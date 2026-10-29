@@ -11,6 +11,7 @@ on:
       - Makefile
       - scripts/**
       - assets/**
+      - install.sh
       - .github/workflows/ci.yml
   pull_request:
     paths: *paths
@@ -57,3 +58,21 @@ jobs:
 
       - name: Build every release target
         run: make launcher-dist
+
+  # Installs the latest release with the script the README tells people to pipe into sh.
+  install:
+    name: Install script (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the latest release
+        env:
+          CODEFLOWER_INSTALL_DIR: ${{ runner.temp }}/bin
+        run: |
+          sh install.sh
+          "$CODEFLOWER_INSTALL_DIR/codeflower" --version

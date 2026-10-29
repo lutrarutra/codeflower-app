@@ -7,14 +7,19 @@ with no runtime dependencies.
 
 ## Install
 
-Download it from the [releases](https://github.com/lutrarutra/codeflower-launcher/releases):
-`codeflower-<os>-<arch>.tar.gz` (or `.zip` on Windows) holds the `codeflower` binary, and
-`codeflower-macos.dmg` holds the macOS app. The builds are not signed yet: on macOS, right-click the app
-and choose *Open* the first time; on Windows, choose *More info → Run anyway*. On a cluster:
+On Linux (also on clusters) and macOS:
 
 ```sh
-curl -fsSL https://github.com/lutrarutra/codeflower-launcher/releases/latest/download/codeflower-linux-amd64.tar.gz | tar xz
+curl -fsSL https://raw.githubusercontent.com/lutrarutra/codeflower-launcher/main/install.sh | sh
 ```
+
+It installs the latest release into `~/.local/bin` after checking its checksum;
+`CODEFLOWER_INSTALL_DIR` chooses another folder and `CODEFLOWER_VERSION=vX.Y.Z` another release.
+
+The [releases](https://github.com/lutrarutra/codeflower-launcher/releases) also have each build
+for download: `codeflower-<os>-<arch>.tar.gz` (`.zip` on Windows) with the `codeflower` binary, and
+`codeflower-macos.dmg` with the macOS app. The builds are not signed yet: on macOS, right-click the
+app and choose *Open* the first time; on Windows, choose *More info → Run anyway*.
 
 Or build it with Go 1.26 or newer:
 

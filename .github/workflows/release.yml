@@ -142,6 +142,10 @@ jobs:
           cat > notes.md <<NOTES
           ## Install
 
+          \`\`\`sh
+          curl -fsSL https://raw.githubusercontent.com/lutrarutra/codeflower-launcher/main/install.sh | sh
+          \`\`\`
+
           | System | Download |
           | --- | --- |
           | macOS (app) | \`codeflower-macos.dmg\`: open it and drag *code flower* to Applications |
