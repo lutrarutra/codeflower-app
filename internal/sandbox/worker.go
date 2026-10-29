@@ -89,9 +89,11 @@ type Worker struct {
 	InitialPrompt string
 	// TaskInteractive enables terminal sign-in before the task when stdin is a terminal.
 	TaskInteractive bool
-	Stdin           io.Reader
-	Stdout          io.Writer
-	Stderr          io.Writer
+	// Resources the user gave replace those of the batch job the launcher runs in.
+	Resources Resources
+	Stdin     io.Reader
+	Stdout    io.Writer
+	Stderr    io.Writer
 }
 
 // ErrImageWithoutTasks means the sandbox started a worker for VS Code instead
@@ -182,6 +184,10 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 		listen = "0.0.0.0"
 	}
 	instanceID := NewInstanceID()
+	resources := DetectResources(ctx, os.Getenv).With(w.Resources)
+	if !resources.Empty() {
+		fmt.Fprintf(w.Stderr, "  resources %s\n", resources.Summary())
+	}
 
 	// An isolated sandbox has no network: the launcher holds VS Code's port
 	// and is its only way out, for as long as it runs.
@@ -229,6 +235,7 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 		LauncherPID:   os.Getpid(),
 		Binds:         w.Binds,
 	})
+	resources.environment(values)
 	if w.APIKey != "" {
 		values[APIKeyVariable] = w.APIKey
 	}
@@ -281,7 +288,7 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 		})
 	}
 
-	code, err := w.runEngine(running, instanceID, values, port, netDirectory)
+	code, err := w.runEngine(running, instanceID, values, port, netDirectory, resources)
 	// Only causes the worker set itself are errors: the caller's interrupt or
 	// deadline (whose cause names the signal) is a normal way to stop.
 	if cause := context.Cause(running); err == nil && cause != nil && ctx.Err() == nil && !errors.Is(cause, context.Canceled) {
@@ -290,18 +297,20 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	return code, err
 }
 
-func (w Worker) runEngine(ctx context.Context, instanceID string, values map[string]string, port int, netDirectory string) (int, error) {
+// Apptainer runs in the job's own limits, so only Docker and Podman, whose
+// containers the daemon or podman start outside them, are limited here.
+func (w Worker) runEngine(ctx context.Context, instanceID string, values map[string]string, port int, netDirectory string, resources Resources) (int, error) {
 	name := "codeflower-" + instanceID[:8]
 	switch w.Engine.Name {
 	case EngineDocker:
 		return RunDocker(ctx, DockerRun{
 			Name: name, Image: w.Image, State: w.State, Binds: w.Binds, Env: values,
-			Port: port, InspectPort: w.InspectPort, NetDirectory: netDirectory, Stdin: w.Stdin, Stdout: w.Stdout, Stderr: w.Stderr,
+			Port: port, InspectPort: w.InspectPort, NetDirectory: netDirectory, CPUs: resources.CPUs, Memory: resources.Memory, Stdin: w.Stdin, Stdout: w.Stdout, Stderr: w.Stderr,
 		})
 	case EnginePodman:
 		return RunPodman(ctx, w.Engine.Executable, PodmanRun{
 			Name: name, Image: w.Image, State: w.State, Binds: w.Binds, Env: values,
-			Port: port, NetDirectory: netDirectory, Stdin: w.Stdin, Stdout: w.Stdout, Stderr: w.Stderr,
+			Port: port, NetDirectory: netDirectory, CPUs: resources.CPUs, Memory: resources.Memory, Stdin: w.Stdin, Stdout: w.Stdout, Stderr: w.Stderr,
 		})
 	case EngineApptainer:
 		args, err := ApptainerCommand(w.Engine.Executable, w.Image, w.State, w.Binds, netDirectory)

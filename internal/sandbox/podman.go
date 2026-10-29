@@ -37,9 +37,12 @@ type PodmanRun struct {
 	// NetDirectory, when set, isolates the sandbox: it gets no network, and
 	// this folder of sockets shared with the launcher instead of ports.
 	NetDirectory string
-	Stdin        io.Reader
-	Stdout       io.Writer
-	Stderr       io.Writer
+	// CPUs and Memory (bytes) limit the container when set.
+	CPUs   int
+	Memory int64
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
 }
 
 // PodmanArgs builds the `podman run` arguments. The environment is passed by
@@ -77,6 +80,12 @@ func PodmanArgs(executable string, run PodmanRun) ([]string, error) {
 	} else if run.Port > 0 {
 		port := strconv.Itoa(run.Port)
 		args = append(args, "--publish", "127.0.0.1:"+port+":"+port)
+	}
+	if run.CPUs > 0 {
+		args = append(args, "--cpus", strconv.Itoa(run.CPUs))
+	}
+	if run.Memory > 0 {
+		args = append(args, "--memory", strconv.FormatInt(run.Memory, 10))
 	}
 	names := make([]string, 0, len(run.Env))
 	for name := range run.Env {

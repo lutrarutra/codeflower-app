@@ -37,7 +37,10 @@ type DockerRun struct {
 	// NetDirectory, when set, isolates the sandbox: it gets no network, and
 	// this folder of sockets shared with the launcher instead of ports.
 	NetDirectory string
-	Stdin        io.Reader
+	// CPUs and Memory (bytes) limit the container when set.
+	CPUs   int
+	Memory int64
+	Stdin  io.Reader
 	// The container's output; standard output and error when nil.
 	Stdout io.Writer
 	Stderr io.Writer
@@ -83,6 +86,8 @@ func DockerConfig(run DockerRun) (*container.Config, *container.HostConfig, erro
 		AutoRemove: true,
 		Init:       &init,
 	}
+	host.NanoCPUs = int64(run.CPUs) * 1e9
+	host.Memory = run.Memory
 	for _, bind := range run.Binds {
 		host.Mounts = append(host.Mounts, mount.Mount{
 			Type: mount.TypeBind, Source: bind.Source, Target: bind.Target, ReadOnly: bind.ReadOnly,

@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -70,6 +71,11 @@ type sandboxOptions struct {
 	bindValues     []string
 	isolateNetwork bool
 	allowlist      string
+	cpus           int
+	memory         string
+	timeLimit      string
+	// resources are --cpus, --memory and --time-limit; set by check.
+	resources sandbox.Resources
 
 	// changed says whether the user gave a flag; set by addSandboxFlags.
 	changed func(name string) bool
@@ -98,6 +104,12 @@ func addSandboxFlags(command *cobra.Command, options *sandboxOptions) {
 		"file of hosts an isolated sandbox may reach, one per line (default: PROJECT.allowed-hosts.txt next to the project)")
 	command.Flags().StringArrayVar(&options.bindValues, "bind", nil,
 		"more mounts: SOURCE[:TARGET[:ro|rw]] (repeatable; default target /data/input/NAME, read-only)")
+	command.Flags().IntVar(&options.cpus, "cpus", 0,
+		"CPUs the agent may use (default: the batch job's allocation; Docker and Podman also enforce it)")
+	command.Flags().StringVar(&options.memory, "memory", "",
+		"memory the agent may use, e.g. 32G (default: the batch job's allocation; Docker and Podman also enforce it)")
+	command.Flags().StringVar(&options.timeLimit, "time-limit", "",
+		"time the agent has, e.g. 8h or 1-12:00:00 (default: the batch job's time limit); reported, not enforced")
 }
 
 // check validates the flags, asking for a missing agent on a terminal.
@@ -119,6 +131,36 @@ func (options *sandboxOptions) check() error {
 	if options.allowlist != "" && !options.isolateNetwork {
 		return fmt.Errorf("--allowlist needs --isolate-network")
 	}
+	return options.checkResources()
+}
+
+// checkResources reads --cpus, --memory and --time-limit.
+func (options *sandboxOptions) checkResources() error {
+	var given []string
+	if options.cpus < 0 {
+		return fmt.Errorf("--cpus must be positive")
+	}
+	if options.cpus > 0 {
+		options.resources.CPUs = options.cpus
+		given = append(given, "--cpus")
+	}
+	if options.memory != "" {
+		memory, err := sandbox.ParseMemory(options.memory)
+		if err != nil {
+			return fmt.Errorf("--memory: %w", err)
+		}
+		options.resources.Memory = memory
+		given = append(given, "--memory")
+	}
+	if options.timeLimit != "" {
+		limit, err := sandbox.ParseTimeLimit(options.timeLimit)
+		if err != nil {
+			return fmt.Errorf("--time-limit: %w", err)
+		}
+		options.resources.End = time.Now().Add(limit)
+		given = append(given, "--time-limit")
+	}
+	options.resources.Source = strings.Join(given, ", ")
 	return nil
 }
 
@@ -198,7 +240,8 @@ type preparedSandbox struct {
 	binds     []sandbox.Bind
 	isolation *sandbox.Isolation
 	// apiKey is the agent's key from the config, if any.
-	apiKey string
+	apiKey    string
+	resources sandbox.Resources
 }
 
 // prepare mounts the folders, makes sure the image is there and prepares the
@@ -260,7 +303,8 @@ func (options sandboxOptions) prepare(ctx context.Context, engine sandbox.Engine
 	if apiKey != "" {
 		fmt.Fprintf(os.Stderr, "  api key  from the config, for %s\n", sandbox.AgentLabel(options.agent))
 	}
-	return preparedSandbox{engine: engine, image: image, state: state, binds: binds, isolation: isolation, apiKey: apiKey}, nil
+	return preparedSandbox{engine: engine, image: image, state: state, binds: binds, isolation: isolation, apiKey: apiKey,
+		resources: options.resources}, nil
 }
 
 // worker is the prepared sandbox as a worker for agent.
@@ -273,6 +317,7 @@ func (p preparedSandbox) worker(agent string) sandbox.Worker {
 		Binds:     p.binds,
 		Isolation: p.isolation,
 		APIKey:    p.apiKey,
+		Resources: p.resources,
 	}
 }
 

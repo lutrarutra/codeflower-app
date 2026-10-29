@@ -158,7 +158,11 @@ private, for example `sbatch --output=$HOME/.codeflower-logs/%j.out` with that d
 The same information is also written to a mode-`0600` file in `<project>/instances/` for scripts.
 
 Under Slurm, wrap it in `sbatch` and add `--signal=B:TERM@120` so the worker can shut down cleanly
-before walltime. Ctrl+C or SIGTERM stops the worker gracefully; Docker and Podman containers are
+before walltime. The launcher tells the agent what the job may use: it reads the allocation of a
+Slurm, PBS Pro/OpenPBS/Torque, LSF, Grid Engine or HTCondor job (CPUs, memory, GPUs and when the job
+ends, as far as the scheduler gives them), and `--cpus`, `--memory 32G` and `--time-limit 8h` replace
+those figures or give them outside a job. Docker and Podman also enforce `--cpus` and `--memory`;
+under Apptainer the scheduler does. Ctrl+C or SIGTERM stops the worker gracefully; Docker and Podman containers are
 named `codeflower-<id>` and removed when they exit. `make dev-run AGENT=claude|codex|dsh` in
 [codeflower-workspace](https://github.com/lutrarutra/codeflower-workspace) starts a Docker worker for
 development with the state in `.dev-state/`.
