@@ -54,14 +54,21 @@ func runCommand() *cobra.Command {
 	var bindValues []string
 	var listenHost, advertiseHost string
 	var port, inspectPort int
+	var isolateNetwork bool
+	var allowlist string
 
 	command := &cobra.Command{
 		Use:   "run",
 		Short: "Start a sandbox (worker) with an agent",
 		Long: `Start a sandbox for a project with one agent. Each folder is mounted in a
 subfolder named after it: data folders read-only in /data/input, output
-folders read-write in /data/output, and code folders (your repositories and
-packages, which the agent may change) read-write in /data/code.
+folders read-write in /data/output, code folders (your repositories and
+packages, which the agent may change) read-write in /data/code, and skills
+folders read-only in /data/skills, where the agent loads them from.
+
+With --isolate-network the sandbox has no network of its own: the launcher
+is its only way out, and lets it reach only its agent's service and the hosts
+in the allowlist file. Edit the file while the sandbox runs to allow more.
 
 It prints a codeflower://… line: in VS Code, run "code flower: Connect to
 worker" and paste it. If the agent is not signed in for this project yet,
@@ -69,6 +76,7 @@ VS Code offers its sign-in after connecting. Press Ctrl+C to stop.`,
 		Example: `  codeflower run --agent claude --input ~/data/study42 --output ~/results/study42
   codeflower run --agent claude --input ~/data/rna --input ~/data/atac --code ~/src/mypkg
   codeflower run --agent codex --project study42 --input /data/study42
+  codeflower run --agent claude --input ~/data/study42 --skills ~/my-skills --isolate-network
   codeflower run --agent claude --image ./codeflower-sandbox.sif --state ~/cf/study42 --bind /data/ref:/reference`,
 		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
@@ -91,6 +99,12 @@ VS Code offers its sign-in after connecting. Press Ctrl+C to stop.`,
 			if inspectPort < 0 || inspectPort > 65535 {
 				return fmt.Errorf("--inspect-port must be between 0 and 65535")
 			}
+			if allowlist != "" && !isolateNetwork {
+				return fmt.Errorf("--allowlist needs --isolate-network")
+			}
+			if isolateNetwork && inspectPort > 0 {
+				return fmt.Errorf("--inspect-port cannot be used with --isolate-network")
+			}
 			binds, err := collectBinds(folders, bindValues)
 			if err != nil {
 				return err
@@ -102,6 +116,11 @@ VS Code offers its sign-in after connecting. Press Ctrl+C to stop.`,
 			}
 			if inspectPort > 0 && engine.Name != sandbox.EngineDocker {
 				return fmt.Errorf("--inspect-port needs --engine docker")
+			}
+			if isolateNetwork {
+				if err := sandbox.IsolationProblem(engine.Name); err != nil {
+					return err
+				}
 			}
 			image, err := sandbox.ResolveImage(options.image, engine.Name)
 			if err != nil {
@@ -120,8 +139,24 @@ VS Code offers its sign-in after connecting. Press Ctrl+C to stop.`,
 				return err
 			}
 
+			var isolation *sandbox.Isolation
+			if isolateNetwork {
+				if allowlist == "" {
+					allowlist = sandbox.DefaultAllowlist(state)
+				}
+				path, err := sandbox.PrepareAllowlist(allowlist)
+				if err != nil {
+					return err
+				}
+				isolation = &sandbox.Isolation{Allowlist: path}
+			}
+
 			fmt.Fprintf(os.Stderr, "Starting a code flower sandbox for %s with %s (%s)\n", sandbox.AgentLabel(agent), engine.Label, image)
 			fmt.Fprintf(os.Stderr, "  project  %s\n", state)
+			if isolation != nil {
+				fmt.Fprintf(os.Stderr, "  network  isolated: only %s and the hosts in %s\n",
+					strings.Join(sandbox.ProviderHosts[agent], ", "), isolation.Allowlist)
+			}
 			for _, bind := range binds {
 				mode := "read-write"
 				if bind.ReadOnly {
@@ -139,6 +174,7 @@ VS Code offers its sign-in after connecting. Press Ctrl+C to stop.`,
 				AdvertiseHost: advertiseHost,
 				Port:          port,
 				InspectPort:   inspectPort,
+				Isolation:     isolation,
 			}.Run(ctx, nil)
 			if err != nil {
 				if errors.Is(err, sandbox.ErrNoImage) {
@@ -161,6 +197,12 @@ VS Code offers its sign-in after connecting. Press Ctrl+C to stop.`,
 		"folder for results, created if needed and mounted read-write at /data/output/NAME (repeatable)")
 	command.Flags().StringArrayVarP(&folders.Code, "code", "c", nil,
 		"repository or package the agent develops, mounted read-write at /data/code/NAME (repeatable)")
+	command.Flags().StringArrayVarP(&folders.Skills, "skills", "s", nil,
+		"folder with a skill (a SKILL.md) or with skill folders, mounted read-only at /data/skills/NAME (repeatable)")
+	command.Flags().BoolVar(&isolateNetwork, "isolate-network", false,
+		"cut the sandbox off the network except for its agent's service and the hosts in the allowlist (Linux)")
+	command.Flags().StringVar(&allowlist, "allowlist", "",
+		"file of hosts an isolated sandbox may reach, one per line (default: PROJECT.allowed-hosts.txt next to the project)")
 	command.Flags().StringArrayVar(&bindValues, "bind", nil,
 		"more mounts: SOURCE[:TARGET[:ro|rw]] (repeatable; default target /data/input/NAME, read-only)")
 	command.Flags().StringVar(&listenHost, "host", "0.0.0.0", "interface the worker listens on")
@@ -174,7 +216,7 @@ VS Code offers its sign-in after connecting. Press Ctrl+C to stop.`,
 	return command
 }
 
-// collectBinds turns --input, --output, --code and --bind into mounts.
+// collectBinds turns --input, --output, --code, --skills and --bind into mounts.
 func collectBinds(folders sandbox.Folders, values []string) ([]sandbox.Bind, error) {
 	var extra []sandbox.Bind
 	for _, value := range values {

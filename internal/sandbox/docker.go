@@ -12,6 +12,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
@@ -31,6 +32,9 @@ type DockerRun struct {
 	// InspectPort publishes the bridge's Node inspector on 127.0.0.1 for
 	// development; the bridge listens on BridgeInspectPort inside.
 	InspectPort int
+	// NetDirectory, when set, isolates the sandbox: it gets no network, and
+	// this folder of sockets shared with the launcher instead of ports.
+	NetDirectory string
 	// The container's output; standard output and error when nil.
 	Stdout io.Writer
 	Stderr io.Writer
@@ -81,6 +85,11 @@ func DockerConfig(run DockerRun) (*container.Config, *container.HostConfig, erro
 	}
 	config.AttachStdout = true
 	config.AttachStderr = true
+	if run.NetDirectory != "" {
+		host.NetworkMode = network.NetworkNone
+		host.Mounts = append(host.Mounts, mount.Mount{Type: mount.TypeBind, Source: run.NetDirectory, Target: ContainerNet})
+		return config, host, nil
+	}
 	config.ExposedPorts = nat.PortSet{}
 	host.PortBindings = nat.PortMap{}
 	publish := func(inside, outside int) {

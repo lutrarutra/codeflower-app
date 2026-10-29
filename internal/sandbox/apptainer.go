@@ -7,12 +7,16 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
+	"time"
 )
 
 // ApptainerCommand confines the sandbox: no home, a clean environment, its
-// own PID and IPC namespaces, and only the project plus explicit binds.
-func ApptainerCommand(executable, image, state string, binds []Bind) ([]string, error) {
+// own PID and IPC namespaces, and only the project plus explicit binds. With
+// netDirectory it also has no network, only that folder of sockets shared
+// with the launcher.
+func ApptainerCommand(executable, image, state string, binds []Bind, netDirectory string) ([]string, error) {
 	if err := checkTargets(binds); err != nil {
 		return nil, err
 	}
@@ -24,10 +28,32 @@ func ApptainerCommand(executable, image, state string, binds []Bind) ([]string, 
 		"--cleanenv",
 		"--bind", state + ":" + ContainerState,
 	}
+	if netDirectory != "" {
+		args = append(args, "--net", "--network", "none", "--bind", netDirectory+":"+ContainerNet)
+	}
 	for _, bind := range binds {
 		args = append(args, "--bind", bind.Spec())
 	}
 	return append(args, image, Entrypoint), nil
+}
+
+// apptainerAllowsIsolation checks that Apptainer may give the user's sandbox
+// a network of its own, which a site's apptainer.conf can forbid.
+func apptainerAllowsIsolation(ctx context.Context, executable, image string) error {
+	check, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	output, err := exec.CommandContext(check, executable, "exec", "--containall", "--no-home", "--cleanenv",
+		"--net", "--network", "none", image, "true").CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	detail := strings.TrimSpace(string(output))
+	if detail == "" {
+		detail = err.Error()
+	}
+	return fmt.Errorf("this machine's Apptainer does not let you isolate the sandbox's network "+
+		"(apptainer exec --net --network none): %s\n"+
+		"Ask the cluster's administrators to allow it, or run without --isolate-network", detail)
 }
 
 // RunApptainer runs the command with values passed as APPTAINERENV_* so they

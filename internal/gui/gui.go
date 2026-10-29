@@ -220,6 +220,8 @@ type systemInfo struct {
 	Image    *imageStatus         `json:"image,omitempty"`
 	Agents   []agentInfo          `json:"agents"`
 	Settings Settings             `json:"settings"`
+	// Isolation says, per engine, why it cannot isolate the network here.
+	Isolation map[string]string `json:"isolation"`
 }
 
 func (s *Server) system(w http.ResponseWriter, r *http.Request) {
@@ -235,6 +237,12 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 		Settings: settings,
 	}
 	info.System = info.Guide.System
+	info.Isolation = map[string]string{}
+	for _, engine := range statuses {
+		if err := sandbox.IsolationProblem(engine.Name); err != nil {
+			info.Isolation[engine.Name] = err.Error()
+		}
+	}
 	for _, agent := range sandbox.Agents {
 		info.Agents = append(info.Agents, agentInfo{ID: agent, Label: sandbox.AgentLabel(agent)})
 	}

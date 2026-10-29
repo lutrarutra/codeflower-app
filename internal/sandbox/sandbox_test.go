@@ -147,7 +147,7 @@ func TestPrepareStateIsPrivateAndKeepsUserEdits(t *testing.T) {
 func TestApptainerCommandConfinesTheSandbox(t *testing.T) {
 	dir := tempDir(t)
 	args, err := ApptainerCommand("apptainer", "/images/sandbox.sif", dir,
-		[]Bind{{Source: dir, Target: "/data/input/study", ReadOnly: true}, {Source: dir, Target: "/scratch"}})
+		[]Bind{{Source: dir, Target: "/data/input/study", ReadOnly: true}, {Source: dir, Target: "/scratch"}}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestApptainerCommandConfinesTheSandbox(t *testing.T) {
 		t.Fatalf("unexpected command tail: %v", args)
 	}
 
-	if _, err := ApptainerCommand("apptainer", "x.sif", dir, []Bind{{Source: dir, Target: "/a"}, {Source: dir, Target: "/a"}}); err == nil {
+	if _, err := ApptainerCommand("apptainer", "x.sif", dir, []Bind{{Source: dir, Target: "/a"}, {Source: dir, Target: "/a"}}, ""); err == nil {
 		t.Fatal("duplicate targets were accepted")
 	}
 }

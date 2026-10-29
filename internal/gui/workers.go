@@ -31,16 +31,19 @@ var tokenPattern = regexp.MustCompile(`token=[A-Za-z0-9_-]+`)
 
 // worker is a sandbox the window started.
 type worker struct {
-	ID      string    `json:"id"`
-	Agent   string    `json:"agent"`
-	Label   string    `json:"label"`
-	Engine  string    `json:"engine"`
-	Project string    `json:"project"`
-	State   string    `json:"state"`
-	Inputs  []string  `json:"inputs"`
-	Outputs []string  `json:"outputs"`
-	Code    []string  `json:"code"`
-	Started time.Time `json:"started"`
+	ID      string   `json:"id"`
+	Agent   string   `json:"agent"`
+	Label   string   `json:"label"`
+	Engine  string   `json:"engine"`
+	Project string   `json:"project"`
+	State   string   `json:"state"`
+	Inputs  []string `json:"inputs"`
+	Outputs []string `json:"outputs"`
+	Code    []string `json:"code"`
+	Skills  []string `json:"skills"`
+	// Allowlist is the file of allowed hosts when the network is isolated.
+	Allowlist string    `json:"allowlist,omitempty"`
+	Started   time.Time `json:"started"`
 
 	mu       sync.Mutex
 	status   string // starting, ready, stopping, stopped, failed
@@ -183,9 +186,13 @@ type startRequest struct {
 	Inputs  []string `json:"inputs"`
 	Outputs []string `json:"outputs"`
 	Code    []string `json:"code"`
+	Skills  []string `json:"skills"`
 	Project string   `json:"project"`
 	Engine  string   `json:"engine"`
 	Image   string   `json:"image"`
+	// IsolateNetwork limits the sandbox to its agent's service and the
+	// project's allowlist.
+	IsolateNetwork bool `json:"isolateNetwork"`
 }
 
 var projectName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
@@ -221,7 +228,9 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 
-	binds, err := sandbox.Folders{Inputs: request.Inputs, Outputs: request.Outputs, Code: request.Code}.Binds(nil)
+	binds, err := sandbox.Folders{
+		Inputs: request.Inputs, Outputs: request.Outputs, Code: request.Code, Skills: request.Skills,
+	}.Binds(nil)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -241,6 +250,12 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	if request.IsolateNetwork {
+		if err := sandbox.IsolationProblem(engine.Name); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+	}
 	// The default image is downloaded when the sandbox starts, with its log.
 	if err := sandbox.CheckImage(r.Context(), engine, named); err != nil && (named != "" || !errors.Is(err, sandbox.ErrNoImage)) {
 		writeError(w, http.StatusBadRequest, err)
@@ -251,9 +266,19 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	var isolation *sandbox.Isolation
+	if request.IsolateNetwork {
+		allowlist, err := sandbox.PrepareAllowlist(sandbox.DefaultAllowlist(state))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		isolation = &sandbox.Isolation{Allowlist: allowlist}
+	}
 	s.settings.save(Settings{
 		Agent: request.Agent, Inputs: request.Inputs, Outputs: request.Outputs, Code: request.Code,
-		Project: request.Project, Engine: request.Engine, Image: request.Image,
+		Skills: request.Skills, Project: request.Project, Engine: request.Engine, Image: request.Image,
+		IsolateNetwork: request.IsolateNetwork,
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -267,12 +292,18 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		Inputs:  nonNil(request.Inputs),
 		Outputs: nonNil(request.Outputs),
 		Code:    nonNil(request.Code),
+		Skills:  nonNil(request.Skills),
 		Started: time.Now(),
 		status:  "starting",
 		cancel:  cancel,
 		done:    make(chan struct{}),
 	}
 	item.appendLine(fmt.Sprintf("Starting %s with %s (%s)…", item.Label, engine.Label, image))
+	if isolation != nil {
+		item.Allowlist = isolation.Allowlist
+		item.appendLine(fmt.Sprintf("Network isolated: only %s and the hosts in %s",
+			strings.Join(sandbox.ProviderHosts[request.Agent], ", "), isolation.Allowlist))
+	}
 	s.mu.Lock()
 	s.workers[item.ID] = item
 	s.order = append(s.order, item.ID)
@@ -289,7 +320,7 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			code, err = sandbox.Worker{
 				Agent: request.Agent, Engine: engine, Image: image, State: state, Binds: binds,
-				Stdout: item, Stderr: item,
+				Isolation: isolation, Stdout: item, Stderr: item,
 			}.Run(ctx, func(connection sandbox.Connection) {
 				item.mu.Lock()
 				item.url = connection.URL
@@ -423,9 +454,12 @@ type Settings struct {
 	Inputs  []string `json:"inputs"`
 	Outputs []string `json:"outputs"`
 	Code    []string `json:"code"`
+	Skills  []string `json:"skills"`
 	Project string   `json:"project,omitempty"`
 	Engine  string   `json:"engine,omitempty"`
 	Image   string   `json:"image,omitempty"`
+
+	IsolateNetwork bool `json:"isolateNetwork,omitempty"`
 }
 
 type settingsStore struct {
@@ -459,6 +493,7 @@ func (store *settingsStore) load() Settings {
 		}
 	}
 	settings.Inputs, settings.Outputs, settings.Code = nonNil(settings.Inputs), nonNil(settings.Outputs), nonNil(settings.Code)
+	settings.Skills = nonNil(settings.Skills)
 	return settings
 }
 

@@ -70,7 +70,9 @@ processor and memory use (per-core bars as in htop, refreshed every second), the
 which hands the line to the code flower extension (`vscode://codeflower.codeflower/connect`; VS Code
 asks before connecting). Each running sandbox shows what its agent does: how many chats are
 working, how many wait for you (a plan to approve, a permission or a question; the card is outlined
-then), and whether VS Code is connected. Chats keep working when VS Code disconnects. Sandboxes run
+then), and whether VS Code is connected. Chats keep working when VS Code disconnects. *Isolate the
+network* does what `--isolate-network` does (below), with the project's allowlist file shown on the
+sandbox's card; the window says when this computer cannot isolate, as with Docker on macOS. Sandboxes run
 while the launcher runs: *Stop all and quit*, or Ctrl+C in its
 terminal, stops them. The window remembers the last choices in the user's config directory
 (`codeflower/launcher.json`).
@@ -90,7 +92,18 @@ codeflower run --agent claude --input ~/data/rna --input ~/data/atac --code ~/sr
 - `--input DIR`: your data, read-only at `/data/input/NAME`. `--output DIR`: created if needed,
   read-write at `/data/output/NAME`; the agent copies its finished report, figures and tables there.
   `--code DIR`: a repository or package the agent changes and runs, read-write at `/data/code/NAME`.
-  All three can be repeated; NAME is the folder's own name.
+  `--skills DIR`: a skill (a folder with a `SKILL.md`) or a folder of skills, read-only at
+  `/data/skills/NAME`; each skill is installed for the agent (Claude Code, Codex and dsh).
+  All four can be repeated; NAME is the folder's own name.
+- `--isolate-network`: the sandbox gets no network of its own. The launcher is its only way out and lets
+  it reach only its agent's service and the hosts in the allowlist file, refusing (and printing) the rest.
+  `--allowlist FILE` names the file (default: `PROJECT.allowed-hosts.txt` next to the project
+  directory, created with an explanation). One host per line, `*.example.org` for subdomains,
+  `example.org:8443` for another port; edits apply immediately. The agent is told how this works and
+  asks you for the hosts it needs, e.g. `pypi.org` and `files.pythonhosted.org` to install packages.
+  It needs no administrator rights: Docker and Podman on Linux, or an Apptainer that lets users run
+  `apptainer exec --net --network none` (the launcher checks and says so). Docker Desktop on macOS
+  and Windows cannot share the launcher's sockets with the sandbox, so it does not work there.
 - `--bind SOURCE[:TARGET[:ro|rw]]`: more mounts (repeatable). Without a target it maps to
   `/data/input/NAME`; binds are read-only unless `:rw` is given.
 - `--project NAME` (default `default`): the project lives in `~/codeflower/projects/NAME`. Or give the
@@ -150,7 +163,8 @@ runs inside the sandbox and stores the login in the project:
 - Codex: a ChatGPT device code shown as a link, or an OpenAI API key.
 - DeepSeek Harness: a DeepSeek API key and/or an OpenAI-compatible endpoint.
 
-The sandbox needs internet access for sign-in and for model calls. Anthropic does not permit third-party
+The sandbox needs internet access for sign-in and for model calls (with `--isolate-network`, the
+launcher's own access, through the node's `HTTPS_PROXY` if it has one). Anthropic does not permit third-party
 products to offer Claude.ai login, but does not prevent users from signing in to the unmodified Claude
 Code binary with their own subscription; whether using it through code flower is covered is not settled,
 so check that your use is permitted, or use an API key.

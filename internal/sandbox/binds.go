@@ -51,7 +51,7 @@ func isLetter(c byte) bool {
 }
 
 // NewBind checks a bind: the source must exist (a folder under /data/input,
-// /data/output and /data/code) and the target must be an absolute path
+// /data/output, /data/code and /data/skills) and the target must be an absolute path
 // outside the project state.
 func NewBind(source, target string, readOnly bool) (Bind, error) {
 	if source == "" || !strings.HasPrefix(target, "/") {
@@ -65,6 +65,9 @@ func NewBind(source, target string, readOnly bool) (Bind, error) {
 	target = path.Clean(target)
 	if target == ContainerState || strings.HasPrefix(target, ContainerState+"/") {
 		return Bind{}, fmt.Errorf("bind target is reserved for instance state")
+	}
+	if target == ContainerNet || strings.HasPrefix(target, ContainerNet+"/") {
+		return Bind{}, fmt.Errorf("bind target is reserved for the sandbox's network")
 	}
 
 	resolved, err := filepath.Abs(expandHome(source))
@@ -96,7 +99,7 @@ func (b Bind) Spec() string {
 }
 
 func folderTarget(target string) bool {
-	for _, root := range []string{InputsRoot, OutputsRoot, CodeRoot} {
+	for _, root := range []string{InputsRoot, OutputsRoot, CodeRoot, SkillsRoot} {
 		if strings.HasPrefix(target, root+"/") {
 			return true
 		}
@@ -104,15 +107,16 @@ func folderTarget(target string) bool {
 	return false
 }
 
-// Folders are the user's input, output and code folders.
+// Folders are the user's input, output, code and skills folders.
 type Folders struct {
 	Inputs  []string
 	Outputs []string
 	Code    []string
+	Skills  []string
 }
 
 // Binds mounts each folder in a subfolder of its root named after it: inputs
-// read-only, outputs (created if needed) and code read-write. Targets already
+// and skills read-only, outputs (created if needed) and code read-write. Targets already
 // used by taken are skipped, and each folder may be chosen only once.
 func (f Folders) Binds(taken []Bind) ([]Bind, error) {
 	used := map[string]bool{}
@@ -130,6 +134,7 @@ func (f Folders) Binds(taken []Bind) ([]Bind, error) {
 		{"input", InputsRoot, f.Inputs, true},
 		{"output", OutputsRoot, f.Outputs, false},
 		{"code", CodeRoot, f.Code, false},
+		{"skills", SkillsRoot, f.Skills, true},
 	} {
 		for _, source := range group.sources {
 			if group.kind == "output" {
@@ -179,7 +184,10 @@ func folderName(source string) string {
 
 func checkTargets(binds []Bind) error {
 	// The roots hold one subfolder per user folder; mounting over one would hide them.
-	occupied := map[string]bool{ContainerState: true, "/": true, "/data": true, InputsRoot: true, OutputsRoot: true, CodeRoot: true}
+	occupied := map[string]bool{
+		ContainerState: true, ContainerNet: true, "/": true, "/data": true,
+		InputsRoot: true, OutputsRoot: true, CodeRoot: true, SkillsRoot: true,
+	}
 	for _, bind := range binds {
 		if occupied[bind.Target] {
 			return fmt.Errorf("duplicate or reserved bind target: %s", bind.Target)

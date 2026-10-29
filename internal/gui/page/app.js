@@ -13,7 +13,7 @@ const $ = (selector, root = document) => root.querySelector(selector);
 const state = {
   system: null,
   agent: 'claude',
-  folders: { inputs: [], outputs: [], code: [] },
+  folders: { inputs: [], outputs: [], code: [], skills: [] },
   guideTab: 0,
   workers: []
 };
@@ -187,7 +187,8 @@ function short(path) {
 const FOLDER_KINDS = {
   inputs: { root: '/data/input', title: 'Choose a folder with your data', noun: 'input' },
   outputs: { root: '/data/output', title: 'Choose a folder for the results', noun: 'output' },
-  code: { root: '/data/code', title: 'Choose a repository or package for the agent to develop', noun: 'code' }
+  code: { root: '/data/code', title: 'Choose a repository or package for the agent to develop', noun: 'code' },
+  skills: { root: '/data/skills', title: 'Choose a skill, or a folder of skills', noun: 'skills' }
 };
 
 /** Where each folder appears in the sandbox; the same names as the launcher's folderName. */
@@ -236,6 +237,20 @@ function canStart() {
 
 function renderStart() {
   $('#start').disabled = !canStart();
+  renderIsolation();
+}
+
+/** Where the allowed hosts go, or why the chosen engine cannot isolate the network here. */
+function renderIsolation() {
+  const note = $('#isolation-note');
+  const engine = $('#engine').value === 'auto' ? state.system?.engine : $('#engine').value;
+  const problem = state.system?.isolation?.[engine];
+  const project = $('#project').value.trim() || 'default';
+  note.hidden = !$('#isolate-network').checked;
+  note.classList.toggle('warn', Boolean(problem));
+  note.textContent = problem
+    ? `${problem[0].toUpperCase()}${problem.slice(1)}. Run without isolation here, or on a Linux machine or cluster.`
+    : `Allowed hosts go in ${state.system?.projects ?? '…'}/${project}.allowed-hosts.txt, one per line.`;
 }
 
 async function loadSystem() {
@@ -264,6 +279,7 @@ async function firstLoad() {
   $('#project').value = settings.project || 'default';
   $('#engine').value = settings.engine || 'auto';
   $('#image').value = settings.image || '';
+  $('#isolate-network').checked = Boolean(settings.isolateNetwork);
   $('#version').textContent = state.system.version ? `launcher ${state.system.version}` : '';
   $('#projects-dir').textContent = state.system.projects;
   renderAgents();
@@ -350,13 +366,15 @@ for (const button of document.querySelectorAll('[data-browse]')) {
 
 $('#engine').addEventListener('change', () => loadSystem());
 $('#image').addEventListener('change', () => loadSystem());
+$('#isolate-network').addEventListener('change', renderIsolation);
+$('#project').addEventListener('input', renderIsolation);
 
 // Starting and watching sandboxes
 
 $('#start-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   $('#start-error').textContent = '';
-  const { inputs, outputs, code } = state.folders;
+  const { inputs, outputs, code, skills } = state.folders;
   if (!inputs.length && !code.length && !confirm('No input or code folder is chosen, so the agent will not see any of your data. Start anyway?')) return;
   const button = $('#start');
   button.disabled = true;
@@ -369,6 +387,8 @@ $('#start-form').addEventListener('submit', async (event) => {
         inputs,
         outputs,
         code,
+        skills,
+        isolateNetwork: $('#isolate-network').checked,
         project: $('#project').value.trim(),
         engine: $('#engine').value,
         image: $('#image').value.trim()
@@ -418,15 +438,20 @@ function renderWorker(worker) {
     worker.engine,
     count(worker.inputs, 'input') || 'no input folder',
     count(worker.outputs, 'output'),
-    count(worker.code, 'code')
+    count(worker.code, 'code'),
+    count(worker.skills || [], 'skills'),
+    worker.allowlist ? 'network isolated' : null
   ]
     .filter(Boolean)
     .join(' · ');
   $('.meta', card).title = [
     ...worker.inputs.map((path) => `input ${path}`),
     ...worker.outputs.map((path) => `output ${path}`),
-    ...worker.code.map((path) => `code ${path}`)
+    ...worker.code.map((path) => `code ${path}`),
+    ...(worker.skills || []).map((path) => `skills ${path}`)
   ].join('\n');
+  $('.network', card).hidden = !worker.allowlist;
+  $('.allowlist', card).textContent = worker.allowlist || '';
   const running = worker.status === 'starting' || worker.status === 'ready';
   $('.stop', card).hidden = !running;
   $('.stop', card).disabled = worker.status === 'stopping';

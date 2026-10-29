@@ -33,9 +33,12 @@ type PodmanRun struct {
 	Binds []Bind
 	Env   map[string]string
 	// Port is published on 127.0.0.1 when set.
-	Port   int
-	Stdout io.Writer
-	Stderr io.Writer
+	Port int
+	// NetDirectory, when set, isolates the sandbox: it gets no network, and
+	// this folder of sockets shared with the launcher instead of ports.
+	NetDirectory string
+	Stdout       io.Writer
+	Stderr       io.Writer
 }
 
 // PodmanArgs builds the `podman run` arguments. The environment is passed by
@@ -64,7 +67,10 @@ func PodmanArgs(executable string, run PodmanRun) ([]string, error) {
 		}
 		args = append(args, "--mount", spec)
 	}
-	if run.Port > 0 {
+	if run.NetDirectory != "" {
+		args = append(args, "--network", "none",
+			"--mount", "type=bind,source="+run.NetDirectory+",target="+ContainerNet)
+	} else if run.Port > 0 {
 		port := strconv.Itoa(run.Port)
 		args = append(args, "--publish", "127.0.0.1:"+port+":"+port)
 	}

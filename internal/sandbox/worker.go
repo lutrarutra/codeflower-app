@@ -6,8 +6,10 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"time"
@@ -36,6 +38,7 @@ const (
 	InputsRoot  = "/data/input"
 	OutputsRoot = "/data/output"
 	CodeRoot    = "/data/code"
+	SkillsRoot  = "/data/skills"
 )
 
 // NewInstanceID returns a random UUIDv4.
@@ -68,8 +71,11 @@ type Worker struct {
 	Port          int
 	// InspectPort publishes the bridge's Node inspector (development, Docker).
 	InspectPort int
-	Stdout      io.Writer
-	Stderr      io.Writer
+	// Isolation, when set, cuts the sandbox off the network except for what
+	// the launcher's proxy allows.
+	Isolation *Isolation
+	Stdout    io.Writer
+	Stderr    io.Writer
 }
 
 // Connection is what the bridge writes once it listens: the line VS Code
@@ -119,9 +125,12 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	if err := checkTargets(w.Binds); err != nil {
 		return 1, err
 	}
+	if w.Isolation != nil && w.InspectPort > 0 {
+		return 1, fmt.Errorf("the inspector cannot be published from a network-isolated sandbox")
+	}
 	containerized := w.Engine.Name != EngineApptainer
 	port := w.Port
-	if containerized && port == 0 {
+	if containerized && port == 0 && w.Isolation == nil {
 		// Docker and Podman publish a fixed port, so choose it up front.
 		var err error
 		if port, err = FreePort(); err != nil {
@@ -141,6 +150,36 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 		listen = "0.0.0.0"
 	}
 	instanceID := NewInstanceID()
+
+	// An isolated sandbox has no network: the launcher holds VS Code's port
+	// and is its only way out, for as long as it runs.
+	var netDirectory string
+	var gate *gateway
+	if w.Isolation != nil {
+		if w.Engine.Name == EngineApptainer {
+			if err := apptainerAllowsIsolation(ctx, w.Engine.Executable, w.Image); err != nil {
+				return 1, err
+			}
+		}
+		var err error
+		if netDirectory, err = newNetDirectory(instanceID); err != nil {
+			return 1, err
+		}
+		ingressHost := listen
+		if containerized {
+			ingressHost = "127.0.0.1"
+		}
+		log := func(message string) { fmt.Fprintln(w.Stderr, message) }
+		list := newAllowlist(w.Isolation.Allowlist, ProviderHosts[w.Agent], log)
+		gate, err = startGateway(netDirectory, net.JoinHostPort(ingressHost, itoa(port)), list, log)
+		if err != nil {
+			os.RemoveAll(netDirectory)
+			return 1, err
+		}
+		defer gate.Close()
+		port = gate.Port()
+	}
+
 	values := WorkerEnvironment(WorkerSettings{
 		Agent:         w.Agent,
 		InstanceID:    instanceID,
@@ -157,29 +196,55 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	if w.InspectPort > 0 {
 		values["CODEFLOWER_BRIDGE_INSPECT"] = fmt.Sprintf("0.0.0.0:%d", BridgeInspectPort)
 	}
+	if gate != nil {
+		isolatedEnvironment(values)
+	}
 	connectionFile := filepath.Join(w.State, "instances", instanceID+".json")
 	defer os.Remove(connectionFile)
 
-	if ready != nil {
+	// Stopping the run with a cause reports that cause instead of the exit.
+	running, stopRunning := context.WithCancelCause(ctx)
+	defer stopRunning(nil)
+	if ready != nil || gate != nil {
 		watching, stopWatching := context.WithCancel(ctx)
 		defer stopWatching()
-		go watchConnection(watching, connectionFile, ready)
+		go watchConnection(watching, connectionFile, func(connection Connection) {
+			if gate != nil {
+				if err := gate.bridgeAnswers(); err != nil {
+					stopRunning(fmt.Errorf("the launcher cannot reach the isolated sandbox through %s: %v\n"+
+						"Docker Desktop on macOS and Windows cannot share sockets with the host; "+
+						"isolate the network on Linux, or run without --isolate-network", netDirectory, err))
+					return
+				}
+			}
+			if ready != nil {
+				ready(connection)
+			}
+		})
 	}
 
+	code, err := w.runEngine(running, instanceID, values, port, netDirectory)
+	if cause := context.Cause(running); err == nil && cause != nil && !errors.Is(cause, context.Canceled) {
+		return 1, cause
+	}
+	return code, err
+}
+
+func (w Worker) runEngine(ctx context.Context, instanceID string, values map[string]string, port int, netDirectory string) (int, error) {
 	name := "codeflower-" + instanceID[:8]
 	switch w.Engine.Name {
 	case EngineDocker:
 		return RunDocker(ctx, DockerRun{
 			Name: name, Image: w.Image, State: w.State, Binds: w.Binds, Env: values,
-			Port: port, InspectPort: w.InspectPort, Stdout: w.Stdout, Stderr: w.Stderr,
+			Port: port, InspectPort: w.InspectPort, NetDirectory: netDirectory, Stdout: w.Stdout, Stderr: w.Stderr,
 		})
 	case EnginePodman:
 		return RunPodman(ctx, w.Engine.Executable, PodmanRun{
 			Name: name, Image: w.Image, State: w.State, Binds: w.Binds, Env: values,
-			Port: port, Stdout: w.Stdout, Stderr: w.Stderr,
+			Port: port, NetDirectory: netDirectory, Stdout: w.Stdout, Stderr: w.Stderr,
 		})
 	case EngineApptainer:
-		args, err := ApptainerCommand(w.Engine.Executable, w.Image, w.State, w.Binds)
+		args, err := ApptainerCommand(w.Engine.Executable, w.Image, w.State, w.Binds, netDirectory)
 		if err != nil {
 			return 1, err
 		}
