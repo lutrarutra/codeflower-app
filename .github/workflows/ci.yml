@@ -45,7 +45,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # Once is enough, and the Windows checkout's CRLF line endings would fail it.
       - name: Check that go.mod and go.sum are tidy
+        if: runner.os == 'Linux'
         run: go mod tidy -diff
 
       - name: Vet and test
