@@ -1,4 +1,4 @@
-package gui
+package client
 
 import (
 	"context"
@@ -22,9 +22,14 @@ func testServer(t *testing.T) (*Server, *httptest.Server) {
 		options:  Options{ProjectsDirectory: t.TempDir()},
 		secret:   "secret-key",
 		settings: &settingsStore{path: filepath.Join(t.TempDir(), "launcher.json")},
+		added:    &workerStore{path: filepath.Join(t.TempDir(), "workers.json")},
 		workers:  map[string]*worker{},
 		quit:     make(chan struct{}),
+		loopback: true,
+
+		detectEngines: sandbox.DetectEngines,
 	}
+	t.Cleanup(server.stopAll)
 	http := httptest.NewServer(nil)
 	server.host = strings.TrimPrefix(http.URL, "http://")
 	http.Config.Handler = server.routes()
@@ -205,11 +210,12 @@ func TestShowsWhatTheSandboxAgentDoesWithoutItsToken(t *testing.T) {
 	host, port, _ := strings.Cut(strings.TrimPrefix(bridge.URL, "http://"), ":")
 	portNumber, _ := strconv.Atoi(port)
 
-	item := &worker{ID: "w1", status: "ready", done: make(chan struct{})}
+	item := &worker{ID: "w1", status: "ready", done: make(chan struct{}),
+		connection: &sandbox.Connection{Host: host, Port: portNumber, Token: "bridge-token"}}
 	ctx, cancel := context.WithCancel(context.Background())
 	stopped := make(chan struct{})
 	go func() {
-		item.watchActivity(ctx, sandbox.Connection{Host: host, Port: portNumber, Token: "bridge-token"})
+		item.watchActivity(ctx)
 		close(stopped)
 	}()
 	deadline := time.Now().Add(5 * time.Second)

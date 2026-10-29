@@ -1,8 +1,10 @@
-// Package gui is the launcher's window for people who do not use a terminal:
-// a page served on 127.0.0.1 and opened in the browser. It checks for a
-// container engine (and explains how to install one), lets the user pick an
-// agent and their input and output folders, and starts and stops sandboxes.
-package gui
+// Package client serves the code flower client: a page on 127.0.0.1, opened
+// in the browser, from which the user starts sandboxes on this computer (when
+// a container engine can run them, else it explains how to install one) and
+// connects to sandboxes running elsewhere by their codeflower:// line. Pages
+// talk to a sandbox's agent through the client, which adds the sandbox's
+// token, so the token never reaches the browser.
+package client
 
 import (
 	"context"
@@ -55,6 +57,12 @@ type Options struct {
 	// start.
 	Image    string
 	ImageTag string
+	// ConnectOnly turns off starting sandboxes here, e.g. on a login node;
+	// the client only connects to sandboxes running elsewhere.
+	ConnectOnly bool
+	// UIDirectory serves the page from a folder instead of the built-in one
+	// (development).
+	UIDirectory string
 }
 
 const cookieName = "codeflower-launcher"
@@ -65,6 +73,12 @@ type Server struct {
 	secret   string
 	host     string
 	settings *settingsStore
+	added    *workerStore
+	// loopback: the client listens on this computer only, so the page may
+	// arrive by any loopback name and port (e.g. through ssh -L).
+	loopback bool
+	// detectEngines is sandbox.DetectEngines, replaced in tests.
+	detectEngines func(context.Context) []sandbox.EngineStatus
 
 	mu       sync.Mutex
 	workers  map[string]*worker
@@ -95,14 +109,20 @@ func Run(ctx context.Context, options Options) error {
 		return fmt.Errorf("could not open the launcher window: %w", err)
 	}
 	server := &Server{
-		options:  options,
-		secret:   randomSecret(),
-		host:     listener.Addr().String(),
-		settings: newSettingsStore(),
-		workers:  map[string]*worker{},
-		lastSeen: time.Now(),
-		quit:     make(chan struct{}),
+		options:       options,
+		secret:        randomSecret(),
+		host:          listener.Addr().String(),
+		settings:      newSettingsStore(),
+		added:         newWorkerStore(),
+		workers:       map[string]*worker{},
+		detectEngines: sandbox.DetectEngines,
+		lastSeen:      time.Now(),
+		quit:          make(chan struct{}),
 	}
+	if address, ok := listener.Addr().(*net.TCPAddr); ok {
+		server.loopback = address.IP.IsLoopback()
+	}
+	server.loadAdded()
 	httpServer := &http.Server{Handler: server.routes(), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = httpServer.Serve(listener) }()
 
@@ -130,6 +150,9 @@ func Run(ctx context.Context, options Options) error {
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	assets, _ := fsSub(page, "page")
+	if s.options.UIDirectory != "" {
+		assets = os.DirFS(s.options.UIDirectory)
+	}
 	mux.Handle("GET /", http.FileServerFS(assets))
 	mux.HandleFunc("GET /api/system", s.system)
 	mux.HandleFunc("GET /api/resources", s.resources)
@@ -137,6 +160,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/folders", s.createFolder)
 	mux.HandleFunc("GET /api/workers", s.listWorkers)
 	mux.HandleFunc("POST /api/workers", s.startWorker)
+	mux.HandleFunc("POST /api/workers/connect", s.connectWorker)
+	mux.HandleFunc("GET /api/workers/{id}/acp", s.relay)
 	mux.HandleFunc("POST /api/workers/{id}/stop", s.stopWorker)
 	mux.HandleFunc("DELETE /api/workers/{id}", s.forgetWorker)
 	mux.HandleFunc("POST /api/quit", s.quitHandler)
@@ -148,13 +173,15 @@ func (s *Server) routes() http.Handler {
 // rebinding or cross-site requests), cannot drive the launcher.
 func (s *Server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Host != s.host {
+		if !s.allowedHost(r.Host) {
 			http.Error(w, "wrong host", http.StatusForbidden)
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'")
+		// connect-src: the relay's WebSockets, on this origin only. Interactive
+		// reports will need frames of their own once the chat is served here.
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'")
 		if key := r.URL.Query().Get("key"); key != "" && r.URL.Path == "/" {
 			if subtle.ConstantTimeCompare([]byte(key), []byte(s.secret)) == 1 {
 				http.SetCookie(w, &http.Cookie{
@@ -180,6 +207,23 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		s.mu.Unlock()
 		next.ServeHTTP(w, r)
 	})
+}
+
+// allowedHost guards against DNS rebinding: another website's name never
+// reaches the client. On loopback any loopback name and port is this
+// computer, e.g. localhost:8080 forwarded by ssh -L.
+func (s *Server) allowedHost(host string) bool {
+	if host == s.host {
+		return true
+	}
+	if !s.loopback {
+		return false
+	}
+	name, _, err := net.SplitHostPort(host)
+	if err != nil {
+		name = strings.Trim(host, "[]")
+	}
+	return name == "localhost" || name == "127.0.0.1" || name == "::1"
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -231,11 +275,37 @@ type systemInfo struct {
 	ConfigDirectory string   `json:"configDirectory,omitempty"`
 	// Isolation says, per engine, why it cannot isolate the network here.
 	Isolation map[string]string `json:"isolation"`
+	// Capabilities say what the client can do here, so pages need no engine
+	// logic of their own.
+	Capabilities capabilities `json:"capabilities"`
+}
+
+type capabilities struct {
+	// Connect to sandboxes running elsewhere: always.
+	Connect bool `json:"connect"`
+	// Start sandboxes on this computer: when an engine can run them.
+	Start bool `json:"start"`
+	// StartDisabledReason says why not.
+	StartDisabledReason string `json:"startDisabledReason,omitempty"`
+	// ConnectOnly: starting is turned off, and the page hides it.
+	ConnectOnly bool `json:"connectOnly"`
 }
 
 func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 	settings := s.settings.load()
-	statuses := sandbox.DetectEngines(r.Context())
+	if s.options.ConnectOnly {
+		// Engines are never looked for: nothing starts here.
+		writeJSON(w, http.StatusOK, systemInfo{
+			Version: s.options.Version, Engines: []sandbox.EngineStatus{}, Agents: []agentInfo{}, Settings: settings,
+			ConfigSkills: []string{}, Isolation: map[string]string{},
+			Capabilities: capabilities{
+				Connect: true, ConnectOnly: true,
+				StartDisabledReason: "This client only connects to sandboxes running elsewhere.",
+			},
+		})
+		return
+	}
+	statuses := s.detectEngines(r.Context())
 	home, _ := os.UserHomeDir()
 	info := systemInfo{
 		Version:         s.options.Version,
@@ -275,6 +345,7 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	info.Capabilities = capabilities{Connect: true}
 	engine, err := sandbox.ChooseEngine(statuses, requested, image)
 	if err != nil {
 		info.Problem = err.Error()
@@ -282,7 +353,9 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 			info.Problem = engine.Problem
 			info.Fix = engine.Fix
 		}
+		info.Capabilities.StartDisabledReason = info.Problem
 	} else {
+		info.Capabilities.Start = true
 		info.Engine = engine.Name
 		resolved, _ := sandbox.ResolveImage(image, engine.Name)
 		status := &imageStatus{Name: resolved, Ready: true}

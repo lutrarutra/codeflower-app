@@ -13,7 +13,7 @@ launcher-build-linux:
 		-o build/codeflower-linux-amd64 ./cmd/codeflower
 
 # Launchers for every desktop system, e.g. to hand to users who start
-# sandboxes with "codeflower gui": build/codeflower-<os>-<arch>[.exe].
+# sandboxes with "codeflower client": build/codeflower-<os>-<arch>[.exe].
 launcher-build-all:
 	for target in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 windows/amd64; do \
 		os=$${target%/*}; arch=$${target#*/}; ext=; [ $$os = windows ] && ext=.exe; \

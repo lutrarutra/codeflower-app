@@ -137,16 +137,16 @@ Run "codeflower interactive" for a sandbox to work with from VS Code,
 "codeflower run TASK" to start an initial task in a session you can continue
 there, or "codeflower task" to let the agent work on a task by itself.
 
-New to the command line? Run "codeflower gui" for a window that starts a
-sandbox with a few clicks. Run "codeflower check" to see whether this
-machine can run sandboxes.`,
+New to the command line? Run "codeflower client" for a window that starts a
+sandbox with a few clicks, or connects to one running elsewhere. Run
+"codeflower check" to see whether this machine can run sandboxes.`,
 		Version:       Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.AddCommand(interactiveCommand(), runCommand(), taskCommand(), pullCommand(), checkCommand(), guiCommand())
+	root.AddCommand(interactiveCommand(), runCommand(), taskCommand(), pullCommand(), checkCommand(), clientCommand())
 	if startedFromDesktop(os.Args[1:]) {
-		root.SetArgs([]string{"gui"})
+		root.SetArgs([]string{"client"})
 	}
 	if err := root.Execute(); err != nil {
 		if exit, ok := err.(exitError); ok {

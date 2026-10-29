@@ -363,6 +363,12 @@ input:focus, select:focus { border-color: var(--indigo); outline: none; }
 
 /* Running sandboxes */
 #workers { display: flex; flex-direction: column; gap: 1rem; }
+.connect-form { display: flex; gap: 0.5rem; align-items: center; }
+.connect-form input { flex: 1; min-width: 0; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.86em; }
+.section-title { margin: 0.75rem 0 -0.5rem; }
+#start-section { display: flex; flex-direction: column; gap: 1.25rem; }
+#start-section[hidden] { display: none; }
+.elsewhere { margin: 0.6rem 0 0; }
 #workers:empty { display: none; }
 .worker > header { display: flex; align-items: center; gap: 0.75rem; }
 .badge {
@@ -376,7 +382,9 @@ input:focus, select:focus { border-color: var(--indigo); outline: none; }
 .badge.starting, .badge.stopping { background: var(--yellow-soft); }
 .badge.ready { background: var(--teal-soft); color: var(--teal); }
 .badge.stopped { background: var(--code); color: var(--muted); }
-.badge.failed { background: var(--pink-soft); color: var(--red); }
+.badge.failed, .badge.unauthorized { background: var(--pink-soft); color: var(--red); }
+.badge.connecting { background: var(--yellow-soft); }
+.badge.unreachable { background: var(--code); color: var(--muted); }
 .meta { overflow: hidden; text-overflow: ellipsis; }
 .activity { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.4rem; }
 .activity[hidden] { display: none; }

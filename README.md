@@ -45,21 +45,28 @@ codeflower check
 lists the engines on this machine and checks that the sandbox image is there. When none is
 installed or running, it prints instructions for this system: Docker Desktop on macOS, Windows and
 WSL, Docker Engine or Podman for the Linux distribution, and Apptainer modules on clusters. The
-window shows the same guide.
+client shows the same guide.
 
 Docker is used through its API (a running daemon, no `docker` command needed); Podman and Apptainer
 run as subprocesses. With Docker and Podman the container runs with the user's uid and publishes its
 port on `127.0.0.1` only.
 
-## The window
+## The client
 
 ```sh
-codeflower gui
+codeflower client
 ```
 
-opens the launcher in the browser; double-clicking the binary does the same on Windows and macOS.
-It shows whether this computer can run sandboxes (and how to install an engine if not), its
-processor and memory use (per-core bars as in htop, refreshed every second), then:
+opens code flower in the browser (`codeflower gui` still works); double-clicking the binary does the
+same on Windows and macOS. At the top it lists your sandboxes. To use one running elsewhere, for
+example in a batch job, paste the `codeflower://…` line it printed: the client keeps it in the user's
+config directory (`codeflower/workers.json`, readable only by you), shows whether the sandbox
+answers, and connects to it again on the next start. Removing such a sandbox from the list does not
+stop it.
+
+Below, it shows whether this computer can run sandboxes (and how to install an engine if not; the
+client still connects to sandboxes elsewhere), its processor and memory use (per-core bars as in
+htop, refreshed every second), then:
 
 1. the agent: Claude Code, Codex or DeepSeek Harness;
 2. the folders, added one by one with a folder browser: input folders with your data, mounted
@@ -74,15 +81,23 @@ asks before connecting). Each running sandbox shows what its agent does: how man
 working, how many wait for you (a plan to approve, a permission or a question; the card is outlined
 then), and whether VS Code is connected. Chats keep working when VS Code disconnects. *Isolate the
 network* does what `--isolate-network` does (below), with the project's allowlist file shown on the
-sandbox's card; the window says when this computer cannot isolate, as with Docker on macOS. Sandboxes run
-while the launcher runs: *Stop all and quit*, or Ctrl+C in its
-terminal, stops them. The window remembers the last choices in the user's config directory
-(`codeflower/launcher.json`).
+sandbox's card; the client says when this computer cannot isolate, as with Docker on macOS. Sandboxes
+started here run while the client runs: *Stop all and quit*, or Ctrl+C in its terminal, stops them.
+The client remembers the last choices in the user's config directory (`codeflower/launcher.json`).
+
+`codeflower client --connect-only` (or `client: {connect_only: true}` in `config.yaml`) never starts
+sandboxes and does not look for an engine, e.g. on a cluster's login node.
 
 The page is served on `127.0.0.1` with an automatically assigned port by default. Choose a fixed
-port with `codeflower gui --port 8080`, or use `--port 0` for automatic selection. The advanced
+port with `codeflower client --port 8080`, or use `--port 0` for automatic selection. The advanced
 `--address` option sets the full listener address and cannot be combined with `--port`. A one-time
 key in the address becomes a cookie, so other users of the machine and other websites cannot use it.
+On a remote machine, forward the port (`ssh -N -L 8080:localhost:8080 login-node`; the client prints
+the command when you are logged in over SSH) and open the printed address with `localhost:8080`.
+
+Pages talk to a sandbox's agent through the client: `GET /api/workers/{id}/acp` is a WebSocket
+that the client passes on to the sandbox's bridge with its token, as browsers cannot send the
+bridge's `Authorization` header. This is what a web version of the chat will use.
 
 ## The command line
 
@@ -191,7 +206,7 @@ agents:                    # claude, codex or dsh
 ```
 
 - The folder `~/.codeflower/skills` is mounted read-only in every sandbox when it exists, like
-  `--skills ~/.codeflower/skills`, as are the folders in `skills:`. The launcher window lists them.
+  `--skills ~/.codeflower/skills`, as are the folders in `skills:`. The client lists them.
 - `model`, `effort` and `options` apply to `codeflower task`. In `codeflower interactive` you choose them
   in the chat.
 - An API key is given in one of three ways per agent: `api_key_env`, `api_key_file`, or `api_key`

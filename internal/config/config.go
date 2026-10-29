@@ -35,6 +35,12 @@ type Agent struct {
 	APIKeyFile string `yaml:"api_key_file"`
 }
 
+// Client configures codeflower client.
+type Client struct {
+	// ConnectOnly: never start sandboxes here, e.g. on a login node.
+	ConnectOnly bool `yaml:"connect_only"`
+}
+
 // Config is the content of config.yaml; every field is optional.
 type Config struct {
 	Engine         string           `yaml:"engine"`
@@ -42,6 +48,7 @@ type Config struct {
 	IsolateNetwork *bool            `yaml:"isolate_network"`
 	Skills         []string         `yaml:"skills"`
 	Agents         map[string]Agent `yaml:"agents"`
+	Client         Client           `yaml:"client"`
 
 	// Directory is the config directory; Path is the file, whether or not it exists.
 	Directory string `yaml:"-"`

@@ -1,5 +1,6 @@
-// The launcher window: checks the container engine, starts sandboxes and
-// shows how to connect VS Code to them.
+// The code flower client: connects to sandboxes running elsewhere, starts
+// sandboxes here when a container engine can run them, and shows how to
+// connect VS Code to them.
 'use strict';
 
 const AGENT_NOTES = {
@@ -232,7 +233,7 @@ function renderFolders() {
 
 function canStart() {
   const system = state.system;
-  return !!(system && system.engine && system.image && (system.image.ready || system.image.download));
+  return !!(system && system.capabilities?.start && system.image && (system.image.ready || system.image.download));
 }
 
 function renderStart() {
@@ -290,7 +291,14 @@ async function firstLoad() {
   $('#image').value = settings.image || '';
   $('#image-tag').value = settings.imageTag || '';
   $('#isolate-network').checked = Boolean(settings.isolateNetwork);
-  $('#version').textContent = state.system.version ? `launcher ${state.system.version}` : '';
+  $('#version').textContent = state.system.version ? `code flower ${state.system.version}` : '';
+  if (state.system.capabilities?.connectOnly) {
+    // Nothing starts here: the client only connects to sandboxes elsewhere.
+    $('#start-section').hidden = true;
+    $('#footer-note').textContent = 'This client connects to sandboxes running elsewhere; quitting it does not stop them.';
+    $('#quit').textContent = 'Quit';
+    return;
+  }
   $('#projects-dir').textContent = state.system.projects;
   renderAgents();
   renderFolders();
@@ -380,6 +388,26 @@ $('#image-tag').addEventListener('change', () => loadSystem());
 $('#isolate-network').addEventListener('change', renderIsolation);
 $('#project').addEventListener('input', renderIsolation);
 
+// Connecting to sandboxes running elsewhere
+
+$('#connect-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  $('#connect-error').textContent = '';
+  const address = $('#connect-address').value.trim();
+  if (!address) return;
+  const button = $('#connect');
+  button.disabled = true;
+  try {
+    await api('/api/workers/connect', { method: 'POST', body: { address } });
+    $('#connect-address').value = '';
+    await refreshWorkers();
+  } catch (error) {
+    $('#connect-error').textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+
 // Starting and watching sandboxes
 
 $('#start-form').addEventListener('submit', async (event) => {
@@ -416,7 +444,16 @@ $('#start-form').addEventListener('submit', async (event) => {
   }
 });
 
-const STATUS_TEXT = { starting: 'starting', ready: 'running', stopping: 'stopping', stopped: 'stopped', failed: 'failed' };
+const STATUS_TEXT = {
+  starting: 'starting',
+  ready: 'running',
+  stopping: 'stopping',
+  stopped: 'stopped',
+  failed: 'failed',
+  connecting: 'connecting',
+  unreachable: 'unreachable',
+  unauthorized: 'refused'
+};
 const cards = new Map();
 
 function vscodeLink(url) {
@@ -444,9 +481,13 @@ function renderWorker(worker) {
   const badge = $('.badge', card);
   badge.className = `badge ${worker.status}`;
   badge.textContent = STATUS_TEXT[worker.status] || worker.status;
-  $('h3', card).textContent = `${worker.label} · ${worker.project}`;
+  const added = worker.source === 'added';
+  $('h3', card).textContent = added ? `${worker.label || 'Sandbox'} · ${worker.address}` : `${worker.label} · ${worker.project}`;
+  $('.elsewhere', card).hidden = !added;
   const count = (paths, noun) => (paths.length ? `${paths.length} ${noun} folder${paths.length === 1 ? '' : 's'}` : null);
-  $('.meta', card).textContent = [
+  $('.meta', card).textContent = added
+    ? (worker.status === 'unreachable' ? 'Not answering. It may have stopped, or this computer cannot reach it.' : '')
+    : [
     worker.engine,
     count(worker.inputs, 'input') || 'no input folder',
     count(worker.outputs, 'output'),
@@ -454,8 +495,8 @@ function renderWorker(worker) {
     count(worker.skills || [], 'skills'),
     worker.allowlist ? 'network isolated' : null
   ]
-    .filter(Boolean)
-    .join(' · ');
+      .filter(Boolean)
+      .join(' · ');
   $('.meta', card).title = [
     ...worker.inputs.map((path) => `input ${path}`),
     ...worker.outputs.map((path) => `output ${path}`),
@@ -464,9 +505,10 @@ function renderWorker(worker) {
   ].join('\n');
   $('.network', card).hidden = !worker.allowlist;
   $('.allowlist', card).textContent = worker.allowlist || '';
-  const running = worker.status === 'starting' || worker.status === 'ready';
+  const running = !added && (worker.status === 'starting' || worker.status === 'ready');
   $('.stop', card).hidden = !running;
   $('.stop', card).disabled = worker.status === 'stopping';
+  // An added sandbox runs on without this client, so it can always leave the list.
   $('.forget', card).hidden = running || worker.status === 'stopping';
   const connect = $('.connect', card);
   connect.hidden = !worker.url;
@@ -482,6 +524,7 @@ function renderWorker(worker) {
   const pre = $('.log pre', card);
   const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24;
   pre.textContent = worker.log.join('\n');
+  $('.log', card).hidden = worker.log.length === 0;
   if (atBottom) pre.scrollTop = pre.scrollHeight;
   if (worker.status === 'failed') $('.log', card).open = true;
   return card;
@@ -592,7 +635,7 @@ async function refreshWorkers() {
 }
 
 $('#quit').addEventListener('click', async () => {
-  const running = state.workers.filter((worker) => ['starting', 'ready'].includes(worker.status)).length;
+  const running = state.workers.filter((worker) => worker.source !== 'added' && ['starting', 'ready'].includes(worker.status)).length;
   if (running && !confirm(`Stop ${running} running sandbox${running === 1 ? '' : 'es'} and quit the launcher?`)) return;
   await api('/api/quit', { method: 'POST', body: {} }).catch(() => {});
   document.body.replaceChildren(

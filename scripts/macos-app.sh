@@ -1,7 +1,7 @@
 #!/bin/sh
 # Builds "code flower.app" from the two macOS binaries and packs it into a disk image.
 # The app is the launcher itself: started without a terminal, it opens its window
-# (codeflower gui). It is signed ad hoc only, so macOS asks before the first start.
+# (codeflower client). It is signed ad hoc only, so macOS asks before the first start.
 # Usage: scripts/macos-app.sh ARM64_BINARY AMD64_BINARY VERSION OUT_DIR
 set -eu
 

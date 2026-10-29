@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>code flower launcher</title>
+<title>code flower</title>
 <link rel="icon" href="tulip.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -12,12 +12,26 @@
   <img class="logo" src="tulip.svg" alt="">
   <div>
     <h1>code flower</h1>
-    <p class="muted">Start a sandbox where an AI agent analyses your data, then talk to it from VS Code.</p>
+    <p class="muted">Start a sandbox where an AI agent analyses your data, or connect to one running elsewhere, then talk to it from VS Code.</p>
   </div>
   <span class="version muted" id="version"></span>
 </header>
 
 <main>
+  <section class="card" id="connect-card">
+    <h2>Sandboxes</h2>
+    <form class="connect-form" id="connect-form" autocomplete="off">
+      <input id="connect-address" placeholder="codeflower://host:port?token=…" spellcheck="false" aria-label="Sandbox address">
+      <button type="submit" class="pill" id="connect">Connect</button>
+    </form>
+    <p class="muted small">To use a sandbox running elsewhere, for example in a batch job, paste the line it printed when it started.</p>
+    <p class="error" id="connect-error" role="alert"></p>
+  </section>
+
+  <section id="workers"></section>
+
+  <div id="start-section">
+  <h2 class="section-title">Start a sandbox on this computer</h2>
   <section class="card" id="engine-card">
     <h2><span class="step">1</span> Container engine</h2>
     <div id="engine-body"><p class="muted"><span class="spinner"></span> Looking for Docker, Podman or Apptainer…</p></div>
@@ -118,12 +132,11 @@
       <button type="submit" class="pill pill-primary pill-large" id="start">Start sandbox</button>
     </div>
   </form>
-
-  <section id="workers"></section>
+  </div>
 </main>
 
 <footer>
-  <span class="muted small">Sandboxes run while this launcher runs. Closing the browser tab does not stop them.</span>
+  <span class="muted small" id="footer-note">Sandboxes started here run while this client runs. Closing the browser tab does not stop them.</span>
   <button type="button" class="link" id="quit">Stop all and quit</button>
 </footer>
 
@@ -166,6 +179,7 @@
       <button type="button" class="pill pill-small stop">Stop</button>
       <button type="button" class="icon-button forget" title="Remove from the list" aria-label="Remove from the list">×</button>
     </header>
+    <p class="muted small elsewhere" hidden>Running elsewhere. Removing it from the list does not stop it.</p>
     <div class="connect">
       <p><strong>Connect from VS Code.</strong> Install the code flower extension, then click <em>Open in VS Code</em>, or run
         <em>code flower: Connect to worker</em> from the command palette and paste this line:</p>

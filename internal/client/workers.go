@@ -1,4 +1,4 @@
-package gui
+package client
 
 import (
 	"bytes"
@@ -31,11 +31,21 @@ const maxLogLines = 400
 // The connection line has its own copy button; the log does not repeat the token.
 var tokenPattern = regexp.MustCompile(`token=[A-Za-z0-9_-]+`)
 
-// worker is a sandbox the window started.
+// Where a worker in the list comes from.
+const (
+	// sourceStarted: a sandbox this client started and stops when it quits.
+	sourceStarted = "started"
+	// sourceAdded: a worker running elsewhere, added by its codeflower:// line.
+	sourceAdded = "added"
+)
+
+// worker is a sandbox the client started, or one running elsewhere that the
+// user added by its address.
 type worker struct {
-	ID      string   `json:"id"`
-	Agent   string   `json:"agent"`
-	Label   string   `json:"label"`
+	ID     string `json:"id"`
+	Source string `json:"source"`
+	// Address is the worker's host:port, safe to show.
+	Address string   `json:"address,omitempty"`
 	Engine  string   `json:"engine"`
 	Project string   `json:"project"`
 	State   string   `json:"state"`
@@ -47,13 +57,21 @@ type worker struct {
 	Allowlist string    `json:"allowlist,omitempty"`
 	Started   time.Time `json:"started"`
 
-	mu       sync.Mutex
-	status   string // starting, ready, stopping, stopped, failed
-	url      string
-	err      string
-	code     int
-	log      []string
-	activity *activity
+	mu sync.Mutex
+	// Agent and Label of an added worker are known once its bridge answers.
+	agent string
+	label string
+	// status of a started worker: starting, ready, stopping, stopped, failed;
+	// of an added one: connecting, ready, unreachable, unauthorized.
+	status string
+	url    string
+	// connection holds the token; it never leaves the client.
+	connection *sandbox.Connection
+	relays     relays
+	err        string
+	code       int
+	log        []string
+	activity   *activity
 	// partial holds output up to its next newline.
 	partial bytes.Buffer
 	cancel  context.CancelFunc
@@ -62,27 +80,37 @@ type worker struct {
 
 type workerView struct {
 	*worker
+	Agent    string    `json:"agent"`
+	Label    string    `json:"label"`
 	Status   string    `json:"status"`
 	URL      string    `json:"url,omitempty"`
 	Error    string    `json:"error,omitempty"`
 	ExitCode int       `json:"exitCode"`
 	Log      []string  `json:"log"`
 	Activity *activity `json:"activity,omitempty"`
+	// Relays counts the pages connected to the worker through this client.
+	Relays int `json:"relays"`
 }
 
 func (w *worker) view() workerView {
+	relays := w.relays.count()
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return workerView{worker: w, Status: w.status, URL: w.url, Error: w.err, ExitCode: w.code, Log: slicesClone(w.log), Activity: w.activity}
+	return workerView{
+		worker: w, Agent: w.agent, Label: w.label, Status: w.status, URL: w.url, Error: w.err, ExitCode: w.code,
+		Log: nonNil(slicesClone(w.log)), Activity: w.activity, Relays: relays,
+	}
 }
 
 // activity is what the sandbox's agent does, as its bridge reports at /status:
 // how many chats work or wait for the user, and whether VS Code is connected.
 type activity struct {
-	Connected bool           `json:"connected"`
-	Working   int            `json:"working"`
-	Waiting   int            `json:"waiting"`
-	Chats     []chatActivity `json:"chats"`
+	Agent      string         `json:"agent"`
+	AgentLabel string         `json:"agentLabel"`
+	Connected  bool           `json:"connected"`
+	Working    int            `json:"working"`
+	Waiting    int            `json:"waiting"`
+	Chats      []chatActivity `json:"chats"`
 	// Missing from bridges older than usage tracking.
 	Usage *usage `json:"usage,omitempty"`
 }
@@ -130,11 +158,11 @@ type chatActivity struct {
 
 const activityInterval = 3 * time.Second
 
-// watchActivity polls the bridge until ctx ends. The token stays here; the
-// page only gets the counts and titles.
-func (w *worker) watchActivity(ctx context.Context, connection sandbox.Connection) {
+// watchActivity polls the worker's bridge until ctx ends, with the
+// connection the worker has at each poll (an added worker's token can change).
+// The token stays here; the page only gets the counts and titles.
+func (w *worker) watchActivity(ctx context.Context) {
 	client := &http.Client{Timeout: 2 * time.Second}
-	url := "http://" + net.JoinHostPort(connection.Host, strconv.Itoa(connection.Port)) + "/status"
 	ticker := time.NewTicker(activityInterval)
 	defer ticker.Stop()
 	defer func() {
@@ -143,13 +171,35 @@ func (w *worker) watchActivity(ctx context.Context, connection sandbox.Connectio
 		w.mu.Unlock()
 	}()
 	for {
-		current, err := fetchActivity(ctx, client, url, connection.Token)
+		w.mu.Lock()
+		connection := w.connection
+		w.mu.Unlock()
+		var current *activity
+		err := errors.New("no connection")
+		if connection != nil {
+			url := "http://" + net.JoinHostPort(connection.Host, strconv.Itoa(connection.Port)) + "/status"
+			current, err = fetchActivity(ctx, client, url, connection.Token)
+		}
 		w.mu.Lock()
 		if err != nil || ctx.Err() != nil {
 			// A stopped sandbox reports nothing.
 			current = nil
 		}
 		w.activity = current
+		if w.Source == sourceAdded && ctx.Err() == nil {
+			// An added worker's status is whether its bridge answers.
+			switch {
+			case err == nil:
+				w.status, w.err = "ready", ""
+				if current.Agent != "" {
+					w.agent, w.label = current.Agent, current.AgentLabel
+				}
+			case errors.Is(err, errUnauthorized):
+				w.status, w.err = "unauthorized", "The worker refused its token; paste its current line again."
+			default:
+				w.status, w.err = "unreachable", ""
+			}
+		}
 		w.mu.Unlock()
 		select {
 		case <-ctx.Done():
@@ -158,6 +208,8 @@ func (w *worker) watchActivity(ctx context.Context, connection sandbox.Connectio
 		}
 	}
 }
+
+var errUnauthorized = errors.New("the sandbox refused the token")
 
 func fetchActivity(ctx context.Context, client *http.Client, url, token string) (*activity, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -170,6 +222,9 @@ func fetchActivity(ctx context.Context, client *http.Client, url, token string) 
 		return nil, err
 	}
 	defer response.Body.Close()
+	if response.StatusCode == http.StatusUnauthorized {
+		return nil, errUnauthorized
+	}
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("the sandbox answered %s", response.Status)
 	}
@@ -263,6 +318,10 @@ func withConfigSkills(loaded *config.Config, chosen []string) []string {
 var projectName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
 
 func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
+	if s.options.ConnectOnly {
+		writeError(w, http.StatusForbidden, errors.New("this client only connects to sandboxes running elsewhere"))
+		return
+	}
 	var request startRequest
 	if err := readJSON(r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -317,9 +376,14 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	engine, err := sandbox.ChooseEngine(sandbox.DetectEngines(r.Context()), request.Engine, named)
+	engine, err := sandbox.ChooseEngine(s.detectEngines(r.Context()), request.Engine, named)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		// No engine can run sandboxes here: say how to install or fix one.
+		problem := noEngine{Error: err.Error(), Guide: sandbox.Guide()}
+		if engine.Installed {
+			problem.Error, problem.Fix = engine.Problem, engine.Fix
+		}
+		writeJSON(w, http.StatusPreconditionFailed, problem)
 		return
 	}
 	image, err := sandbox.ResolveImage(named, engine.Name)
@@ -361,8 +425,9 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(context.Background())
 	item := &worker{
 		ID:      sandbox.NewInstanceID()[:8],
-		Agent:   request.Agent,
-		Label:   sandbox.AgentLabel(request.Agent),
+		Source:  sourceStarted,
+		agent:   request.Agent,
+		label:   sandbox.AgentLabel(request.Agent),
 		Engine:  engine.Label,
 		Project: request.Project,
 		State:   state,
@@ -375,7 +440,7 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		cancel:  cancel,
 		done:    make(chan struct{}),
 	}
-	item.appendLine(fmt.Sprintf("Starting %s with %s (%s)…", item.Label, engine.Label, image))
+	item.appendLine(fmt.Sprintf("Starting %s with %s (%s)…", item.label, engine.Label, image))
 	if isolation != nil {
 		item.Allowlist = isolation.Allowlist
 		item.appendLine(fmt.Sprintf("Network isolated: only %s and the hosts in %s",
@@ -385,7 +450,7 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 	s.workers[item.ID] = item
 	s.order = append(s.order, item.ID)
 	s.mu.Unlock()
-	fmt.Fprintf(s.options.Log, "Starting %s for project %s\n", item.Label, request.Project)
+	fmt.Fprintf(s.options.Log, "Starting %s for project %s\n", item.label, request.Project)
 
 	go func() {
 		defer close(item.done)
@@ -401,11 +466,12 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 			}.Run(ctx, func(connection sandbox.Connection) {
 				item.mu.Lock()
 				item.url = connection.URL
+				item.connection = &connection
 				if item.status == "starting" {
 					item.status = "ready"
 				}
 				item.mu.Unlock()
-				go item.watchActivity(watching, connection)
+				go item.watchActivity(watching)
 			})
 		}
 		stopWatching()
@@ -416,6 +482,7 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 			item.partial.Reset()
 		}
 		item.url = ""
+		item.connection = nil
 		item.code = code
 		switch {
 		case err != nil && item.status == "stopping" && ctx.Err() != nil:
@@ -430,6 +497,14 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	writeJSON(w, http.StatusOK, item.view())
+}
+
+// noEngine is the answer to a start where no engine can run sandboxes: the
+// problem, and the steps that fix it or the guide to install one.
+type noEngine struct {
+	Error string               `json:"error"`
+	Fix   []sandbox.Step       `json:"fix,omitempty"`
+	Guide sandbox.InstallGuide `json:"guide"`
 }
 
 func (s *Server) listWorkers(w http.ResponseWriter, _ *http.Request) {
@@ -454,6 +529,10 @@ func (s *Server) stopWorker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, errors.New("no such sandbox"))
 		return
 	}
+	if item.Source == sourceAdded {
+		writeError(w, http.StatusConflict, errors.New("this sandbox runs elsewhere; stop it where it was started, or remove it from the list"))
+		return
+	}
 	item.mu.Lock()
 	if item.status == "starting" || item.status == "ready" {
 		item.status = "stopping"
@@ -461,6 +540,7 @@ func (s *Server) stopWorker(w http.ResponseWriter, r *http.Request) {
 	}
 	item.mu.Unlock()
 	item.cancel()
+	item.relays.closeAll()
 	writeJSON(w, http.StatusOK, item.view())
 }
 
@@ -471,15 +551,21 @@ func (s *Server) forgetWorker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, errors.New("no such sandbox"))
 		return
 	}
+	if item.Source == sourceAdded {
+		// Stops watching it; the worker itself runs on.
+		item.cancel()
+	}
 	select {
 	case <-item.done:
 	default:
 		writeError(w, http.StatusConflict, errors.New("stop the sandbox first"))
 		return
 	}
+	item.relays.closeAll()
 	s.mu.Lock()
 	delete(s.workers, id)
 	s.order = removeString(s.order, id)
+	s.saveAdded()
 	s.mu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
@@ -494,20 +580,26 @@ func removeString(values []string, value string) []string {
 	return result
 }
 
-// stopAll stops every sandbox and waits for them (at most 30 s).
+// stopAll stops every sandbox it started and waits for them (at most 30 s),
+// stops watching the added ones, and closes every relay.
 func (s *Server) stopAll() {
 	s.mu.Lock()
 	items := make([]*worker, 0, len(s.workers))
+	started := 0
 	for _, item := range s.workers {
 		items = append(items, item)
+		if item.Source == sourceStarted {
+			started++
+		}
 	}
 	s.mu.Unlock()
-	if len(items) > 0 {
-		fmt.Fprintf(s.options.Log, "Stopping %d sandbox(es)…\n", len(items))
+	if started > 0 {
+		fmt.Fprintf(s.options.Log, "Stopping %d sandbox(es)…\n", started)
 	}
 	deadline := time.After(30 * time.Second)
 	for _, item := range items {
 		item.cancel()
+		item.relays.closeAll()
 	}
 	for _, item := range items {
 		select {
