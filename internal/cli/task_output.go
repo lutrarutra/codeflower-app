@@ -43,6 +43,7 @@ type taskProgress struct {
 	lineOpen   bool
 	footer     bool
 	closed     bool
+	onWrapUp   func(reason string)
 	mu         sync.Mutex
 	stop       chan struct{}
 	stopOnce   sync.Once
@@ -93,6 +94,21 @@ func (p *taskProgress) Start() {
 			}
 		}
 	}()
+}
+
+func (p *taskProgress) SetOnWrapUp(fn func(reason string)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.onWrapUp = fn
+}
+
+func (p *taskProgress) Notice(text string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return
+	}
+	p.writeText("  " + text + "\n")
 }
 
 func (p *taskProgress) Write(data []byte) (int, error) {
@@ -220,6 +236,9 @@ func (p *taskProgress) render(event taskProgressEvent) {
 	case "continuation":
 		p.writeText("\nAttempt: " + describeContinuation(sandbox.TaskContinuation{Kind: event.Kind, FollowUp: event.FollowUp}) + "\n")
 	case "wrap-up":
+		if p.onWrapUp != nil {
+			p.onWrapUp(event.Reason)
+		}
 		p.writeText("\nWrapping up: " + wrapUpReason(event.Reason) + "\n")
 	case "settings":
 		for key, value := range event.Settings {

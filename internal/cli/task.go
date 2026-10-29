@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -177,9 +178,9 @@ func startTask(command *cobra.Command, options *sandboxOptions, flags taskFlags,
 	if err != nil {
 		return err
 	}
-	ctx, stop := signal.NotifyContext(command.Context(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	prepared, err := options.prepare(ctx, engine, "a code flower task")
+	prepareCtx, stopPrepare := signal.NotifyContext(command.Context(), os.Interrupt, syscall.SIGTERM)
+	prepared, err := options.prepare(prepareCtx, engine, "a code flower task")
+	stopPrepare()
 	if err != nil {
 		return err
 	}
@@ -216,7 +217,7 @@ func startTask(command *cobra.Command, options *sandboxOptions, flags taskFlags,
 	}
 	defer unlock()
 	fmt.Fprintf(os.Stderr, "  task     %s\n", summarize(text))
-	return runTaskAttempt(ctx, taskAttemptRun{
+	return runTaskAttempt(command.Context(), taskAttemptRun{
 		prepared:    prepared,
 		agent:       options.agent,
 		id:          id,
@@ -285,9 +286,9 @@ func continueTask(command *cobra.Command, options *sandboxOptions, flags taskFla
 	if err != nil {
 		return err
 	}
-	ctx, stop := signal.NotifyContext(command.Context(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	prepared, err := options.prepareWith(ctx, engine, "a code flower task", binds)
+	prepareCtx, stopPrepare := signal.NotifyContext(command.Context(), os.Interrupt, syscall.SIGTERM)
+	prepared, err := options.prepareWith(prepareCtx, engine, "a code flower task", binds)
+	stopPrepare()
 	if err != nil {
 		return err
 	}
@@ -317,7 +318,7 @@ func continueTask(command *cobra.Command, options *sandboxOptions, flags taskFla
 	if followUp != "" {
 		fmt.Fprintf(os.Stderr, "  follow-up %s\n", summarize(followUp))
 	}
-	return runTaskAttempt(ctx, taskAttemptRun{
+	return runTaskAttempt(command.Context(), taskAttemptRun{
 		prepared:    prepared,
 		agent:       task.Agent,
 		id:          id,
@@ -382,19 +383,29 @@ func runTaskAttempt(ctx context.Context, run taskAttemptRun) error {
 }
 
 func (run taskAttemptRun) run(ctx context.Context, attempt sandbox.TaskAttempt) (*sandbox.TaskResult, error) {
-	running := ctx
+	running, cancelRunning := context.WithCancel(ctx)
+	defer cancelRunning()
 	if run.timeout > 0 {
-		var cancel context.CancelFunc
-		running, cancel = context.WithTimeout(ctx, run.timeout)
-		defer cancel()
+		var cancelTimeout context.CancelFunc
+		running, cancelTimeout = context.WithTimeout(running, run.timeout)
+		defer cancelTimeout()
 	}
 	worker := run.prepared.worker(run.agent)
 	worker.Task = run.id
 	worker.TaskAttempt = attempt.Attempt
 	worker.TaskInteractive = run.interactive
-	if worker.TaskInteractive {
+
+	var tw *terminalWatcher
+	if isTerminal(os.Stdin) {
+		tw = newTerminalWatcher(os.Stdin, worker.TaskInteractive)
+		if worker.TaskInteractive {
+			worker.Stdin = tw.pipeReader
+		}
+		defer tw.close()
+	} else if worker.TaskInteractive {
 		worker.Stdin = os.Stdin
 	}
+
 	started := time.Now()
 	var progress *taskProgress
 	if run.outputMode == "attached" {
@@ -403,6 +414,107 @@ func (run taskAttemptRun) run(ctx context.Context, attempt sandbox.TaskAttempt) 
 		worker.Stdout = progress
 		defer progress.Close()
 	}
+
+	attemptDir := sandbox.AttemptDirectory(run.directory, attempt.Attempt)
+	wrapUpFile := filepath.Join(attemptDir, "wrap-up")
+	cancelFile := filepath.Join(attemptDir, "cancel")
+
+	var (
+		mu              sync.Mutex
+		wrappingUp      bool
+		lastCancelPress time.Time
+	)
+
+	markWrappingUp := func(reason string) {
+		mu.Lock()
+		defer mu.Unlock()
+		if wrappingUp {
+			return
+		}
+		wrappingUp = true
+		_ = os.WriteFile(wrapUpFile, []byte(reason+"\n"), 0o600)
+	}
+
+	isWrappingUp := func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		if wrappingUp {
+			return true
+		}
+		if _, err := os.Stat(wrapUpFile); err == nil {
+			wrappingUp = true
+			return true
+		}
+		return false
+	}
+
+	if progress != nil {
+		progress.SetOnWrapUp(func(reason string) {
+			mu.Lock()
+			wrappingUp = true
+			mu.Unlock()
+		})
+	}
+
+	showNotice := func(text string) {
+		if progress != nil {
+			progress.Notice(text)
+		} else {
+			fmt.Fprintln(os.Stderr, text)
+		}
+	}
+
+	handleCancelPress := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		now := time.Now()
+		if !lastCancelPress.IsZero() && now.Sub(lastCancelPress) <= 3*time.Second {
+			showNotice("Cancelling...")
+			_ = os.WriteFile(cancelFile, []byte("cancel\n"), 0o600)
+			cancelRunning()
+			return
+		}
+		lastCancelPress = now
+		showNotice("Press Ctrl+C or Ctrl+D again within 3s to cancel wrap-up")
+	}
+
+	handleInterrupt := func() {
+		if !isWrappingUp() {
+			markWrappingUp("interrupt")
+			showNotice("Interrupt received; wrapping up... (press Ctrl+C or Ctrl+D twice to cancel immediately)")
+		} else {
+			handleCancelPress()
+		}
+	}
+
+	sigCh := make(chan os.Signal, 2)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+
+	go func() {
+		var ctrlDCh <-chan struct{}
+		if tw != nil {
+			ctrlDCh = tw.ctrlD
+		}
+		for {
+			select {
+			case <-running.Done():
+				return
+			case sig := <-sigCh:
+				if sig == syscall.SIGTERM {
+					showNotice("Stopping...")
+					cancelRunning()
+					return
+				}
+				handleInterrupt()
+			case <-ctrlDCh:
+				if isWrappingUp() {
+					handleCancelPress()
+				}
+			}
+		}
+	}()
+
 	code, err := worker.Run(running, nil)
 	if progress != nil {
 		if closeErr := progress.Close(); closeErr != nil {
@@ -431,6 +543,94 @@ func (run taskAttemptRun) run(ctx context.Context, attempt sandbox.TaskAttempt) 
 		return &result, exitError{exit}
 	}
 	return &result, nil
+}
+
+// terminalWatcher monitors standard input on a terminal for Ctrl+D (EOF/0x04)
+// and forwards non-Ctrl+D input to worker.Stdin when interactive is true.
+type terminalWatcher struct {
+	ctrlD      chan struct{}
+	pipeReader *io.PipeReader
+	pipeWriter *io.PipeWriter
+	done       chan struct{}
+}
+
+func newTerminalWatcher(file *os.File, interactive bool) *terminalWatcher {
+	tw := &terminalWatcher{
+		ctrlD: make(chan struct{}, 10),
+		done:  make(chan struct{}),
+	}
+	if interactive {
+		tw.pipeReader, tw.pipeWriter = io.Pipe()
+	}
+	go tw.readLoop(file)
+	return tw
+}
+
+func (tw *terminalWatcher) close() {
+	select {
+	case <-tw.done:
+	default:
+		close(tw.done)
+	}
+	if tw.pipeWriter != nil {
+		_ = tw.pipeWriter.Close()
+	}
+}
+
+func (tw *terminalWatcher) readLoop(file *os.File) {
+	buf := make([]byte, 1024)
+	consecutiveEOFs := 0
+	for {
+		select {
+		case <-tw.done:
+			return
+		default:
+		}
+
+		n, err := file.Read(buf)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				select {
+				case tw.ctrlD <- struct{}{}:
+				default:
+				}
+				consecutiveEOFs++
+				if !isTerminal(file) || consecutiveEOFs > 5 {
+					if tw.pipeWriter != nil {
+						_ = tw.pipeWriter.Close()
+					}
+					return
+				}
+				time.Sleep(50 * time.Millisecond)
+				continue
+			}
+			if tw.pipeWriter != nil {
+				_ = tw.pipeWriter.CloseWithError(err)
+			}
+			return
+		}
+		consecutiveEOFs = 0
+		if n > 0 {
+			hasCtrlD := false
+			clean := make([]byte, 0, n)
+			for i := 0; i < n; i++ {
+				if buf[i] == 4 { // Ctrl+D / EOT
+					hasCtrlD = true
+				} else {
+					clean = append(clean, buf[i])
+				}
+			}
+			if hasCtrlD {
+				select {
+				case tw.ctrlD <- struct{}{}:
+				default:
+				}
+			}
+			if len(clean) > 0 && tw.pipeWriter != nil {
+				_, _ = tw.pipeWriter.Write(clean)
+			}
+		}
+	}
 }
 
 // wrapUpReserve is how long before the timeout the agent is told to wrap up:
@@ -710,10 +910,14 @@ func describeContinuation(continuation sandbox.TaskContinuation) string {
 
 // wrapUpReason says why a task wrapped up.
 func wrapUpReason(reason string) string {
-	if reason == "time" {
+	switch reason {
+	case "time":
 		return "the time was almost up"
+	case "interrupt":
+		return "interrupted"
+	default:
+		return "out of rounds"
 	}
-	return "out of rounds"
 }
 
 func plural(count int, word string) string {
