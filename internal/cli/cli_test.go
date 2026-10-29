@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"codeflower-launcher/internal/sandbox"
 )
@@ -85,7 +86,9 @@ func TestProjectsLiveInTheProjectsDirectory(t *testing.T) {
 func TestTaskChecksItsArguments(t *testing.T) {
 	output := t.TempDir()
 	cases := map[string][]string{
-		"accepts 1 arg":          {"--agent", "claude", "--output", output},
+		"give the task as an":    {"--agent", "claude", "--output", output},
+		"not both":               {"--agent", "claude", "--output", output, "--prompt", "task.md", "x"},
+		"no such file":           {"--agent", "claude", "--output", output, "--prompt", "missing.md"},
 		"the task is empty":      {"--agent", "claude", "--output", output, "  "},
 		"--output is required":   {"--agent", "claude", "Cluster the cells"},
 		"--max-rounds must be":   {"--agent", "claude", "--output", output, "--max-rounds", "0", "x"},
@@ -108,8 +111,10 @@ func TestTaskChecksItsArguments(t *testing.T) {
 
 func TestRunRequiresOneNonEmptyTaskArgument(t *testing.T) {
 	cases := map[string][]string{
-		"accepts 1 arg(s)":  {},
-		"the task is empty": {""},
+		"give the task as an": {},
+		"the task is empty":   {""},
+		"not both":            {"--prompt", "task.md", "x"},
+		"no such file":        {"--prompt", "missing.md"},
 	}
 	for message, args := range cases {
 		command := runCommand()
@@ -146,6 +151,39 @@ func TestTaskTextComesFromTheArgumentOrStandardInput(t *testing.T) {
 	}
 	if _, err := readTask("-", strings.NewReader("\n")); err == nil {
 		t.Fatal("accepted an empty task from standard input")
+	}
+}
+
+func TestTaskTextComesFromTheArgumentOrThePromptFile(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "task.md")
+	if err := os.WriteFile(file, []byte("\n# Task\n\nCluster the cells\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if text, argument, err := readPrompt(nil, file, nil, "task"); err != nil || text != "# Task\n\nCluster the cells" || argument != "" {
+		t.Fatalf("got %q, %q, %v", text, argument, err)
+	}
+	if text, argument, err := readPrompt([]string{"Cluster the cells"}, "", nil, "task"); err != nil || text != "Cluster the cells" || argument != "Cluster the cells" {
+		t.Fatalf("got %q, %q, %v", text, argument, err)
+	}
+	if text, _, err := readPrompt(nil, "", nil, "follow-up"); err != nil || text != "" {
+		t.Fatalf("got %q, %v for no follow-up", text, err)
+	}
+	for _, missing := range []string{filepath.Join(t.TempDir(), "missing.md"), t.TempDir()} {
+		if _, _, err := readPrompt(nil, missing, nil, "task"); err == nil {
+			t.Errorf("accepted --prompt %s", missing)
+		}
+	}
+	if err := checkPromptArgs([]string{"Cluster the cells"}, file, false, "task"); err == nil {
+		t.Error("accepted both an argument and --prompt")
+	}
+	if err := checkPromptArgs(nil, "", true, "task"); err == nil {
+		t.Error("accepted neither an argument nor --prompt")
+	}
+	if err := checkPromptArgs(nil, "", false, "follow-up"); err != nil {
+		t.Errorf("a follow-up was required: %v", err)
+	}
+	if err := checkPromptArgs(nil, file, true, "task"); err != nil {
+		t.Errorf("--prompt alone was refused: %v", err)
 	}
 }
 
@@ -275,5 +313,79 @@ agents:
 	}
 	if options.engine != "docker" || options.isolateNetwork || len(options.folders.Skills) != 1 {
 		t.Fatalf("got %s %v %v", options.engine, options.isolateNetwork, options.folders.Skills)
+	}
+}
+
+func TestContinuingATaskChecksItsArguments(t *testing.T) {
+	state, err := sandbox.PrepareState(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	gone := filepath.Join(t.TempDir(), "gone")
+	task := sandbox.Task{Task: "Cluster the cells", Agent: "claude", Output: sandbox.OutputsRoot + "/gone",
+		Mounts: []sandbox.TaskMount{{Source: gone, Target: sandbox.OutputsRoot + "/gone"}}}
+	if err := sandbox.WriteTask(state, "abc", task); err != nil {
+		t.Fatal(err)
+	}
+	directory := sandbox.TaskDirectory(state, "abc")
+	cases := map[string][]string{
+		"--input cannot be used with --continue":       {"--continue", directory, "--input", t.TempDir()},
+		"--agent cannot be used with --continue":       {"--continue", directory, "--agent", "codex"},
+		"--project cannot be used with --continue":     {"--continue", directory, "--project", "other"},
+		"--skip-report cannot be used with --continue": {"--continue", directory, "--skip-report"},
+		"accepts at most 1 arg":                        {"--continue", directory, "more", "work"},
+		"the follow-up is empty":                       {"--continue", directory, " "},
+		"is not a task folder":                         {"--continue", state},
+		"missing: " + gone:                             {"--continue", directory},
+	}
+	for message, args := range cases {
+		command := taskCommand()
+		command.SetArgs(args)
+		command.SetOut(new(strings.Builder))
+		command.SetErr(new(strings.Builder))
+		if err := command.Execute(); err == nil || !strings.Contains(err.Error(), message) {
+			t.Errorf("%v: got %v, want %q", args, err, message)
+		}
+	}
+}
+
+func TestTasksWrapUpShortlyBeforeTheirTimeout(t *testing.T) {
+	for _, test := range []struct{ timeout, asked, want time.Duration }{
+		{90 * time.Minute, 0, 9 * time.Minute},
+		{10 * time.Minute, 0, 2 * time.Minute},
+		{3 * time.Minute, 0, 90 * time.Second},
+		{7*time.Hour + 30*time.Minute, 0, 15 * time.Minute},
+		{7*time.Hour + 30*time.Minute, 30 * time.Minute, 30 * time.Minute},
+		{time.Hour, time.Hour, 30 * time.Minute},
+	} {
+		if got := wrapUpReserve(test.timeout, test.asked); got != test.want {
+			t.Errorf("--timeout %s --wrap-up %s wraps up %s before, want %s", test.timeout, test.asked, got, test.want)
+		}
+	}
+}
+
+func TestTheContinueCommandCanBePasted(t *testing.T) {
+	if got := continueCommand("/home/u/codeflower/projects/p/tasks/abc", false); got != "codeflower task --continue /home/u/codeflower/projects/p/tasks/abc" {
+		t.Errorf("got %s", got)
+	}
+	if got := continueCommand("/home/u/my projects/it's", true); got != `codeflower task --continue '/home/u/my projects/it'\''s' "FOLLOW-UP"` {
+		t.Errorf("got %s", got)
+	}
+	if got := shellQuote("~/tasks/$x"); got != `'~/tasks/$x'` {
+		t.Errorf("got %s", got)
+	}
+}
+
+func TestTaskSummarySaysHowTheAttemptWentOn(t *testing.T) {
+	var out strings.Builder
+	result := sandbox.TaskResult{Status: "unmet", Rounds: 2, Attempt: 3, Message: "The time limit was near; wrapped up: more to do",
+		Continuation: &sandbox.TaskContinuation{Kind: "interrupted", FollowUp: true},
+		WrapUp:       &sandbox.TaskWrapUp{Reason: "time"}}
+	printTaskResult(&out, result, preparedSandbox{}, time.Minute)
+	for _, want := range []string{"Task not done after 1m0s (2 rounds)", "attempt  3, continued the session after an interruption, with a follow-up",
+		"wrap-up  the time was almost up"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("summary %q does not contain %q", out.String(), want)
+		}
 	}
 }

@@ -16,14 +16,17 @@ func runCommand() *cobra.Command {
 	var options sandboxOptions
 	var listenHost, advertiseHost string
 	var port, inspectPort int
+	var promptFile string
 
 	command := &cobra.Command{
-		Use:   "run TASK",
+		Use:   "run (TASK | --prompt FILE)",
 		Short: "Start a task in a session you can continue from VS Code",
 		Long: `Start a sandbox and create a new chat session with TASK as its first
-prompt. The agent starts working immediately; connect to the worker in VS Code
-to follow along, answer questions, or continue the session. Unlike "task", this
-command keeps the worker running for interactive follow-up.
+prompt: the request in plain words, - to read it from standard input, or
+--prompt FILE to read it from a Markdown file. The agent starts working
+immediately; connect to the worker in VS Code to follow along, answer
+questions, or continue the session. Unlike "task", this command keeps the
+worker running for interactive follow-up.
 
 The session is saved in the project and appears in the extension's sessions
 list. If the agent is not signed in yet, sign in with "codeflower interactive"
@@ -34,10 +37,13 @@ worker" and paste it. Press Ctrl+C to stop.`,
 		Example: `  codeflower run --agent claude --input ~/data/study42 --output ~/results/study42 \
     "Cluster the cells and annotate the cell types"
   codeflower run --agent codex --project study42 --input /data/study42 \
-    "Run quality control and write the filtered matrix"`,
-		Args: cobra.ExactArgs(1),
+    "Run quality control and write the filtered matrix"
+  codeflower run --agent claude --project study42 --input /data/study42 --prompt task.md`,
+		Args: func(command *cobra.Command, args []string) error {
+			return checkPromptArgs(args, promptFile, true, "task")
+		},
 		RunE: func(command *cobra.Command, args []string) error {
-			text, err := readTask(args[0], os.Stdin)
+			text, _, err := readPrompt(args, promptFile, os.Stdin, "task")
 			if err != nil {
 				return err
 			}
@@ -93,6 +99,7 @@ worker" and paste it. Press Ctrl+C to stop.`,
 		},
 	}
 	addSandboxFlags(command, &options)
+	command.Flags().StringVar(&promptFile, "prompt", "", "read TASK from this Markdown file instead of an argument")
 	command.Flags().StringVar(&listenHost, "host", "0.0.0.0", "interface the worker listens on")
 	command.Flags().StringVar(&advertiseHost, "advertise-host", "",
 		"address printed for VS Code (default: this node's IPv4 address; 127.0.0.1 with Docker or Podman)")

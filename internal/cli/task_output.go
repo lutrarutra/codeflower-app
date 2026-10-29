@@ -24,6 +24,8 @@ type taskProgressEvent struct {
 	MaxRounds      int                `json:"maxRounds,omitempty"`
 	Reason         string             `json:"reason,omitempty"`
 	Phase          string             `json:"phase,omitempty"`
+	Kind           string             `json:"kind,omitempty"`
+	FollowUp       bool               `json:"followUp,omitempty"`
 }
 
 // taskProgress translates the sandbox's task events into terminal-friendly
@@ -215,6 +217,10 @@ func (p *taskProgress) render(event taskProgressEvent) {
 			text += ": " + event.Reason
 		}
 		p.writeText(text + "\n")
+	case "continuation":
+		p.writeText("\nAttempt: " + describeContinuation(sandbox.TaskContinuation{Kind: event.Kind, FollowUp: event.FollowUp}) + "\n")
+	case "wrap-up":
+		p.writeText("\nWrapping up: " + wrapUpReason(event.Reason) + "\n")
 	case "settings":
 		for key, value := range event.Settings {
 			p.settings[key] = value

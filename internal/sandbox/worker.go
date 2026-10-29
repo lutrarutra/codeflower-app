@@ -82,8 +82,10 @@ type Worker struct {
 	// in the command line); it stores the key in the agent's own files.
 	APIKey string
 	// Task, when set, is the id of a task in the project's tasks folder: the
-	// agent works on it by itself, and nothing listens for VS Code.
-	Task string
+	// agent works on its attempt TaskAttempt by itself, and nothing listens
+	// for VS Code.
+	Task        string
+	TaskAttempt int
 	// InitialPrompt, when set, is the id of a run prompt to send in a new
 	// session while keeping the worker available to VS Code.
 	InitialPrompt string
@@ -105,11 +107,6 @@ var ErrImageWithoutTasks = errors.New("this sandbox image cannot run tasks (it s
 // the run's initial prompt.
 var ErrImageWithoutInitialPrompt = errors.New("this sandbox image cannot start a run with an initial prompt; " +
 	"update it with `codeflower pull`, or choose a newer --image")
-
-// TaskFile is where the sandbox finds a task's description.
-func TaskFile(task string) string {
-	return ContainerState + "/tasks/" + task + "/task.json"
-}
 
 // Connection is what the bridge writes once it listens: the line VS Code
 // connects with.
@@ -246,7 +243,7 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 		isolatedEnvironment(values)
 	}
 	if w.Task != "" {
-		values["CODEFLOWER_TASK_FILE"] = TaskFile(w.Task)
+		values["CODEFLOWER_TASK_ATTEMPT_FILE"] = AttemptFile(w.Task, w.TaskAttempt)
 		if w.TaskInteractive {
 			values["CODEFLOWER_TASK_INTERACTIVE"] = "1"
 		}

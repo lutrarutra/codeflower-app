@@ -145,3 +145,25 @@ func mustJSON(t *testing.T, value any) string {
 	}
 	return string(data)
 }
+
+func TestTaskProgressSaysWhyATaskContinuesAndWrapsUp(t *testing.T) {
+	var out bytes.Buffer
+	progress := newTaskProgress(&out, false, "Claude Code", "", "", time.Now())
+	progress.Start()
+	stream := `{"codeflowerTask":true,"type":"continuation","kind":"unmet","followUp":true}` + "\n" +
+		`{"codeflowerTask":true,"type":"wrap-up","reason":"rounds"}` + "\n"
+	if _, err := progress.Write([]byte(stream)); err != nil {
+		t.Fatal(err)
+	}
+	if err := progress.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Attempt: continued the session: the task was not done, with a follow-up", "Wrapping up: out of rounds"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("attached output %q does not contain %q", out.String(), want)
+		}
+	}
+	if strings.Contains(out.String(), "unsupported") {
+		t.Errorf("attached output %q has unsupported events", out.String())
+	}
+}

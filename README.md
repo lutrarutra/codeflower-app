@@ -128,7 +128,8 @@ codeflower run --agent claude --input ~/data/study42 --output ~/results/study42 
 ```
 
 `run` takes the same folder, project, network and engine options as `interactive`. It sends the
-required task string as the first prompt in a newly created session, then keeps the worker running
+task (the argument, `-` to read it from standard input, or `--prompt FILE` to read it from a Markdown
+file) as the first prompt in a newly created session, then keeps the worker running
 so VS Code can attach while the agent works and continue the chat afterwards. The task is an ordinary
 interactive turn: the extension handles questions and permissions. Sign in with `interactive` first
 if this project has not been signed in yet. `run` replaces its former use as an alias of
@@ -209,10 +210,11 @@ is done, for example as a batch job:
 codeflower task --agent claude --project study42 --input /data/study42 --output ~/results/study42 \
   "Cluster the cells and annotate the cell types"
 sbatch --time=8:00:00 --signal=B:TERM@120 --wrap "codeflower task --agent claude --project study42 \
-  --input /data/study42 --output ~/results/study42 --timeout 7h50m - < task.md"
+  --input /data/study42 --output ~/results/study42 --timeout 7h50m --prompt task.md"
 ```
 
-- The task is the one argument, or `-` to read it from standard input. It takes the folder and network
+- The task is the one argument, `-` to read it from standard input, or `--prompt FILE` to read it from
+  a Markdown file (one or the other, not both). It takes the folder and network
   options of `interactive`; `--output` is required, and the first one gets the results.
 - The agent gets the task as its goal (`/goal` for Claude Code and Codex; DeepSeek Harness gets it as a
   plain prompt) and instructions that nobody is there to answer: it decides open questions itself and
@@ -227,17 +229,48 @@ sbatch --time=8:00:00 --signal=B:TERM@120 --wrap "codeflower task --agent claude
   them the agent's defaults apply, including what its settings file in the project says.
 - After each round the agent is asked whether the task is done. If not, it is sent back to work, at
   most `--max-rounds` times (default 3). `--timeout 90m` stops it after that long.
+- Before it stops, the agent gets one more turn to wrap up: when the rounds run out, and shortly before
+  `--timeout` (a tenth of it, between 2 and 15 minutes; the hidden `--wrap-up DURATION` sets another
+  lead). It stops starting new work and brings the report up to date with what it did, what it found,
+  its assumptions, and what is left and why. A task that wraps up without finishing ends "not done".
 - If the agent offers terminal sign-in, `codeflower task TASK` starts it when needed when run from an
   interactive terminal, then continues the task. Batch jobs and tasks read from standard input still
   need sign-in beforehand; use `codeflower interactive` once and sign in there. The run is a session
   of the project, so VS Code lists it afterwards and you can continue it there. Its progress is
-  printed; `<project>/tasks/<id>/` keeps the task and its result.
+  printed.
 - `--output-mode auto` uses the attached progress view when stdout is a terminal and raw output when
   redirected. Use `--output-mode raw` to pass progress through unchanged, or `--output-mode attached`
   to request the formatted view. The attached footer shows elapsed time, the selected model and effort,
   and usage/quota values when the agent reports them; Claude cost is an estimate at API prices.
-- Exit status: `0` done, `2` not done (judged impossible, out of rounds, or the report failed its check), `3` not signed in,
+- Exit status: `0` done, `2` not done (judged impossible, out of rounds or time, or the report failed its check), `3` not signed in,
   `130` interrupted or timed out, `1` other errors.
+
+### Continuing a task
+
+The task's folder, `<project>/tasks/<id>/`, is printed when the task starts, and the command to continue
+it when it ends:
+
+```sh
+codeflower task --continue ~/codeflower/projects/study42/tasks/1a2b3c --timeout 7h50m
+codeflower task --continue ~/codeflower/projects/study42/tasks/1a2b3c "Also compare the two donors"
+```
+
+- The agent continues in the task's session and is told why: the run before was interrupted (Ctrl+C,
+  `--timeout`, a killed job), stopped on an error (e.g. a usage limit), or ran out of rounds or time.
+  After an interruption it first checks what a cut-off command or edit left behind. A finished task
+  can be continued too: the agent checks and improves its work.
+- A follow-up (the argument, `-` to read it from standard input, or `--prompt FILE`) asks for more work in the same task:
+  the agent builds on its results and updates the same report.
+- A continued task keeps its project, agent, folders and network, which must still be where they were,
+  and whether it writes a report; `--input`, `--output`, `--agent`, `--project` and the other folder
+  and network options are refused. Each run gets a fresh `--max-rounds` (default: the task's) and its own
+  `--timeout`; `--model`, `--effort`, `--option`, `--engine` and `--image` may change. API keys are
+  read from the config again, so a new key applies.
+- If the run before never started a session (e.g. it was not signed in), the task starts over, and says
+  so. A session that cannot be continued, or that is open in VS Code or another run, stops the attempt
+  instead of starting a second session.
+- The folder keeps `task.json`, `session.json` (the task's session) and `attempts/<n>/` with each run's
+  `attempt.json` and `result.json`.
 
 ## The sandbox image
 

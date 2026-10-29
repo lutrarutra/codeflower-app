@@ -251,6 +251,11 @@ func (options sandboxOptions) prepare(ctx context.Context, engine sandbox.Engine
 	if err != nil {
 		return preparedSandbox{}, err
 	}
+	return options.prepareWith(ctx, engine, what, binds)
+}
+
+// prepareWith is prepare with the mounts already chosen, e.g. a continued task's.
+func (options sandboxOptions) prepareWith(ctx context.Context, engine sandbox.EngineStatus, what string, binds []sandbox.Bind) (preparedSandbox, error) {
 	apiKey, err := options.userConfig.APIKey(options.agent)
 	if err != nil {
 		return preparedSandbox{}, err
