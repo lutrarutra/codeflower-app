@@ -19,9 +19,13 @@ import (
 	"github.com/docker/docker/api/types/network"
 )
 
-// socketDir is short, as socket paths are limited to about 100 bytes.
+// socketDir is short, as socket paths are limited to about 100 bytes. Tests
+// that need it are skipped on Windows, where network isolation is refused.
 func socketDir(t *testing.T) string {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("network isolation needs Linux")
+	}
 	dir, err := os.MkdirTemp("/tmp", "cf-test-")
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +146,7 @@ func TestPrepareAllowlistWritesTheHeaderOnce(t *testing.T) {
 	if _, err := PrepareAllowlist(filepath.Dir(path)); err == nil {
 		t.Fatal("a folder was accepted as the allowlist")
 	}
-	if got := DefaultAllowlist("/home/ana/.codeflower/projects/study42/"); got != "/home/ana/.codeflower/projects/study42.allowed-hosts.txt" {
+	if got := DefaultAllowlist("/home/ana/.codeflower/projects/study42/"); got != filepath.FromSlash("/home/ana/.codeflower/projects/study42.allowed-hosts.txt") {
 		t.Fatalf("DefaultAllowlist = %q", got)
 	}
 }

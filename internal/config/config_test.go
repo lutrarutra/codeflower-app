@@ -105,16 +105,17 @@ func TestAPIKeySources(t *testing.T) {
 func TestSkillFolders(t *testing.T) {
 	directory := t.TempDir()
 	extra := filepath.Join(t.TempDir(), "extra")
+	absent := filepath.Join(t.TempDir(), "absent")
 	os.Mkdir(extra, 0o755)
 	os.Mkdir(filepath.Join(directory, SkillsFolder), 0o755)
-	write(t, directory, "skills: ["+extra+", /no/such/folder]\n", 0o644)
+	write(t, directory, "skills: ["+extra+", "+absent+"]\n", 0o644)
 	loaded, err := Load(directory)
 	if err != nil {
 		t.Fatal(err)
 	}
 	folders, missing := loaded.SkillFolders()
 	if len(folders) != 2 || folders[0] != filepath.Join(directory, SkillsFolder) || folders[1] != extra ||
-		len(missing) != 1 || missing[0] != "/no/such/folder" {
+		len(missing) != 1 || missing[0] != absent {
 		t.Fatalf("got %v, missing %v", folders, missing)
 	}
 }

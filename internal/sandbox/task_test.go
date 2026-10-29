@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -19,7 +20,7 @@ func TestTasksAreWrittenPrivatelyAndTheirResultsRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	file := filepath.Join(state, "tasks", "abc", "task.json")
-	if info, err := os.Stat(file); err != nil || info.Mode().Perm() != 0o600 {
+	if info, err := os.Stat(file); err != nil || runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("task.json: %v %v", info, err)
 	}
 	var written Task

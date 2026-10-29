@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -131,7 +132,7 @@ func TestRunPromptIsStoredPrivately(t *testing.T) {
 		t.Fatalf("got %q, %v", got, err)
 	}
 	info, err := os.Stat(filepath.Join(state, "runs", "run-id", "prompt.txt"))
-	if err != nil || info.Mode().Perm() != 0o600 {
+	if err != nil || runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("prompt permissions: %v, %v", info, err)
 	}
 }
