@@ -48,21 +48,17 @@ jobs:
             echo "The launcher did not change since $previous: nothing released for $GITHUB_REF_NAME." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-  test:
-    name: Test
+  ci:
+    name: CI
     needs: gate
     if: needs.gate.outputs.changed == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-      - run: make launcher-test
+    uses: ./.github/workflows/ci.yml
+    with:
+      release: true
 
   dist:
     name: Build binaries
-    needs: test
+    needs: ci
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

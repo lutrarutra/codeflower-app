@@ -16,6 +16,12 @@ on:
   pull_request:
     paths: *paths
   workflow_dispatch:
+  # The release runs these checks on the tag before it builds anything.
+  workflow_call:
+    inputs:
+      release:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -38,6 +44,9 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+
+      - name: Check that go.mod and go.sum are tidy
+        run: go mod tidy -diff
 
       - name: Vet and test
         run: |
@@ -62,6 +71,8 @@ jobs:
   # Installs the latest release with the script the README tells people to pipe into sh.
   install:
     name: Install script (${{ matrix.os }})
+    # It installs the previous release, so it says nothing about the one being built.
+    if: ${{ !inputs.release }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
