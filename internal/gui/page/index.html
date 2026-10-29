@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>code flower launcher</title>
+<link rel="icon" href="tulip.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <img class="logo" src="tulip.svg" alt="">
+  <div>
+    <h1>code flower</h1>
+    <p class="muted">Start a sandbox where an AI agent analyses your data, then talk to it from VS Code.</p>
+  </div>
+  <span class="version muted" id="version"></span>
+</header>
+
+<main>
+  <section class="card" id="engine-card">
+    <h2><span class="step">1</span> Container engine</h2>
+    <div id="engine-body"><p class="muted"><span class="spinner"></span> Looking for Docker, Podman or Apptainer…</p></div>
+  </section>
+
+  <section class="card" id="resources-card" aria-labelledby="resources-title">
+    <h2 id="resources-title">This computer <span class="muted small grow" id="resources-summary"></span></h2>
+    <div class="meters">
+      <div class="meter-row"><span class="meter-label">Mem</span><div class="meter" id="memory-meter"></div><span class="meter-value" id="memory-value"></span></div>
+      <div class="meter-row" id="swap-row"><span class="meter-label">Swap</span><div class="meter" id="swap-meter"></div><span class="meter-value" id="swap-value"></span></div>
+    </div>
+    <div class="cores" id="cores" aria-label="Processor usage per core"></div>
+    <p class="muted small legend">
+      <span class="key key-user"></span> user <span class="key key-system"></span> system <span class="key key-iowait"></span> waiting for disk
+      <span id="cache-key" hidden><span class="key key-cache"></span> file cache</span>
+    </p>
+    <p class="muted small" id="resources-note"></p>
+  </section>
+
+  <form class="card" id="start-form" autocomplete="off">
+    <h2><span class="step">2</span> Agent</h2>
+    <div class="agents" id="agents" role="radiogroup" aria-label="Agent"></div>
+
+    <h2><span class="step">3</span> Folders</h2>
+    <div class="folder-row">
+      <div class="folder-label">
+        <strong>Input data</strong> <span class="tag tag-teal">read-only</span>
+        <p class="muted small">Each folder appears in <code>/data/input</code> under its name. The agent cannot change them.</p>
+      </div>
+      <div class="folder-list">
+        <ul class="paths" id="inputs-list" data-empty="No folders chosen"></ul>
+        <button type="button" class="pill pill-small" data-browse="inputs">Add folder…</button>
+      </div>
+    </div>
+    <div class="folder-row">
+      <div class="folder-label">
+        <strong>Output folders</strong> <span class="tag tag-pink">read-write</span>
+        <p class="muted small">Reports, figures and tables the agent makes go here, in <code>/data/output</code>.</p>
+      </div>
+      <div class="folder-list">
+        <ul class="paths" id="outputs-list" data-empty="No folders chosen"></ul>
+        <button type="button" class="pill pill-small" data-browse="outputs">Add folder…</button>
+      </div>
+    </div>
+    <div class="folder-row">
+      <div class="folder-label">
+        <strong>Code</strong> <span class="tag tag-indigo">read-write</span>
+        <p class="muted small">Repositories and packages the agent develops and runs, in <code>/data/code</code>. It changes these files.</p>
+      </div>
+      <div class="folder-list">
+        <ul class="paths" id="code-list" data-empty="No folders chosen"></ul>
+        <button type="button" class="pill pill-small" data-browse="code">Add folder…</button>
+      </div>
+    </div>
+
+    <details class="advanced">
+      <summary>Advanced</summary>
+      <label>Project name
+        <input id="project" value="default" pattern="[A-Za-z0-9][A-Za-z0-9._\-]*" maxlength="100">
+        <span class="muted small">Sessions, sign-ins and the agent's working files are kept per project in <code id="projects-dir"></code>.</span>
+      </label>
+      <label>Engine
+        <select id="engine"><option value="auto">Automatic</option><option value="docker">Docker</option><option value="podman">Podman</option><option value="apptainer">Apptainer</option></select>
+      </label>
+      <label>Sandbox image
+        <input id="image" placeholder="codeflower-sandbox">
+        <span class="muted small">A Docker or Podman image name, or an Apptainer <code>.sif</code> file.</span>
+      </label>
+    </details>
+
+    <div class="actions">
+      <p class="error" id="start-error" role="alert"></p>
+      <button type="submit" class="pill pill-primary pill-large" id="start">Start sandbox</button>
+    </div>
+  </form>
+
+  <section id="workers"></section>
+</main>
+
+<footer>
+  <span class="muted small">Sandboxes run while this launcher runs. Closing the browser tab does not stop them.</span>
+  <button type="button" class="link" id="quit">Stop all and quit</button>
+</footer>
+
+<dialog id="browser">
+  <form method="dialog" class="browser">
+    <header>
+      <h3 id="browser-title">Choose a folder</h3>
+      <button class="icon-button" value="cancel" aria-label="Close">×</button>
+    </header>
+    <div class="browser-path">
+      <button type="button" class="icon-button" id="browser-up" title="Up one folder" aria-label="Up one folder">↑</button>
+      <input id="browser-location" aria-label="Folder path" spellcheck="false">
+      <button type="button" class="pill pill-small" id="browser-go">Go</button>
+    </div>
+    <div class="browser-body">
+      <nav id="browser-places" aria-label="Places"></nav>
+      <ul id="browser-list" role="listbox" aria-label="Folders"></ul>
+    </div>
+    <p class="error small" id="browser-error"></p>
+    <footer>
+      <span class="muted small" id="browser-summary"></span>
+      <button type="button" class="pill pill-small" id="browser-new">New folder</button>
+      <button class="pill" value="cancel">Cancel</button>
+      <button type="button" class="pill pill-primary" id="browser-choose">Use this folder</button>
+    </footer>
+  </form>
+</dialog>
+
+<template id="worker-template">
+  <article class="card worker">
+    <header>
+      <span class="badge"></span>
+      <div class="grow">
+        <h3></h3>
+        <p class="muted small meta"></p>
+      </div>
+      <button type="button" class="pill pill-small stop">Stop</button>
+      <button type="button" class="icon-button forget" title="Remove from the list" aria-label="Remove from the list">×</button>
+    </header>
+    <div class="connect">
+      <p><strong>Connect from VS Code.</strong> Install the code flower extension, then click <em>Open in VS Code</em>, or run
+        <em>code flower: Connect to worker</em> from the command palette and paste this line:</p>
+      <div class="line">
+        <code class="url"></code>
+        <button type="button" class="pill pill-small copy">Copy</button>
+        <a class="pill pill-small pill-teal open">Open in VS Code</a>
+      </div>
+      <p class="muted small">Anyone with this line can control the agent; keep it to yourself.</p>
+    </div>
+    <p class="error worker-error"></p>
+    <details class="log"><summary>Log</summary><pre></pre></details>
+  </article>
+</template>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,412 @@
+// Package gui is the launcher's window for people who do not use a terminal:
+// a page served on 127.0.0.1 and opened in the browser. It checks for a
+// container engine (and explains how to install one), lets the user pick an
+// agent and their input and output folders, and starts and stops sandboxes.
+package gui
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"embed"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"slices"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"codeflower-launcher/internal/sandbox"
+)
+
+//go:embed page
+var page embed.FS
+
+// Options configure the window.
+type Options struct {
+	// Address to listen on; 127.0.0.1 with any free port by default.
+	Address string
+	// ProjectsDirectory holds projects started by name.
+	ProjectsDirectory string
+	// Version is shown in the page.
+	Version string
+	// OpenBrowser opens the page; false prints its address only.
+	OpenBrowser bool
+	// Ready receives the page's address (with its secret) once listening.
+	Ready func(url string)
+	// Log receives progress messages for the terminal.
+	Log io.Writer
+}
+
+const cookieName = "codeflower-launcher"
+
+// Server serves the page and owns the sandboxes it started.
+type Server struct {
+	options  Options
+	secret   string
+	host     string
+	settings *settingsStore
+
+	mu       sync.Mutex
+	workers  map[string]*worker
+	order    []string
+	lastSeen time.Time
+	quit     chan struct{}
+	quitOnce sync.Once
+	cpu      cpuSampler
+}
+
+func randomSecret() string {
+	bytes := make([]byte, 24)
+	_, _ = rand.Read(bytes)
+	return base64.RawURLEncoding.EncodeToString(bytes)
+}
+
+// Run serves the window until the user quits or ctx ends, then stops every
+// sandbox it started.
+func Run(ctx context.Context, options Options) error {
+	if options.Address == "" {
+		options.Address = "127.0.0.1:0"
+	}
+	if options.Log == nil {
+		options.Log = io.Discard
+	}
+	listener, err := net.Listen("tcp", options.Address)
+	if err != nil {
+		return fmt.Errorf("could not open the launcher window: %w", err)
+	}
+	server := &Server{
+		options:  options,
+		secret:   randomSecret(),
+		host:     listener.Addr().String(),
+		settings: newSettingsStore(),
+		workers:  map[string]*worker{},
+		lastSeen: time.Now(),
+		quit:     make(chan struct{}),
+	}
+	httpServer := &http.Server{Handler: server.routes(), ReadHeaderTimeout: 10 * time.Second}
+	go func() { _ = httpServer.Serve(listener) }()
+
+	url := fmt.Sprintf("http://%s/?key=%s", server.host, server.secret)
+	if options.Ready != nil {
+		options.Ready(url)
+	}
+	if options.OpenBrowser {
+		if err := openBrowser(url); err != nil {
+			fmt.Fprintf(options.Log, "Could not open a browser (%v); open the address above yourself.\n", err)
+		}
+	}
+
+	select {
+	case <-ctx.Done():
+	case <-server.quit:
+	}
+	server.stopAll()
+	shutdown, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = httpServer.Shutdown(shutdown)
+	return nil
+}
+
+func (s *Server) routes() http.Handler {
+	mux := http.NewServeMux()
+	assets, _ := fsSub(page, "page")
+	mux.Handle("GET /", http.FileServerFS(assets))
+	mux.HandleFunc("GET /api/system", s.system)
+	mux.HandleFunc("GET /api/resources", s.resources)
+	mux.HandleFunc("GET /api/folders", s.folders)
+	mux.HandleFunc("POST /api/folders", s.createFolder)
+	mux.HandleFunc("GET /api/workers", s.listWorkers)
+	mux.HandleFunc("POST /api/workers", s.startWorker)
+	mux.HandleFunc("POST /api/workers/{id}/stop", s.stopWorker)
+	mux.HandleFunc("DELETE /api/workers/{id}", s.forgetWorker)
+	mux.HandleFunc("POST /api/quit", s.quitHandler)
+	return s.guard(mux)
+}
+
+// guard admits only this user's browser: the page is opened with a secret,
+// which becomes a cookie. Other local users, and other websites (by DNS
+// rebinding or cross-site requests), cannot drive the launcher.
+func (s *Server) guard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Host != s.host {
+			http.Error(w, "wrong host", http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'")
+		if key := r.URL.Query().Get("key"); key != "" && r.URL.Path == "/" {
+			if subtle.ConstantTimeCompare([]byte(key), []byte(s.secret)) == 1 {
+				http.SetCookie(w, &http.Cookie{
+					Name: cookieName, Value: s.secret, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode,
+				})
+				http.Redirect(w, r, "/", http.StatusSeeOther)
+				return
+			}
+		}
+		cookie, err := r.Cookie(cookieName)
+		if err != nil || subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(s.secret)) != 1 {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprintln(w, "Open the code flower launcher with the address it printed, or start it again.")
+			return
+		}
+		if r.Method != http.MethodGet && r.Header.Get("Content-Type") != "application/json" {
+			http.Error(w, "expected JSON", http.StatusUnsupportedMediaType)
+			return
+		}
+		s.mu.Lock()
+		s.lastSeen = time.Now()
+		s.mu.Unlock()
+		next.ServeHTTP(w, r)
+	})
+}
+
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+func writeError(w http.ResponseWriter, status int, err error) {
+	writeJSON(w, status, map[string]string{"error": err.Error()})
+}
+
+func readJSON(r *http.Request, value any) error {
+	decoder := json.NewDecoder(io.LimitReader(r.Body, 64*1024))
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(value)
+}
+
+type agentInfo struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+type imageStatus struct {
+	Name  string         `json:"name"`
+	Ready bool           `json:"ready"`
+	Error string         `json:"error,omitempty"`
+	Help  []sandbox.Step `json:"help,omitempty"`
+}
+
+type systemInfo struct {
+	Version  string                 `json:"version"`
+	System   string                 `json:"system"`
+	Home     string                 `json:"home"`
+	Projects string                 `json:"projects"`
+	Engines  []sandbox.EngineStatus `json:"engines"`
+	// Engine is the one "auto" chooses; empty when none can run sandboxes.
+	Engine   string               `json:"engine"`
+	Problem  string               `json:"problem,omitempty"`
+	Fix      []sandbox.Step       `json:"fix,omitempty"`
+	Guide    sandbox.InstallGuide `json:"guide"`
+	Image    *imageStatus         `json:"image,omitempty"`
+	Agents   []agentInfo          `json:"agents"`
+	Settings Settings             `json:"settings"`
+}
+
+func (s *Server) system(w http.ResponseWriter, r *http.Request) {
+	settings := s.settings.load()
+	statuses := sandbox.DetectEngines(r.Context())
+	home, _ := os.UserHomeDir()
+	info := systemInfo{
+		Version:  s.options.Version,
+		Home:     home,
+		Projects: s.options.ProjectsDirectory,
+		Engines:  statuses,
+		Guide:    sandbox.Guide(),
+		Settings: settings,
+	}
+	info.System = info.Guide.System
+	for _, agent := range sandbox.Agents {
+		info.Agents = append(info.Agents, agentInfo{ID: agent, Label: sandbox.AgentLabel(agent)})
+	}
+	requested := r.URL.Query().Get("engine")
+	if requested == "" {
+		requested = settings.Engine
+	}
+	image := r.URL.Query().Get("image")
+	if image == "" {
+		image = settings.Image
+	}
+	engine, err := sandbox.ChooseEngine(statuses, requested, image)
+	if err != nil {
+		info.Problem = err.Error()
+		if engine.Installed {
+			info.Problem = engine.Problem
+			info.Fix = engine.Fix
+		}
+	} else {
+		info.Engine = engine.Name
+		resolved, _ := sandbox.ResolveImage(image, engine.Name)
+		status := &imageStatus{Name: resolved, Ready: true}
+		if err := sandbox.CheckImage(r.Context(), engine, image); err != nil {
+			status.Ready = false
+			status.Error = err.Error()
+			status.Help = sandbox.ImageHelp(engine.Name)
+		}
+		info.Image = status
+	}
+	writeJSON(w, http.StatusOK, info)
+}
+
+type folderEntry struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+type folderListing struct {
+	Path    string        `json:"path"`
+	Parent  string        `json:"parent,omitempty"`
+	Folders []folderEntry `json:"folders"`
+	Files   int           `json:"files"`
+	Places  []folderEntry `json:"places"`
+}
+
+// places are where browsing starts: home, common folders, and drives.
+func places() []folderEntry {
+	var result []folderEntry
+	home, err := os.UserHomeDir()
+	if err == nil {
+		result = append(result, folderEntry{Name: "Home", Path: home})
+		for _, name := range []string{"Desktop", "Documents", "Downloads"} {
+			if info, err := os.Stat(filepath.Join(home, name)); err == nil && info.IsDir() {
+				result = append(result, folderEntry{Name: name, Path: filepath.Join(home, name)})
+			}
+		}
+	}
+	switch runtime.GOOS {
+	case "windows":
+		for letter := 'A'; letter <= 'Z'; letter++ {
+			root := string(letter) + `:\`
+			if _, err := os.Stat(root); err == nil {
+				result = append(result, folderEntry{Name: string(letter) + ":", Path: root})
+			}
+		}
+	case "darwin":
+		result = append(result, folderEntry{Name: "Volumes", Path: "/Volumes"})
+	default:
+		if sandbox.IsWSL() {
+			result = append(result, folderEntry{Name: "Windows drives", Path: "/mnt"})
+		}
+		result = append(result, folderEntry{Name: "Computer", Path: "/"})
+	}
+	return result
+}
+
+func (s *Server) folders(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		path, _ = os.UserHomeDir()
+	}
+	path, err := filepath.Abs(path)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("cannot open %s: %w", path, errors.Unwrap(err)))
+		return
+	}
+	listing := folderListing{Path: path, Folders: []folderEntry{}, Places: places()}
+	if parent := filepath.Dir(path); parent != path {
+		listing.Parent = parent
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		full := filepath.Join(path, name)
+		isDir := entry.IsDir()
+		if entry.Type()&os.ModeSymlink != 0 {
+			if info, err := os.Stat(full); err == nil {
+				isDir = info.IsDir()
+			}
+		}
+		if isDir {
+			listing.Folders = append(listing.Folders, folderEntry{Name: name, Path: full})
+		} else {
+			listing.Files++
+		}
+	}
+	sort.Slice(listing.Folders, func(i, j int) bool {
+		return strings.ToLower(listing.Folders[i].Name) < strings.ToLower(listing.Folders[j].Name)
+	})
+	writeJSON(w, http.StatusOK, listing)
+}
+
+func (s *Server) createFolder(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		Parent string `json:"parent"`
+		Name   string `json:"name"`
+	}
+	if err := readJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	name := strings.TrimSpace(request.Name)
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\:`) {
+		writeError(w, http.StatusBadRequest, errors.New("choose a folder name without slashes or colons"))
+		return
+	}
+	path := filepath.Join(request.Parent, name)
+	if err := os.Mkdir(path, 0o755); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("could not create the folder: %w", errors.Unwrap(err)))
+		return
+	}
+	writeJSON(w, http.StatusOK, folderEntry{Name: name, Path: path})
+}
+
+func (s *Server) quitHandler(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	s.quitOnce.Do(func() { close(s.quit) })
+}
+
+// openBrowser opens the page in the user's browser.
+func openBrowser(url string) error {
+	var candidates [][]string
+	switch runtime.GOOS {
+	case "darwin":
+		candidates = [][]string{{"open", url}}
+	case "windows":
+		candidates = [][]string{{"rundll32", "url.dll,FileProtocolHandler", url}}
+	default:
+		if sandbox.IsWSL() {
+			// The Windows browser reaches WSL's 127.0.0.1 through localhost forwarding.
+			candidates = append(candidates, []string{"wslview", url}, []string{"explorer.exe", url})
+		}
+		candidates = append(candidates, []string{"xdg-open", url}, []string{"sensible-browser", url})
+	}
+	var lastError error = errors.New("no browser found")
+	for _, candidate := range candidates {
+		if _, err := exec.LookPath(candidate[0]); err != nil {
+			continue
+		}
+		command := exec.Command(candidate[0], candidate[1:]...)
+		if err := command.Start(); err != nil {
+			lastError = err
+			continue
+		}
+		go func() { _ = command.Wait() }()
+		return nil
+	}
+	return lastError
+}
+
+func validAgent(agent string) bool {
+	return slices.Contains(sandbox.Agents, agent)
+}
