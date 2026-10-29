@@ -103,8 +103,10 @@ codeflower interactive --agent claude --input ~/data/rna --input ~/data/atac --c
   it reach only its agent's service and the hosts in the allowlist file, refusing (and printing) the rest.
   `--allowlist FILE` names the file (default: `PROJECT.allowed-hosts.txt` next to the project
   directory, created with an explanation). One host per line, `*.example.org` for subdomains,
-  `example.org:8443` for another port; edits apply immediately. The agent is told how this works and
-  asks you for the hosts it needs, e.g. `pypi.org` and `files.pythonhosted.org` to install packages.
+  `example.org:8443` for another port; edits apply immediately. A line `@NAME` allows every host of
+  one service: `@pypi`, `@conda`, `@cran`, `@bioconductor`, `@npm`, `@huggingface`, `@github`,
+  `@ncbi`, `@ensembl`, `@uniprot`, `@ebi` (the new file lists them with their hosts). The agent is told
+  how this works and asks you for what it needs, e.g. `@pypi` to install packages.
   It needs no administrator rights: Docker and Podman on Linux, or an Apptainer that lets users run
   `apptainer exec --net --network none` (the launcher checks and says so). Docker Desktop on macOS
   and Windows cannot share the launcher's sockets with the sandbox, so it does not work there.

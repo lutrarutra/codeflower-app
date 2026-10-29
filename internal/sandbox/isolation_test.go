@@ -100,6 +100,34 @@ example.net:http
 	}
 }
 
+func TestAllowlistPresetsExpandToTheirHosts(t *testing.T) {
+	rules, problems := parseAllowlist("@pypi\n@NCBI   # case does not matter\n@nonsense\n")
+	if len(problems) != 1 || !strings.Contains(problems[0], "@huggingface") {
+		t.Fatalf("problems = %v", problems)
+	}
+	var hosts []string
+	for _, rule := range rules {
+		hosts = append(hosts, rule.String())
+	}
+	if got := strings.Join(hosts, " "); got != "pypi.org files.pythonhosted.org *.ncbi.nlm.nih.gov" {
+		t.Errorf("rules = %s", got)
+	}
+	for _, preset := range AllowlistPresets {
+		for _, host := range preset.Hosts {
+			if _, err := parseHostRule(host); err != nil {
+				t.Errorf("preset %s: %v", preset.Name, err)
+			}
+		}
+		if !strings.Contains(allowlistHeader(), "# @"+preset.Name+" ") {
+			t.Errorf("the header does not list @%s", preset.Name)
+		}
+	}
+	// The header lists the presets commented out: a new file allows nothing.
+	if rules, problems := parseAllowlist(allowlistHeader()); len(rules) != 0 || len(problems) != 0 {
+		t.Errorf("the header allows %v, problems %v", rules, problems)
+	}
+}
+
 func TestAllowlistIsReadAgainWhenItChanges(t *testing.T) {
 	path := filepath.Join(tempDir(t), "hosts.txt")
 	writeAllowlist(t, path, "pypi.org\n")
@@ -302,7 +330,7 @@ func TestProxyAnswersWithTheAllowlist(t *testing.T) {
 		t.Fatal(err)
 	}
 	body, _ := io.ReadAll(response.Body)
-	for _, want := range []string{`"agent":["api.example.com"]`, `"allowed":["pypi.org","*.hf.co"]`, `hosts.txt"`} {
+	for _, want := range []string{`"agent":["api.example.com"]`, `"allowed":["pypi.org","*.hf.co"]`, `hosts.txt"`, `"name":"pypi"`} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("missing %s in %s", want, body)
 		}

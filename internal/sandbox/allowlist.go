@@ -22,14 +22,78 @@ var ProviderHosts = map[string][]string{
 	"dsh":    {"api.deepseek.com"},
 }
 
-const allowlistHeader = `# Hosts a network-isolated code flower sandbox may reach, one per line:
+// AllowlistPreset is a set of hosts one service needs, allowed by a single
+// "@name" line in the allowlist file.
+type AllowlistPreset struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Hosts       []string `json:"hosts"`
+	// Uploads is set when the service also accepts data from its users.
+	Uploads bool `json:"uploads,omitempty"`
+}
+
+// AllowlistPresets are the services scientists most often need from an
+// isolated sandbox: package indexes, model hubs and public databases.
+var AllowlistPresets = []AllowlistPreset{
+	{Name: "pypi", Description: "pip and uv (PyPI)", Hosts: []string{"pypi.org", "files.pythonhosted.org"}},
+	{Name: "conda", Description: "conda and mamba (conda-forge, bioconda, Anaconda)",
+		Hosts: []string{"conda.anaconda.org", "repo.anaconda.com"}},
+	{Name: "cran", Description: "R packages from CRAN and Posit Package Manager",
+		Hosts: []string{"cloud.r-project.org", "cran.r-project.org", "packagemanager.posit.co"}},
+	{Name: "bioconductor", Description: "R packages from Bioconductor", Hosts: []string{"bioconductor.org"}},
+	{Name: "npm", Description: "npm packages", Hosts: []string{"registry.npmjs.org"}},
+	{Name: "huggingface", Description: "Hugging Face models and datasets",
+		Hosts: []string{"huggingface.co", "*.huggingface.co", "*.hf.co"}, Uploads: true},
+	{Name: "github", Description: "git clone and release downloads from GitHub",
+		Hosts:   []string{"github.com", "codeload.github.com", "objects.githubusercontent.com", "raw.githubusercontent.com"},
+		Uploads: true},
+	{Name: "ncbi", Description: "NCBI: E-utilities, Datasets, GEO, SRA and the FTP site over HTTPS",
+		Hosts: []string{"*.ncbi.nlm.nih.gov"}},
+	{Name: "ensembl", Description: "Ensembl: REST API, BioMart and downloads", Hosts: []string{"ensembl.org", "*.ensembl.org"}},
+	{Name: "uniprot", Description: "UniProt: REST API and downloads", Hosts: []string{"uniprot.org", "*.uniprot.org"}},
+	{Name: "ebi", Description: "EMBL-EBI: ENA, Expression Atlas, PDBe and the FTP site over HTTPS",
+		Hosts: []string{"www.ebi.ac.uk", "ftp.ebi.ac.uk"}},
+}
+
+func findPreset(name string) (AllowlistPreset, bool) {
+	for _, preset := range AllowlistPresets {
+		if preset.Name == strings.ToLower(name) {
+			return preset, true
+		}
+	}
+	return AllowlistPreset{}, false
+}
+
+func presetNames() string {
+	names := make([]string, len(AllowlistPresets))
+	for index, preset := range AllowlistPresets {
+		names[index] = "@" + preset.Name
+	}
+	return strings.Join(names, ", ")
+}
+
+func allowlistHeader() string {
+	var text strings.Builder
+	text.WriteString(`# Hosts a network-isolated code flower sandbox may reach, one per line:
 #   example.org          example.org on ports 443 and 80
 #   *.example.org        every subdomain of example.org (not example.org itself)
 #   example.org:8443     example.org on port 8443 only
+#   @pypi                a preset: every host one service needs (see below)
 # The agent's own service is always allowed. Every host here is also a place
 # the agent could send your data to: prefer hosts that only serve downloads.
 # Changes apply immediately, without restarting the sandbox.
-`
+#
+# Presets (uncomment to allow):
+`)
+	for _, preset := range AllowlistPresets {
+		line := fmt.Sprintf("# @%-14s %s: %s", preset.Name, preset.Description, strings.Join(preset.Hosts, " "))
+		if preset.Uploads {
+			line += " (also accepts uploads)"
+		}
+		text.WriteString(line + "\n")
+	}
+	return text.String()
+}
 
 // DefaultAllowlist is the project's allowlist file: next to its state
 // directory, so the sandbox, which can write its state, cannot change it.
@@ -55,7 +119,7 @@ func PrepareAllowlist(path string) (string, error) {
 		return "", fmt.Errorf("allowlist: %w", err)
 	}
 	defer file.Close()
-	if _, err := file.WriteString(allowlistHeader); err != nil {
+	if _, err := file.WriteString(allowlistHeader()); err != nil {
 		return "", fmt.Errorf("allowlist: %w", err)
 	}
 	return path, nil
@@ -122,8 +186,8 @@ func parseHostRule(line string) (hostRule, error) {
 	return rule, nil
 }
 
-// parseAllowlist reads one rule per line; # starts a comment. Lines that are
-// not rules are returned as problems and otherwise ignored.
+// parseAllowlist reads one rule or @preset per line; # starts a comment. Lines
+// that are neither are returned as problems and otherwise ignored.
 func parseAllowlist(text string) ([]hostRule, []string) {
 	var rules []hostRule
 	var problems []string
@@ -133,6 +197,18 @@ func parseAllowlist(text string) ([]hostRule, []string) {
 		}
 		line = strings.TrimSpace(line)
 		if line == "" {
+			continue
+		}
+		if name, ok := strings.CutPrefix(line, "@"); ok {
+			preset, found := findPreset(name)
+			if !found {
+				problems = append(problems, fmt.Sprintf("line %d: unknown preset %q (known: %s)", number+1, line, presetNames()))
+				continue
+			}
+			for _, host := range preset.Hosts {
+				rule, _ := parseHostRule(host)
+				rules = append(rules, rule)
+			}
 			continue
 		}
 		rule, err := parseHostRule(line)

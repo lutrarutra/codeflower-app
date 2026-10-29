@@ -392,7 +392,8 @@ func (p *egressProxy) handle(conn net.Conn) {
 
 	case request.Method == http.MethodGet && request.URL.Path == "/allowlist":
 		provider, user := p.allowlist.rules()
-		body, _ := json.Marshal(map[string]any{"file": p.allowlist.path, "agent": provider, "allowed": user})
+		body, _ := json.Marshal(map[string]any{"file": p.allowlist.path, "agent": provider, "allowed": user,
+			"presets": AllowlistPresets})
 		writeResponse(conn, http.StatusOK, "application/json", string(body))
 
 	default:
