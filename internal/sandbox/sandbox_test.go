@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -117,7 +118,8 @@ func TestPrepareStateIsPrivateAndKeepsUserEdits(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if info.Mode().Perm() != 0o700 {
+		// Windows has no Unix modes; the user's profile ACLs keep it private.
+		if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
 			t.Errorf("%s has mode %o", name, info.Mode().Perm())
 		}
 	}
