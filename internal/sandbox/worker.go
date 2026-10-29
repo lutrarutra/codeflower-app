@@ -74,8 +74,21 @@ type Worker struct {
 	// Isolation, when set, cuts the sandbox off the network except for what
 	// the launcher's proxy allows.
 	Isolation *Isolation
-	Stdout    io.Writer
-	Stderr    io.Writer
+	// Task, when set, is the id of a task in the project's tasks folder: the
+	// agent works on it by itself, and nothing listens for VS Code.
+	Task   string
+	Stdout io.Writer
+	Stderr io.Writer
+}
+
+// ErrImageWithoutTasks means the sandbox started a worker for VS Code instead
+// of running its task: the image is older than tasks.
+var ErrImageWithoutTasks = errors.New("this sandbox image cannot run tasks (it started a worker for VS Code instead); " +
+	"update it with `codeflower pull`, or choose a newer --image")
+
+// TaskFile is where the sandbox finds a task's description.
+func TaskFile(task string) string {
+	return ContainerState + "/tasks/" + task + "/task.json"
 }
 
 // Connection is what the bridge writes once it listens: the line VS Code
@@ -91,17 +104,17 @@ type Connection struct {
 }
 
 // ResolveImage checks that an Apptainer image file the user named exists;
-// Docker and Podman image names, and the default image file, are checked by
-// CheckImage.
+// Docker and Podman image names, and the published image's files, are checked
+// by CheckImage.
 func ResolveImage(image, engine string) (string, error) {
-	if engine != EngineApptainer {
-		if image == "" {
-			return DefaultImage, nil
+	if tag, ok := publishedTag(image); ok {
+		if engine == EngineApptainer {
+			return publishedSIF(tag), nil
 		}
-		return image, nil
+		return ImageRepository + ":" + tag, nil
 	}
-	if image == "" {
-		return DefaultSIF(), nil
+	if engine != EngineApptainer {
+		return image, nil
 	}
 	path, err := filepath.Abs(expandHome(image))
 	if err != nil {
@@ -130,7 +143,7 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	}
 	containerized := w.Engine.Name != EngineApptainer
 	port := w.Port
-	if containerized && port == 0 && w.Isolation == nil {
+	if containerized && port == 0 && w.Isolation == nil && w.Task == "" {
 		// Docker and Podman publish a fixed port, so choose it up front.
 		var err error
 		if port, err = FreePort(); err != nil {
@@ -165,13 +178,17 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 		if netDirectory, err = newNetDirectory(instanceID); err != nil {
 			return 1, err
 		}
-		ingressHost := listen
-		if containerized {
-			ingressHost = "127.0.0.1"
+		ingress := ""
+		if w.Task == "" {
+			ingressHost := listen
+			if containerized {
+				ingressHost = "127.0.0.1"
+			}
+			ingress = net.JoinHostPort(ingressHost, itoa(port))
 		}
 		log := func(message string) { fmt.Fprintln(w.Stderr, message) }
 		list := newAllowlist(w.Isolation.Allowlist, ProviderHosts[w.Agent], log)
-		gate, err = startGateway(netDirectory, net.JoinHostPort(ingressHost, itoa(port)), list, log)
+		gate, err = startGateway(netDirectory, ingress, list, log)
 		if err != nil {
 			os.RemoveAll(netDirectory)
 			return 1, err
@@ -199,13 +216,22 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	if gate != nil {
 		isolatedEnvironment(values)
 	}
+	if w.Task != "" {
+		values["CODEFLOWER_TASK_FILE"] = TaskFile(w.Task)
+	}
 	connectionFile := filepath.Join(w.State, "instances", instanceID+".json")
 	defer os.Remove(connectionFile)
 
 	// Stopping the run with a cause reports that cause instead of the exit.
 	running, stopRunning := context.WithCancelCause(ctx)
 	defer stopRunning(nil)
-	if ready != nil || gate != nil {
+	if w.Task != "" {
+		// A task never writes a connection file; an image that does not know
+		// tasks starts a worker for VS Code, which would wait forever.
+		watching, stopWatching := context.WithCancel(ctx)
+		defer stopWatching()
+		go watchConnection(watching, connectionFile, func(Connection) { stopRunning(ErrImageWithoutTasks) })
+	} else if ready != nil || gate != nil {
 		watching, stopWatching := context.WithCancel(ctx)
 		defer stopWatching()
 		go watchConnection(watching, connectionFile, func(connection Connection) {
@@ -224,7 +250,9 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	}
 
 	code, err := w.runEngine(running, instanceID, values, port, netDirectory)
-	if cause := context.Cause(running); err == nil && cause != nil && !errors.Is(cause, context.Canceled) {
+	// Only causes the worker set itself are errors: the caller's interrupt or
+	// deadline (whose cause names the signal) is a normal way to stop.
+	if cause := context.Cause(running); err == nil && cause != nil && ctx.Err() == nil && !errors.Is(cause, context.Canceled) {
 		return 1, cause
 	}
 	return code, err

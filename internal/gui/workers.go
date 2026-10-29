@@ -81,6 +81,42 @@ type activity struct {
 	Working   int            `json:"working"`
 	Waiting   int            `json:"waiting"`
 	Chats     []chatActivity `json:"chats"`
+	// Missing from bridges older than usage tracking.
+	Usage *usage `json:"usage,omitempty"`
+}
+
+// usage is the agent's login, its subscription quota, and the tokens and
+// cost of the sandbox so far.
+type usage struct {
+	Auth struct {
+		Kind  string `json:"kind"`
+		Plan  string `json:"plan,omitempty"`
+		Label string `json:"label,omitempty"`
+	} `json:"auth"`
+	Limits []usageLimit `json:"limits"`
+	// The agent's cost is its own estimate at API prices (Claude Code).
+	CostEstimate bool `json:"costEstimate"`
+	Totals       struct {
+		Tokens struct {
+			Input       int64 `json:"inputTokens"`
+			Output      int64 `json:"outputTokens"`
+			CachedRead  int64 `json:"cachedReadTokens"`
+			CachedWrite int64 `json:"cachedWriteTokens"`
+			Total       int64 `json:"totalTokens"`
+		} `json:"tokens"`
+		Cost *struct {
+			Amount   float64 `json:"amount"`
+			Currency string  `json:"currency"`
+		} `json:"cost,omitempty"`
+	} `json:"totals"`
+}
+
+type usageLimit struct {
+	ID          string   `json:"id"`
+	Label       string   `json:"label"`
+	UsedPercent *float64 `json:"usedPercent"`
+	ResetsAt    *string  `json:"resetsAt"`
+	Status      string   `json:"status,omitempty"`
 }
 
 type chatActivity struct {
@@ -190,6 +226,8 @@ type startRequest struct {
 	Project string   `json:"project"`
 	Engine  string   `json:"engine"`
 	Image   string   `json:"image"`
+	// ImageTag picks a build of the published image instead of Image.
+	ImageTag string `json:"imageTag"`
 	// IsolateNetwork limits the sandbox to its agent's service and the
 	// project's allowlist.
 	IsolateNetwork bool `json:"isolateNetwork"`
@@ -236,9 +274,10 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	named := request.Image
-	if named == "" {
-		named = s.options.Image
+	named, err := s.image(request.Image, request.ImageTag)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
 	}
 	engine, err := sandbox.ChooseEngine(sandbox.DetectEngines(r.Context()), request.Engine, named)
 	if err != nil {
@@ -256,8 +295,8 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// The default image is downloaded when the sandbox starts, with its log.
-	if err := sandbox.CheckImage(r.Context(), engine, named); err != nil && (named != "" || !errors.Is(err, sandbox.ErrNoImage)) {
+	// The published image is downloaded when the sandbox starts, with its log.
+	if err := sandbox.CheckImage(r.Context(), engine, named); err != nil && (!sandbox.IsPublished(named) || !errors.Is(err, sandbox.ErrNoImage)) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -277,7 +316,7 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 	}
 	s.settings.save(Settings{
 		Agent: request.Agent, Inputs: request.Inputs, Outputs: request.Outputs, Code: request.Code,
-		Skills: request.Skills, Project: request.Project, Engine: request.Engine, Image: request.Image,
+		Skills: request.Skills, Project: request.Project, Engine: request.Engine, Image: request.Image, ImageTag: request.ImageTag,
 		IsolateNetwork: request.IsolateNetwork,
 	})
 
@@ -314,8 +353,8 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		defer close(item.done)
 		watching, stopWatching := context.WithCancel(ctx)
 		code, err := 1, error(nil)
-		if named == "" {
-			err = sandbox.EnsureImage(ctx, engine, item)
+		if sandbox.IsPublished(named) {
+			err = sandbox.EnsureImage(ctx, engine, named, item)
 		}
 		if err == nil {
 			code, err = sandbox.Worker{
@@ -458,6 +497,8 @@ type Settings struct {
 	Project string   `json:"project,omitempty"`
 	Engine  string   `json:"engine,omitempty"`
 	Image   string   `json:"image,omitempty"`
+	// ImageTag is the version of the published image (empty: the latest).
+	ImageTag string `json:"imageTag,omitempty"`
 
 	IsolateNetwork bool `json:"isolateNetwork,omitempty"`
 }

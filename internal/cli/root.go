@@ -19,7 +19,9 @@ type commonOptions struct {
 	project string
 	state   string
 	image   string
-	engine  string
+	// imageTag picks a build of the published image instead of --image.
+	imageTag string
+	engine   string
 }
 
 // ProjectsDirectory holds projects started by name (--project, or the GUI).
@@ -41,8 +43,26 @@ func addCommonFlags(command *cobra.Command, options *commonOptions) {
 	command.Flags().StringVar(&options.state, "state", "", "project directory, instead of --project (created with owner-only permissions)")
 	command.Flags().StringVar(&options.image, "image", os.Getenv("CODEFLOWER_IMAGE"),
 		"sandbox image: a Docker/Podman image name, or an Apptainer .sif file (or set $CODEFLOWER_IMAGE; default "+sandbox.DefaultImage+", downloaded on first use)")
+	addImageTagFlag(command, &options.imageTag)
 	command.Flags().StringVar(&options.engine, "engine", defaultEngine,
 		"container engine: auto, docker, podman, or apptainer (or set $CODEFLOWER_ENGINE)")
+}
+
+func addImageTagFlag(command *cobra.Command, tag *string) {
+	command.Flags().StringVar(tag, "image-tag", os.Getenv("CODEFLOWER_IMAGE_TAG"),
+		"build of the published image to use instead of the latest: a release (0.2.1, or 0.2 for its newest patch) or a commit (sha-abc1234) (or set $CODEFLOWER_IMAGE_TAG)")
+}
+
+// imageName combines --image and --image-tag into the image to use; empty
+// means the default published image.
+func imageName(image, tag string) (string, error) {
+	if tag == "" {
+		return image, nil
+	}
+	if image != "" {
+		return "", fmt.Errorf("--image and --image-tag (or $CODEFLOWER_IMAGE and $CODEFLOWER_IMAGE_TAG) cannot be used together")
+	}
+	return sandbox.PublishedImage(tag)
 }
 
 func (options commonOptions) validate() error {
@@ -104,6 +124,9 @@ func Execute() int {
 		Short: "Start code flower sandboxes for Claude Code, Codex, or DeepSeek Harness",
 		Long: `Start code flower sandboxes for Claude Code, Codex, or DeepSeek Harness.
 
+Run "codeflower interactive" for a sandbox to work with from VS Code, or
+"codeflower task" to let the agent work on a task by itself.
+
 New to the command line? Run "codeflower gui" for a window that starts a
 sandbox with a few clicks. Run "codeflower check" to see whether this
 machine can run sandboxes.`,
@@ -111,7 +134,7 @@ machine can run sandboxes.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.AddCommand(runCommand(), pullCommand(), checkCommand(), guiCommand())
+	root.AddCommand(interactiveCommand(), taskCommand(), pullCommand(), checkCommand(), guiCommand())
 	if startedFromDesktop(os.Args[1:]) {
 		root.SetArgs([]string{"gui"})
 	}

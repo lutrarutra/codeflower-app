@@ -46,9 +46,12 @@ type Options struct {
 	Ready func(url string)
 	// Log receives progress messages for the terminal.
 	Log io.Writer
-	// Image is used when the page names none ($CODEFLOWER_IMAGE); when both
-	// are empty the published image is downloaded on first start.
-	Image string
+	// Image, or the build of the published image ImageTag names, is used
+	// when the page names neither ($CODEFLOWER_IMAGE, $CODEFLOWER_IMAGE_TAG);
+	// when all are empty the latest published image is downloaded on first
+	// start.
+	Image    string
+	ImageTag string
 }
 
 const cookieName = "codeflower-launcher"
@@ -200,7 +203,7 @@ type agentInfo struct {
 type imageStatus struct {
 	Name  string `json:"name"`
 	Ready bool   `json:"ready"`
-	// Download: the default image is missing and is downloaded on start.
+	// Download: the published image is missing and is downloaded on start.
 	Download bool           `json:"download,omitempty"`
 	Error    string         `json:"error,omitempty"`
 	Help     []sandbox.Step `json:"help,omitempty"`
@@ -250,12 +253,14 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 	if requested == "" {
 		requested = settings.Engine
 	}
-	image := r.URL.Query().Get("image")
-	if image == "" {
-		image = settings.Image
+	name, tag := r.URL.Query().Get("image"), r.URL.Query().Get("imageTag")
+	if name == "" && tag == "" {
+		name, tag = settings.Image, settings.ImageTag
 	}
-	if image == "" {
-		image = s.options.Image
+	image, err := s.image(name, tag)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
 	}
 	engine, err := sandbox.ChooseEngine(statuses, requested, image)
 	if err != nil {
@@ -270,13 +275,30 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 		status := &imageStatus{Name: resolved, Ready: true}
 		if err := sandbox.CheckImage(r.Context(), engine, image); err != nil {
 			status.Ready = false
-			status.Download = image == "" && errors.Is(err, sandbox.ErrNoImage)
+			status.Download = sandbox.IsPublished(image) && errors.Is(err, sandbox.ErrNoImage)
 			status.Error = err.Error()
-			status.Help = sandbox.ImageHelp(engine.Name)
+			status.Help = sandbox.ImageHelp(engine.Name, image)
 		}
 		info.Image = status
 	}
 	writeJSON(w, http.StatusOK, info)
+}
+
+// image is the image the page asks for, by name or as a build of the
+// published image; when it names neither, the launcher's options apply.
+// Empty is the latest published image.
+func (s *Server) image(name, tag string) (string, error) {
+	name, tag = strings.TrimSpace(name), strings.TrimSpace(tag)
+	if name == "" && tag == "" {
+		name, tag = s.options.Image, s.options.ImageTag
+	}
+	if tag == "" {
+		return name, nil
+	}
+	if name != "" {
+		return "", errors.New("choose a sandbox image or a version of the published one, not both")
+	}
+	return sandbox.PublishedImage(tag)
 }
 
 type folderEntry struct {

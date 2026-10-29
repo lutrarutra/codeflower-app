@@ -208,16 +208,21 @@ type gateway struct {
 	stopped   sync.WaitGroup
 }
 
-// startGateway listens on ingressAddress for VS Code and on the egress
-// socket for the sandbox.
+// startGateway listens on ingressAddress for VS Code, unless it is empty (a
+// task, which nobody connects to), and on the egress socket for the sandbox.
 func startGateway(directory, ingressAddress string, list *allowlist, log func(string)) (*gateway, error) {
-	ingress, err := net.Listen("tcp", ingressAddress)
-	if err != nil {
-		return nil, fmt.Errorf("could not listen on %s: %w", ingressAddress, err)
+	var ingress net.Listener
+	if ingressAddress != "" {
+		var err error
+		if ingress, err = net.Listen("tcp", ingressAddress); err != nil {
+			return nil, fmt.Errorf("could not listen on %s: %w", ingressAddress, err)
+		}
 	}
 	egress, err := net.Listen("unix", filepath.Join(directory, egressSocket))
 	if err != nil {
-		ingress.Close()
+		if ingress != nil {
+			ingress.Close()
+		}
 		return nil, fmt.Errorf("could not start the sandbox's proxy: %w", err)
 	}
 	_ = os.Chmod(filepath.Join(directory, egressSocket), 0o600)
@@ -227,14 +232,20 @@ func startGateway(directory, ingressAddress string, list *allowlist, log func(st
 		egress:    egress,
 		proxy:     newEgressProxy(list, log),
 	}
-	g.stopped.Add(2)
-	go g.accept(ingress, g.forwardToBridge)
+	if ingress != nil {
+		g.stopped.Add(1)
+		go g.accept(ingress, g.forwardToBridge)
+	}
+	g.stopped.Add(1)
 	go g.accept(egress, g.proxy.handle)
 	return g, nil
 }
 
-// Port is the TCP port VS Code connects to.
+// Port is the TCP port VS Code connects to, or 0 without one.
 func (g *gateway) Port() int {
+	if g.ingress == nil {
+		return 0
+	}
 	return g.ingress.Addr().(*net.TCPAddr).Port
 }
 
@@ -279,7 +290,9 @@ func (g *gateway) bridgeAnswers() error {
 
 // Close stops listening, closes every connection, and removes the folder.
 func (g *gateway) Close() {
-	g.ingress.Close()
+	if g.ingress != nil {
+		g.ingress.Close()
+	}
 	g.egress.Close()
 	g.conns.closeAll()
 	g.stopped.Wait()

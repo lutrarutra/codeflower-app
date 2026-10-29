@@ -255,7 +255,7 @@ function renderIsolation() {
 
 async function loadSystem() {
   $('#engine-body').replaceChildren(element('p', { class: 'muted' }, [element('span', { class: 'spinner' }), ' Looking for Docker, Podman or Apptainer…']));
-  const query = new URLSearchParams({ engine: $('#engine').value, image: $('#image').value.trim() });
+  const query = new URLSearchParams({ engine: $('#engine').value, image: $('#image').value.trim(), imageTag: $('#image-tag').value.trim() });
   try {
     state.system = await api(`/api/system?${query}`);
   } catch (error) {
@@ -279,6 +279,7 @@ async function firstLoad() {
   $('#project').value = settings.project || 'default';
   $('#engine').value = settings.engine || 'auto';
   $('#image').value = settings.image || '';
+  $('#image-tag').value = settings.imageTag || '';
   $('#isolate-network').checked = Boolean(settings.isolateNetwork);
   $('#version').textContent = state.system.version ? `launcher ${state.system.version}` : '';
   $('#projects-dir').textContent = state.system.projects;
@@ -366,6 +367,7 @@ for (const button of document.querySelectorAll('[data-browse]')) {
 
 $('#engine').addEventListener('change', () => loadSystem());
 $('#image').addEventListener('change', () => loadSystem());
+$('#image-tag').addEventListener('change', () => loadSystem());
 $('#isolate-network').addEventListener('change', renderIsolation);
 $('#project').addEventListener('input', renderIsolation);
 
@@ -391,7 +393,8 @@ $('#start-form').addEventListener('submit', async (event) => {
         isolateNetwork: $('#isolate-network').checked,
         project: $('#project').value.trim(),
         engine: $('#engine').value,
-        image: $('#image').value.trim()
+        image: $('#image').value.trim(),
+        imageTag: $('#image-tag').value.trim()
       }
     });
     await refreshWorkers();
@@ -465,6 +468,7 @@ function renderWorker(worker) {
     $('.open', card).href = vscodeLink(worker.url);
   }
   renderActivity(card, worker);
+  renderUsage(card, worker);
   $('.worker-error', card).textContent = worker.error || '';
   const pre = $('.log pre', card);
   const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24;
@@ -497,6 +501,68 @@ function renderActivity(card, worker) {
   line.title = activity.chats
     .map((chat) => `${chat.title}: ${chat.state === 'waiting' ? `waiting for ${WAITING_FOR[chat.waitingFor] || 'you'}` : 'working'}`)
     .join('\n');
+}
+
+const SHORT_LIMITS = { five_hour: '5h', seven_day: 'week' };
+
+function tokens(count) {
+  if (count >= 1e6) return `${(count / 1e6).toFixed(count >= 1e7 ? 0 : 1)}M`;
+  if (count >= 1e3) return `${(count / 1e3).toFixed(count >= 1e4 ? 0 : 1)}k`;
+  return String(count);
+}
+
+function cost(value, estimate) {
+  const amount = value.currency === 'USD' ? `$${value.amount.toFixed(value.amount < 1 ? 3 : 2)}` : `${value.amount.toFixed(2)} ${value.currency}`;
+  return estimate ? `≈${amount}` : amount;
+}
+
+function resets(iso) {
+  const minutes = Math.round((Date.parse(iso) - Date.now()) / 60000);
+  if (!(minutes > 0)) return '';
+  if (minutes < 60) return `in ${minutes}m`;
+  if (minutes < 1440) return `in ${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+  return new Date(iso).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+/** The agent's subscription quota, or the tokens and cost of a key, as the sandbox's bridge reports them. */
+function renderUsage(card, worker) {
+  const line = $('.usage', card);
+  const usage = worker.status === 'ready' ? worker.activity?.usage : null;
+  // A window that already reset says nothing about the current one.
+  const limits = (usage?.limits || []).filter(
+    (limit) => limit.usedPercent !== null && (!limit.resetsAt || Date.parse(limit.resetsAt) > Date.now())
+  );
+  const pills = [];
+  if (usage && usage.auth.kind !== 'api_key') {
+    for (const limit of limits) {
+      const low = limit.status === 'rejected' || limit.status === 'allowed_warning' || limit.usedPercent >= 80;
+      const percent = Math.round(limit.usedPercent);
+      const fill = element('span');
+      fill.style.width = `${Math.min(percent, 100)}%`;
+      const reset = limit.resetsAt ? resets(limit.resetsAt) : '';
+      pills.push(
+        element('span', { class: `chip quota${low ? ' low' : ''}`, title: `${limit.label}: ${percent}% used${reset ? `, resets ${reset}` : ''}` }, [
+          `${SHORT_LIMITS[limit.id] || limit.label} `,
+          element('span', { class: 'meter' }, [fill]),
+          ` ${percent}%`
+        ])
+      );
+    }
+  }
+  const total = usage?.totals.tokens;
+  if (total?.totalTokens) {
+    const parts = [`${tokens(total.inputTokens + total.cachedReadTokens + total.cachedWriteTokens)} in`, `${tokens(total.outputTokens)} out`];
+    if (usage.totals.cost) parts.push(cost(usage.totals.cost, usage.costEstimate));
+    pills.push(
+      element('span', {
+        class: 'chip',
+        text: parts.join(' · '),
+        title: `Since the sandbox started${usage.costEstimate && usage.totals.cost ? "; the cost is the agent's estimate at API prices" : ''}`
+      })
+    );
+  }
+  line.hidden = !pills.length;
+  line.replaceChildren(...pills);
 }
 
 async function refreshWorkers() {

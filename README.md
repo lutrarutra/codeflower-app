@@ -77,14 +77,16 @@ while the launcher runs: *Stop all and quit*, or Ctrl+C in its
 terminal, stops them. The window remembers the last choices in the user's config directory
 (`codeflower/launcher.json`).
 
-The page is served on `127.0.0.1` with a random port and a one-time key in the address that becomes
-a cookie, so other users of the machine and other websites cannot use it.
+The page is served on `127.0.0.1` with an automatically assigned port by default. Choose a fixed
+port with `codeflower gui --port 8080`, or use `--port 0` for automatic selection. The advanced
+`--address` option sets the full listener address and cannot be combined with `--port`. A one-time
+key in the address becomes a cookie, so other users of the machine and other websites cannot use it.
 
 ## The command line
 
 ```sh
-codeflower run --agent claude --input ~/data/study42 --output ~/results/study42
-codeflower run --agent claude --input ~/data/rna --input ~/data/atac --code ~/src/mypkg
+codeflower interactive --agent claude --input ~/data/study42 --output ~/results/study42
+codeflower interactive --agent claude --input ~/data/rna --input ~/data/atac --code ~/src/mypkg
 ```
 
 - `--agent`: `claude` (Claude Code), `codex` (Codex) or `dsh` (DeepSeek Harness). Asked for when
@@ -109,15 +111,15 @@ codeflower run --agent claude --input ~/data/rna --input ~/data/atac --code ~/sr
 - `--project NAME` (default `default`): the project lives in `~/codeflower/projects/NAME`. Or give the
   directory with `--state DIR`. The project holds the sessions, the agent environment, the workspace,
   the agents' logins, caches, and connection files, created with owner-only permissions.
-- `--engine` and `--image`: see above; `CODEFLOWER_ENGINE`, `CODEFLOWER_IMAGE` and `CODEFLOWER_AGENT`
-  set defaults.
+- `--engine`, `--image` and `--image-tag`: see above and [The sandbox image](#the-sandbox-image);
+  `CODEFLOWER_ENGINE`, `CODEFLOWER_IMAGE`, `CODEFLOWER_IMAGE_TAG` and `CODEFLOWER_AGENT` set defaults.
 
 On a cluster, download the image once on the login node (compute nodes often have no internet), then
 start the worker in a job:
 
 ```sh
 codeflower pull --engine apptainer      # ~/codeflower/images/codeflower-sandbox_<version>.sif
-codeflower run --agent claude \
+codeflower interactive --agent claude \
   --project study42 \
   --input /data/study42 --output ~/results/study42
 ```
@@ -141,15 +143,52 @@ named `codeflower-<id>` and removed when they exit. `make dev-run AGENT=claude|c
 [codeflower-workspace](https://github.com/lutrarutra/codeflower-workspace) starts a Docker worker for
 development with the state in `.dev-state/`.
 
+## Tasks: the agent works by itself
+
+`codeflower task` starts the same sandbox without VS Code and lets the agent work on one task until it
+is done, for example as a batch job:
+
+```sh
+codeflower task --agent claude --project study42 --input /data/study42 --output ~/results/study42 \
+  "Cluster the cells and annotate the cell types"
+sbatch --time=8:00:00 --signal=B:TERM@120 --wrap "codeflower task --agent claude --project study42 \
+  --input /data/study42 --output ~/results/study42 --timeout 7h50m - < task.md"
+```
+
+- The task is the one argument, or `-` to read it from standard input. It takes the folder and network
+  options of `interactive`; `--output` is required, and the first one gets the results.
+- The agent gets the task as its goal (`/goal` for Claude Code and Codex; DeepSeek Harness gets it as a
+  plain prompt) and instructions that nobody is there to answer: it decides open questions itself and
+  records them as assumptions. Permission requests are allowed and questions declined automatically.
+- It builds a storyteller report as it works and delivers it as `report.html` in the output folder.
+  The task is not done until the finalized report is there. `--skip-report` asks for a `README.md`
+  instead.
+- `--model` and `--effort` choose among what the agent offers, for example `--model opus --effort high`
+  for Claude Code or `--model gpt-6.1-sol --effort xhigh` for Codex (Codex's own default effort is
+  `low`). A value the agent does not offer stops the task before it starts, with the agent's choices.
+  `--option ID=VALUE` sets any other setting of the agent by its id, e.g. `--option fast=on`. Without
+  them the agent's defaults apply, including what its settings file in the project says.
+- After each round the agent is asked whether the task is done. If not, it is sent back to work, at
+  most `--max-rounds` times (default 3). `--timeout 90m` stops it after that long.
+- The agent must be signed in for the project already: run `codeflower interactive` once, connect
+  VS Code and sign in. The run is a session of the project, so VS Code lists it afterwards and you can
+  continue it there. Its progress is printed; `<project>/tasks/<id>/` keeps the task and its result.
+- Exit status: `0` done, `2` not done (judged impossible, out of rounds, or the report failed its check), `3` not signed in,
+  `130` interrupted or timed out, `1` other errors.
+
 ## The sandbox image
 
 The sandbox is published by [codeflower-sandbox](https://github.com/lutrarutra/codeflower-sandbox) as
-`ghcr.io/lutrarutra/codeflower-sandbox`. Each launcher release uses the `major.minor` tag of the sandbox
-it was tested with (`sandbox.ImageVersion`), so sandbox patch releases reach it without a new launcher.
+`ghcr.io/lutrarutra/codeflower-sandbox`. The launcher uses its `latest` tag, so sandbox releases reach it
+without a new launcher.
 
-- `codeflower run` and the window download the image when it is missing. `codeflower pull` downloads
-  it, or updates it to the newest patch release of that tag.
-- With Apptainer it is kept as `~/codeflower/images/codeflower-sandbox_<version>.sif`, or in
+- `--image-tag TAG` (or `CODEFLOWER_IMAGE_TAG`, or "Sandbox version" in the window) uses another build:
+  a release (`0.2.1`, `v0.2.1`, or `0.2` for the newest patch of 0.2) or a commit (`sha-abc1234`, or the
+  commit's hash).
+- `codeflower interactive`, `codeflower task` and the window download the image when it is missing.
+  `codeflower pull [--image-tag TAG]` downloads it, or updates it to the newest build of that tag; a
+  downloaded `latest` stays as it is until then.
+- With Apptainer it is kept as `~/codeflower/images/codeflower-sandbox_<tag>.sif`, or in
   `CODEFLOWER_IMAGE_DIR`. Jobs that start at the same time wait for one download.
 - `--image` (or `CODEFLOWER_IMAGE`) uses another image, which is never downloaded automatically: for
   example `codeflower-sandbox` built locally with `make sandbox-build`, or a `.sif` file.

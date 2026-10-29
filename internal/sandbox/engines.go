@@ -28,7 +28,7 @@ var EngineNames = []string{EngineDocker, EnginePodman, EngineApptainer}
 
 // DefaultImage is the published sandbox image the launcher downloads; for
 // Apptainer it is converted into DefaultSIF.
-const DefaultImage = ImageRepository + ":" + ImageVersion
+const DefaultImage = ImageRepository + ":" + DefaultImageTag
 
 // EngineStatus says whether an engine can run sandboxes on this machine.
 type EngineStatus struct {
@@ -507,16 +507,26 @@ func CheckImage(ctx context.Context, engine EngineStatus, image string) error {
 	return nil
 }
 
-// ImageHelp says how to get the sandbox image for an engine.
-func ImageHelp(engine string) []Step {
-	switch engine {
-	case EngineApptainer:
-		return []Step{
-			{Text: "Download it once, on a node with internet access (on a cluster, the login node; compute nodes often have none):", Command: "codeflower pull --engine apptainer"},
-			{Text: "It is saved as " + DefaultSIF() + " (set CODEFLOWER_IMAGE_DIR to keep it elsewhere). Or convert it yourself and pass --image FILE.sif:", Command: "apptainer pull codeflower-sandbox.sif docker://" + DefaultImage},
-		}
-	case EnginePodman:
-		return []Step{{Text: "Download it (starting a sandbox also does this):", Command: "codeflower pull --engine podman"}}
+// ImageHelp says how to get the sandbox image for an engine; image is the
+// one asked for (empty: the default).
+func ImageHelp(engine, image string) []Step {
+	pull := "codeflower pull"
+	if engine == EngineApptainer || engine == EnginePodman {
+		pull += " --engine " + engine
 	}
-	return []Step{{Text: "Download it (starting a sandbox also does this):", Command: "codeflower pull"}}
+	name := PublishedName(image)
+	tag, published := publishedTag(image)
+	if published && tag != DefaultImageTag {
+		pull += " --image-tag " + tag
+	}
+	switch {
+	case !published:
+		return []Step{{Text: "Download or build " + image + " yourself; the launcher downloads only the published image " + ImageRepository + "."}}
+	case engine == EngineApptainer:
+		return []Step{
+			{Text: "Download it once, on a node with internet access (on a cluster, the login node; compute nodes often have none):", Command: pull},
+			{Text: "It is saved as " + publishedSIF(tag) + " (set CODEFLOWER_IMAGE_DIR to keep it elsewhere). Or convert it yourself and pass --image FILE.sif:", Command: "apptainer pull codeflower-sandbox.sif docker://" + name},
+		}
+	}
+	return []Step{{Text: "Download it (starting a sandbox also does this):", Command: pull}}
 }

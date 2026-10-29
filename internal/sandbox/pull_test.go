@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,12 +13,52 @@ import (
 	"time"
 )
 
-func TestDefaultImageIsThePinnedRelease(t *testing.T) {
-	if DefaultImage != "ghcr.io/lutrarutra/codeflower-sandbox:"+ImageVersion {
+func TestDefaultImageIsTheLatestRelease(t *testing.T) {
+	if DefaultImage != "ghcr.io/lutrarutra/codeflower-sandbox:latest" {
 		t.Fatalf("DefaultImage = %q", DefaultImage)
 	}
-	if strings.Count(ImageVersion, ".") != 1 {
-		t.Fatalf("ImageVersion %q should be major.minor, so patch releases are picked up", ImageVersion)
+}
+
+func TestPublishedImageTags(t *testing.T) {
+	for tag, want := range map[string]string{
+		"":             "latest",
+		" latest ":     "latest",
+		"0.2.1":        "0.2.1",
+		"v0.2.1":       "0.2.1",
+		"v0.2":         "0.2",
+		"sha-abc1234":  "sha-abc1234",
+		"abc1234":      "sha-abc1234",
+		"abc1234def56": "sha-abc1234",
+		"sha-abc1234def56789012345678901234567890ab": "sha-abc1234",
+		"1234567": "1234567",
+	} {
+		got, err := PublishedImage(tag)
+		if err != nil || got != ImageRepository+":"+want {
+			t.Errorf("PublishedImage(%q) = %q, %v; want tag %q", tag, got, err, want)
+		}
+	}
+	for _, tag := range []string{"0.2 1", "-rc", "a/b", "x:y"} {
+		if _, err := PublishedImage(tag); err == nil {
+			t.Errorf("PublishedImage(%q) accepted", tag)
+		}
+	}
+}
+
+func TestPublishedImagesAreDownloadedPerTag(t *testing.T) {
+	directory := t.TempDir()
+	t.Setenv("CODEFLOWER_IMAGE_DIR", directory)
+	image, _ := PublishedImage("0.2")
+	if !IsPublished(image) || !IsPublished("") || IsPublished("codeflower-sandbox") || IsPublished(ImageRepository+"@sha256:0") {
+		t.Fatal("IsPublished is wrong")
+	}
+	if got, _ := ResolveImage(image, EngineDocker); got != image {
+		t.Fatalf("Docker: %q", got)
+	}
+	if got, _ := ResolveImage(image, EngineApptainer); got != filepath.Join(directory, "codeflower-sandbox_0.2.sif") {
+		t.Fatalf("Apptainer: %q", got)
+	}
+	if err := pullImage(context.Background(), EngineStatus{Name: EngineDocker}, "codeflower-sandbox", false, io.Discard); err == nil {
+		t.Fatal("an image that is not the published one was downloaded")
 	}
 }
 
@@ -25,7 +66,7 @@ func TestApptainerDefaultsToTheDownloadedFile(t *testing.T) {
 	directory := t.TempDir()
 	t.Setenv("CODEFLOWER_IMAGE_DIR", directory)
 	image, err := ResolveImage("", EngineApptainer)
-	if err != nil || image != filepath.Join(directory, "codeflower-sandbox_"+ImageVersion+".sif") {
+	if err != nil || image != filepath.Join(directory, "codeflower-sandbox_latest.sif") {
 		t.Fatalf("ResolveImage = %q, %v", image, err)
 	}
 	engine := EngineStatus{Name: EngineApptainer}

@@ -195,7 +195,11 @@ func TestShowsWhatTheSandboxAgentDoesWithoutItsToken(t *testing.T) {
 		}
 		w.Write([]byte(`{"agent":"claude","connected":false,"running":true,"working":1,"waiting":1,"chats":[` +
 			`{"key":"claude-1","title":"Cluster the cells","state":"working"},` +
-			`{"key":"claude-2","title":"Plot QC","state":"waiting","waitingFor":"plan"}]}`))
+			`{"key":"claude-2","title":"Plot QC","state":"waiting","waitingFor":"plan"}],` +
+			`"usage":{"auth":{"kind":"subscription","plan":"max"},"costEstimate":true,"limitsUpdatedAt":null,` +
+			`"limits":[{"id":"five_hour","label":"5-hour","usedPercent":37.5,"resetsAt":"2027-01-15T08:00:00.000Z","status":"allowed"}],` +
+			`"totals":{"tokens":{"inputTokens":100,"outputTokens":20,"cachedReadTokens":50,"cachedWriteTokens":0,"thoughtTokens":0,"totalTokens":170},` +
+			`"cost":{"amount":0.25,"currency":"USD"}}}}`))
 	}))
 	t.Cleanup(bridge.Close)
 	host, port, _ := strings.Cut(strings.TrimPrefix(bridge.URL, "http://"), ":")
@@ -218,6 +222,10 @@ func TestShowsWhatTheSandboxAgentDoesWithoutItsToken(t *testing.T) {
 	}
 	if chat := view.Activity.Chats[1]; chat.Title != "Plot QC" || chat.WaitingFor != "plan" {
 		t.Fatalf("chat %+v", chat)
+	}
+	if u := view.Activity.Usage; u == nil || u.Auth.Kind != "subscription" || len(u.Limits) != 1 ||
+		*u.Limits[0].UsedPercent != 37.5 || u.Totals.Tokens.Total != 170 || u.Totals.Cost.Amount != 0.25 {
+		t.Fatalf("usage %+v", view.Activity.Usage)
 	}
 	data, _ := json.Marshal(view)
 	if strings.Contains(string(data), "bridge-token") || !strings.Contains(string(data), `"waitingFor":"plan"`) {

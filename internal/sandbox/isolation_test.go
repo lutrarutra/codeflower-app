@@ -496,3 +496,22 @@ func TestIsolationNeedsLinuxForContainerEngines(t *testing.T) {
 		}
 	}
 }
+
+func TestGatewayForATaskHasOnlyTheEgressProxy(t *testing.T) {
+	dir := socketDir(t)
+	list := newAllowlist(filepath.Join(dir, "missing.txt"), nil, func(string) {})
+	gate, err := startGateway(dir, "", list, func(string) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gate.Port() != 0 {
+		t.Fatalf("a task's gateway listens on port %d", gate.Port())
+	}
+	if _, err := os.Stat(filepath.Join(dir, egressSocket)); err != nil {
+		t.Fatal(err)
+	}
+	gate.Close()
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("the network folder is left behind: %v", err)
+	}
+}

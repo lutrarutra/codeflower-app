@@ -102,9 +102,13 @@
       <label>Engine
         <select id="engine"><option value="auto">Automatic</option><option value="docker">Docker</option><option value="podman">Podman</option><option value="apptainer">Apptainer</option></select>
       </label>
+      <label>Sandbox version
+        <input id="image-tag" placeholder="latest">
+        <span class="muted small">A release of the published image (<code>0.2.1</code>, or <code>0.2</code> for its newest fix) or a commit's build (<code>sha-abc1234</code>), downloaded on first use.</span>
+      </label>
       <label>Sandbox image
         <input id="image" placeholder="the published image, downloaded on first use">
-        <span class="muted small">A Docker or Podman image name, or an Apptainer <code>.sif</code> file.</span>
+        <span class="muted small">Instead of a version: a Docker or Podman image name, or an Apptainer <code>.sif</code> file.</span>
       </label>
     </details>
 
@@ -156,6 +160,7 @@
         <p class="muted small meta"></p>
         <p class="muted small network" hidden>Network isolated. To allow a host, add a line to <code class="allowlist"></code>; it applies at once. Refused hosts appear in the log.</p>
         <p class="activity" hidden></p>
+        <p class="usage" hidden></p>
       </div>
       <button type="button" class="pill pill-small stop">Stop</button>
       <button type="button" class="icon-button forget" title="Remove from the list" aria-label="Remove from the list">×</button>

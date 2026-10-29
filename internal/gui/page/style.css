@@ -380,6 +380,13 @@ input:focus, select:focus { border-color: var(--indigo); outline: none; }
 .meta { overflow: hidden; text-overflow: ellipsis; }
 .activity { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.4rem; }
 .activity[hidden] { display: none; }
+.usage { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.4rem; }
+.usage[hidden] { display: none; }
+.chip.quota { gap: 0.4rem; }
+.chip.quota.low { background: var(--yellow-soft); color: var(--ink); }
+.meter { display: inline-block; width: 2.6rem; height: 0.4rem; border-radius: 999px; background: var(--line); overflow: hidden; }
+.meter > span { display: block; height: 100%; background: var(--teal); }
+.chip.quota.low .meter > span { background: var(--orange); }
 .chip {
   display: inline-flex;
   align-items: center;

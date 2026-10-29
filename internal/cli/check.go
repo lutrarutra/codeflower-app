@@ -61,13 +61,17 @@ func engineMissing(out io.Writer, engine sandbox.EngineStatus, err error) error 
 }
 
 func checkCommand() *cobra.Command {
-	var image, engineName string
+	var image, imageTag, engineName string
 	command := &cobra.Command{
 		Use:   "check",
 		Short: "Check that this machine can run sandboxes, and how to set it up",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			out := os.Stdout
+			image, err := imageName(image, imageTag)
+			if err != nil {
+				return err
+			}
 			statuses := sandbox.DetectEngines(command.Context())
 			fmt.Fprintln(out, "Container engines:")
 			for _, status := range statuses {
@@ -91,17 +95,17 @@ func checkCommand() *cobra.Command {
 			}
 			fmt.Fprintf(out, "\nSandboxes will run with %s.\n", engine.Label)
 			if err := sandbox.CheckImage(command.Context(), engine, image); err != nil {
-				if image == "" && errors.Is(err, sandbox.ErrNoImage) {
-					fmt.Fprintf(out, "\nThe sandbox image %s is not downloaded yet.\n", sandbox.DefaultImage)
+				if sandbox.IsPublished(image) && errors.Is(err, sandbox.ErrNoImage) {
+					fmt.Fprintf(out, "\nThe sandbox image %s is not downloaded yet.\n", sandbox.PublishedName(image))
 				} else {
 					fmt.Fprintf(out, "\nThe sandbox image is missing. %v.\n", err)
 				}
-				printSteps(out, sandbox.ImageHelp(engine.Name), "")
+				printSteps(out, sandbox.ImageHelp(engine.Name, image), "")
 				return exitError{4}
 			}
 			resolved, _ := sandbox.ResolveImage(image, engine.Name)
 			fmt.Fprintf(out, "The sandbox image %s is ready.\n", resolved)
-			fmt.Fprintln(out, "\nStart one with:  codeflower run --agent claude --input DATA_FOLDER  (or: codeflower gui)")
+			fmt.Fprintln(out, "\nStart one with:  codeflower interactive --agent claude --input DATA_FOLDER  (or: codeflower gui)")
 			return nil
 		},
 	}
@@ -110,6 +114,7 @@ func checkCommand() *cobra.Command {
 		defaultEngine = "auto"
 	}
 	command.Flags().StringVar(&image, "image", os.Getenv("CODEFLOWER_IMAGE"), "sandbox image to look for")
+	addImageTagFlag(command, &imageTag)
 	command.Flags().StringVar(&engineName, "engine", defaultEngine, "engine to check: auto, docker, podman, or apptainer")
 	return command
 }
