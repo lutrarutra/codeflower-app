@@ -167,6 +167,10 @@ func TestTaskSignInNeedsAnInteractiveArgument(t *testing.T) {
 
 func TestTaskResultsAreFoundOnTheHost(t *testing.T) {
 	input, first, second := t.TempDir(), t.TempDir(), t.TempDir()
+	first, err := filepath.EvalSymlinks(first)
+	if err != nil {
+		t.Fatal(err)
+	}
 	binds, err := collectBinds(sandbox.Folders{Inputs: []string{input}, Outputs: []string{first, second}},
 		[]string{second + ":" + sandbox.OutputsRoot + "/extra:rw"})
 	if err != nil {
