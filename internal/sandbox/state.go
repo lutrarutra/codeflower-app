@@ -77,7 +77,8 @@ func PrepareState(dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if strings.Contains(state, ":") {
+	// Apptainer binds are SOURCE:TARGET; a Windows drive letter is not part of that.
+	if strings.Contains(strings.TrimPrefix(state, filepath.VolumeName(state)), ":") {
 		return "", fmt.Errorf("state path must not contain ':'")
 	}
 	if err := privateDirectory(state); err != nil {
