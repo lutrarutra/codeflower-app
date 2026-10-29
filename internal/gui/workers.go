@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -40,12 +42,13 @@ type worker struct {
 	Code    []string  `json:"code"`
 	Started time.Time `json:"started"`
 
-	mu     sync.Mutex
-	status string // starting, ready, stopping, stopped, failed
-	url    string
-	err    string
-	code   int
-	log    []string
+	mu       sync.Mutex
+	status   string // starting, ready, stopping, stopped, failed
+	url      string
+	err      string
+	code     int
+	log      []string
+	activity *activity
 	// partial holds output up to its next newline.
 	partial bytes.Buffer
 	cancel  context.CancelFunc
@@ -54,17 +57,89 @@ type worker struct {
 
 type workerView struct {
 	*worker
-	Status   string   `json:"status"`
-	URL      string   `json:"url,omitempty"`
-	Error    string   `json:"error,omitempty"`
-	ExitCode int      `json:"exitCode"`
-	Log      []string `json:"log"`
+	Status   string    `json:"status"`
+	URL      string    `json:"url,omitempty"`
+	Error    string    `json:"error,omitempty"`
+	ExitCode int       `json:"exitCode"`
+	Log      []string  `json:"log"`
+	Activity *activity `json:"activity,omitempty"`
 }
 
 func (w *worker) view() workerView {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return workerView{worker: w, Status: w.status, URL: w.url, Error: w.err, ExitCode: w.code, Log: slicesClone(w.log)}
+	return workerView{worker: w, Status: w.status, URL: w.url, Error: w.err, ExitCode: w.code, Log: slicesClone(w.log), Activity: w.activity}
+}
+
+// activity is what the sandbox's agent does, as its bridge reports at /status:
+// how many chats work or wait for the user, and whether VS Code is connected.
+type activity struct {
+	Connected bool           `json:"connected"`
+	Working   int            `json:"working"`
+	Waiting   int            `json:"waiting"`
+	Chats     []chatActivity `json:"chats"`
+}
+
+type chatActivity struct {
+	Title string `json:"title"`
+	// State is working or waiting; WaitingFor is plan, permission or question.
+	State      string `json:"state"`
+	WaitingFor string `json:"waitingFor,omitempty"`
+}
+
+const activityInterval = 3 * time.Second
+
+// watchActivity polls the bridge until ctx ends. The token stays here; the
+// page only gets the counts and titles.
+func (w *worker) watchActivity(ctx context.Context, connection sandbox.Connection) {
+	client := &http.Client{Timeout: 2 * time.Second}
+	url := "http://" + net.JoinHostPort(connection.Host, strconv.Itoa(connection.Port)) + "/status"
+	ticker := time.NewTicker(activityInterval)
+	defer ticker.Stop()
+	defer func() {
+		w.mu.Lock()
+		w.activity = nil
+		w.mu.Unlock()
+	}()
+	for {
+		current, err := fetchActivity(ctx, client, url, connection.Token)
+		w.mu.Lock()
+		if err != nil || ctx.Err() != nil {
+			// A stopped sandbox reports nothing.
+			current = nil
+		}
+		w.activity = current
+		w.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func fetchActivity(ctx context.Context, client *http.Client, url, token string) (*activity, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("the sandbox answered %s", response.Status)
+	}
+	var current activity
+	if err := json.NewDecoder(response.Body).Decode(&current); err != nil {
+		return nil, err
+	}
+	if current.Chats == nil {
+		current.Chats = []chatActivity{}
+	}
+	return &current, nil
 }
 
 func slicesClone(lines []string) []string {
@@ -152,17 +227,22 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	engine, err := sandbox.ChooseEngine(sandbox.DetectEngines(r.Context()), request.Engine, request.Image)
+	named := request.Image
+	if named == "" {
+		named = s.options.Image
+	}
+	engine, err := sandbox.ChooseEngine(sandbox.DetectEngines(r.Context()), request.Engine, named)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	image, err := sandbox.ResolveImage(request.Image, engine.Name)
+	image, err := sandbox.ResolveImage(named, engine.Name)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := sandbox.CheckImage(r.Context(), engine, image); err != nil {
+	// The default image is downloaded when the sandbox starts, with its log.
+	if err := sandbox.CheckImage(r.Context(), engine, named); err != nil && (named != "" || !errors.Is(err, sandbox.ErrNoImage)) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -201,17 +281,26 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		defer close(item.done)
-		code, err := sandbox.Worker{
-			Agent: request.Agent, Engine: engine, Image: image, State: state, Binds: binds,
-			Stdout: item, Stderr: item,
-		}.Run(ctx, func(connection sandbox.Connection) {
-			item.mu.Lock()
-			item.url = connection.URL
-			if item.status == "starting" {
-				item.status = "ready"
-			}
-			item.mu.Unlock()
-		})
+		watching, stopWatching := context.WithCancel(ctx)
+		code, err := 1, error(nil)
+		if named == "" {
+			err = sandbox.EnsureImage(ctx, engine, item)
+		}
+		if err == nil {
+			code, err = sandbox.Worker{
+				Agent: request.Agent, Engine: engine, Image: image, State: state, Binds: binds,
+				Stdout: item, Stderr: item,
+			}.Run(ctx, func(connection sandbox.Connection) {
+				item.mu.Lock()
+				item.url = connection.URL
+				if item.status == "starting" {
+					item.status = "ready"
+				}
+				item.mu.Unlock()
+				go item.watchActivity(watching, connection)
+			})
+		}
+		stopWatching()
 		item.mu.Lock()
 		defer item.mu.Unlock()
 		if rest := item.partial.String(); rest != "" {
@@ -221,6 +310,9 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		item.url = ""
 		item.code = code
 		switch {
+		case err != nil && item.status == "stopping" && ctx.Err() != nil:
+			// Stopped while the image was downloading.
+			item.status = "stopped"
 		case err != nil:
 			item.status, item.err = "failed", err.Error()
 		case item.status == "stopping" || code == 0:

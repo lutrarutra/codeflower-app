@@ -1,0 +1,161 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Build even if the launcher did not change since the previous tag
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Check tag and changes
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.changes.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check that the tag is a version on main
+        run: |
+          [[ "$GITHUB_REF" == refs/tags/v*.*.* ]] || { echo "::error::Run this on a vX.Y.Z tag, not $GITHUB_REF"; exit 1; }
+          git fetch origin main --no-tags
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$GITHUB_REF_NAME is not on main"; exit 1; }
+
+      - name: Compare with the previous tag
+        id: changes
+        env:
+          FORCE: ${{ inputs.force }}
+        run: |
+          previous=$(git describe --tags --abbrev=0 --match 'v*.*.*' "$GITHUB_SHA^" 2>/dev/null || true)
+          if [ "$FORCE" = true ] || [ -z "$previous" ] ||
+            ! git diff --quiet "$previous" "$GITHUB_SHA" -- cmd internal go.mod go.sum Makefile scripts assets; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "The launcher did not change since $previous: nothing released for $GITHUB_REF_NAME." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  test:
+    name: Test
+    needs: gate
+    if: needs.gate.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: make launcher-test
+
+  dist:
+    name: Build binaries
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Build the archives
+        run: make launcher-dist VERSION="$GITHUB_REF_NAME"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: build/dist/*.tar.gz
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-windows
+          path: build/dist/*.zip
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: darwin-binaries
+          path: build/codeflower-darwin-*
+          if-no-files-found: error
+
+  app:
+    name: Build the macOS app
+    needs: dist
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: darwin-binaries
+          path: build
+
+      - name: Build the disk image
+        run: |
+          chmod +x build/codeflower-darwin-*
+          scripts/macos-app.sh build/codeflower-darwin-arm64 build/codeflower-darwin-amd64 "$GITHUB_REF_NAME" build/dist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-macos
+          path: build/dist/codeflower-macos.dmg
+          if-no-files-found: error
+
+  release:
+    name: Publish the GitHub release
+    needs: [dist, app]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: dist*
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          image=$(sed -n 's/^\tImageRepository = "\(.*\)"$/\1/p; s/^\tImageVersion    = "\(.*\)"$/\1/p' internal/sandbox/pull.go | paste -sd: -)
+          cat > notes.md <<NOTES
+          ## Install
+
+          | System | Download |
+          | --- | --- |
+          | macOS (app) | \`codeflower-macos.dmg\`: open it and drag *code flower* to Applications |
+          | macOS (command line) | \`codeflower-darwin-arm64.tar.gz\` (Apple silicon), \`codeflower-darwin-amd64.tar.gz\` (Intel) |
+          | Linux and clusters | \`codeflower-linux-amd64.tar.gz\`, \`codeflower-linux-arm64.tar.gz\` |
+          | Windows | \`codeflower-windows-amd64.zip\` |
+
+          The builds are not signed yet. On macOS, right-click the app and choose *Open* the first time
+          (or *System Settings → Privacy & Security → Open Anyway*). On Windows, choose *More info → Run anyway*.
+
+          This launcher runs the sandbox image \`$image\`, which it downloads on first use (\`codeflower pull\`).
+          NOTES
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --notes-file notes.md --generate-notes --verify-tag
+          fi

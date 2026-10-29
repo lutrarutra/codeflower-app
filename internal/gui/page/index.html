@@ -83,7 +83,7 @@
         <select id="engine"><option value="auto">Automatic</option><option value="docker">Docker</option><option value="podman">Podman</option><option value="apptainer">Apptainer</option></select>
       </label>
       <label>Sandbox image
-        <input id="image" placeholder="codeflower-sandbox">
+        <input id="image" placeholder="the published image, downloaded on first use">
         <span class="muted small">A Docker or Podman image name, or an Apptainer <code>.sif</code> file.</span>
       </label>
     </details>
@@ -134,6 +134,7 @@
       <div class="grow">
         <h3></h3>
         <p class="muted small meta"></p>
+        <p class="activity" hidden></p>
       </div>
       <button type="button" class="pill pill-small stop">Stop</button>
       <button type="button" class="icon-button forget" title="Remove from the list" aria-label="Remove from the list">×</button>

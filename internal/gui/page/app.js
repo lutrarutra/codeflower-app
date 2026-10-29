@@ -110,7 +110,13 @@ function renderEngine() {
     const engine = system.engines.find((item) => item.name === system.engine);
     body.append(statusLine('ok', `${engine.label} is ready`, `Sandboxes run in containers with ${engine.label}, isolated from the rest of this computer.`), engines);
     const image = system.image;
-    if (image && !image.ready) {
+    if (image && image.download) {
+      body.append(
+        element('div', { style: 'margin-top:1rem' }, [
+          statusLine('ok', 'The sandbox image is downloaded when you start', `The first start downloads ${image.name} (a few GB), once.`)
+        ])
+      );
+    } else if (image && !image.ready) {
       body.append(
         element('div', { style: 'margin-top:1rem' }, [
           statusLine('warn', `The sandbox image "${image.name}" is not on this computer yet`, image.error),
@@ -225,7 +231,7 @@ function renderFolders() {
 
 function canStart() {
   const system = state.system;
-  return !!(system && system.engine && system.image && system.image.ready);
+  return !!(system && system.engine && system.image && (system.image.ready || system.image.download));
 }
 
 function renderStart() {
@@ -433,6 +439,7 @@ function renderWorker(worker) {
     $('.url', card).textContent = worker.url.replace(/token=[^&\s]+/, 'token=••••••••');
     $('.open', card).href = vscodeLink(worker.url);
   }
+  renderActivity(card, worker);
   $('.worker-error', card).textContent = worker.error || '';
   const pre = $('.log pre', card);
   const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24;
@@ -440,6 +447,31 @@ function renderWorker(worker) {
   if (atBottom) pre.scrollTop = pre.scrollHeight;
   if (worker.status === 'failed') $('.log', card).open = true;
   return card;
+}
+
+const WAITING_FOR = { plan: 'plan approval', permission: 'permission', question: 'an answer' };
+
+/** What the sandbox's agent does: chats working, chats waiting for the user, and whether VS Code is there. */
+function renderActivity(card, worker) {
+  const line = $('.activity', card);
+  const activity = worker.status === 'ready' ? worker.activity : null;
+  line.hidden = !activity;
+  card.classList.toggle('attention', Boolean(activity?.waiting));
+  if (!activity) return;
+  const chats = (count) => `${count} chat${count === 1 ? '' : 's'}`;
+  const waiting = activity.chats.filter((chat) => chat.state === 'waiting');
+  const reasons = [...new Set(waiting.map((chat) => WAITING_FOR[chat.waitingFor] || 'you'))];
+  const pills = [];
+  if (activity.working) pills.push(element('span', { class: 'chip working', text: `${chats(activity.working)} working` }));
+  if (activity.waiting) {
+    pills.push(element('span', { class: 'chip waiting', text: `${chats(activity.waiting)} waiting for ${reasons.length === 1 ? reasons[0] : 'you'}` }));
+  }
+  if (!pills.length) pills.push(element('span', { class: 'chip idle', text: 'No chats running' }));
+  if (!activity.connected) pills.push(element('span', { class: 'chip offline', text: 'VS Code not connected' }));
+  line.replaceChildren(...pills);
+  line.title = activity.chats
+    .map((chat) => `${chat.title}: ${chat.state === 'waiting' ? `waiting for ${WAITING_FOR[chat.waitingFor] || 'you'}` : 'working'}`)
+    .join('\n');
 }
 
 async function refreshWorkers() {

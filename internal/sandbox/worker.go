@@ -80,10 +80,13 @@ type Connection struct {
 	Host  string `json:"host"`
 	Port  int    `json:"port"`
 	Agent string `json:"agent"`
+	// Token also authorizes the bridge's /status.
+	Token string `json:"token"`
 }
 
-// ResolveImage checks that an Apptainer image file exists; Docker and Podman
-// image names are checked by the engine when it starts.
+// ResolveImage checks that an Apptainer image file the user named exists;
+// Docker and Podman image names, and the default image file, are checked by
+// CheckImage.
 func ResolveImage(image, engine string) (string, error) {
 	if engine != EngineApptainer {
 		if image == "" {
@@ -92,7 +95,7 @@ func ResolveImage(image, engine string) (string, error) {
 		return image, nil
 	}
 	if image == "" {
-		return "", fmt.Errorf("Apptainer needs the sandbox image file: --image codeflower-sandbox.sif (or set CODEFLOWER_IMAGE)")
+		return DefaultSIF(), nil
 	}
 	path, err := filepath.Abs(expandHome(image))
 	if err != nil {

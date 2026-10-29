@@ -1,14 +1,19 @@
 package gui
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"codeflower-launcher/internal/sandbox"
 )
 
 func testServer(t *testing.T) (*Server, *httptest.Server) {
@@ -179,5 +184,53 @@ func TestWorkerLogsHideTheToken(t *testing.T) {
 	view := item.view()
 	if strings.Join(view.Log, "|") != "ready:|  codeflower://127.0.0.1:1?token=…|partial line" {
 		t.Fatalf("log: %q", view.Log)
+	}
+}
+
+func TestShowsWhatTheSandboxAgentDoesWithoutItsToken(t *testing.T) {
+	bridge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/status" || r.Header.Get("Authorization") != "Bearer bridge-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Write([]byte(`{"agent":"claude","connected":false,"running":true,"working":1,"waiting":1,"chats":[` +
+			`{"key":"claude-1","title":"Cluster the cells","state":"working"},` +
+			`{"key":"claude-2","title":"Plot QC","state":"waiting","waitingFor":"plan"}]}`))
+	}))
+	t.Cleanup(bridge.Close)
+	host, port, _ := strings.Cut(strings.TrimPrefix(bridge.URL, "http://"), ":")
+	portNumber, _ := strconv.Atoi(port)
+
+	item := &worker{ID: "w1", status: "ready", done: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() {
+		item.watchActivity(ctx, sandbox.Connection{Host: host, Port: portNumber, Token: "bridge-token"})
+		close(stopped)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for item.view().Activity == nil && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	view := item.view()
+	if view.Activity == nil || view.Activity.Working != 1 || view.Activity.Waiting != 1 || view.Activity.Connected {
+		t.Fatalf("activity %+v", view.Activity)
+	}
+	if chat := view.Activity.Chats[1]; chat.Title != "Plot QC" || chat.WaitingFor != "plan" {
+		t.Fatalf("chat %+v", chat)
+	}
+	data, _ := json.Marshal(view)
+	if strings.Contains(string(data), "bridge-token") || !strings.Contains(string(data), `"waitingFor":"plan"`) {
+		t.Fatalf("view %s", data)
+	}
+
+	cancel()
+	<-stopped
+	if item.view().Activity != nil {
+		t.Fatal("a stopped watch keeps reporting activity")
+	}
+
+	if _, err := fetchActivity(context.Background(), http.DefaultClient, bridge.URL+"/status", "wrong"); err == nil {
+		t.Fatal("a wrong token was accepted")
 	}
 }

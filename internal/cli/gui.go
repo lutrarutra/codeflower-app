@@ -31,6 +31,7 @@ sandboxes. The window is served only to this computer.`,
 				Version:           Version,
 				OpenBrowser:       !noBrowser,
 				Log:               os.Stderr,
+				Image:             os.Getenv("CODEFLOWER_IMAGE"),
 				Ready: func(url string) {
 					fmt.Fprintf(os.Stderr, "code flower launcher is open at:\n\n  %s\n\n", url)
 					fmt.Fprintln(os.Stderr, "Keep this running while you use your sandboxes; press Ctrl+C to stop them and quit.")

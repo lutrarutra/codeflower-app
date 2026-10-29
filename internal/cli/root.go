@@ -40,7 +40,7 @@ func addCommonFlags(command *cobra.Command, options *commonOptions) {
 		"project name: its sessions, logins and workspace live in "+filepath.Join(ProjectsDirectory(), "NAME"))
 	command.Flags().StringVar(&options.state, "state", "", "project directory, instead of --project (created with owner-only permissions)")
 	command.Flags().StringVar(&options.image, "image", os.Getenv("CODEFLOWER_IMAGE"),
-		"sandbox image: a Docker/Podman image name (default "+sandbox.DefaultImage+"), or an Apptainer .sif file (or set $CODEFLOWER_IMAGE)")
+		"sandbox image: a Docker/Podman image name, or an Apptainer .sif file (or set $CODEFLOWER_IMAGE; default "+sandbox.DefaultImage+", downloaded on first use)")
 	command.Flags().StringVar(&options.engine, "engine", defaultEngine,
 		"container engine: auto, docker, podman, or apptainer (or set $CODEFLOWER_ENGINE)")
 }
@@ -111,7 +111,7 @@ machine can run sandboxes.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.AddCommand(runCommand(), checkCommand(), guiCommand())
+	root.AddCommand(runCommand(), pullCommand(), checkCommand(), guiCommand())
 	if startedFromDesktop(os.Args[1:]) {
 		root.SetArgs([]string{"gui"})
 	}

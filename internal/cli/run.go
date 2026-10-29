@@ -107,6 +107,14 @@ VS Code offers its sign-in after connecting. Press Ctrl+C to stop.`,
 			if err != nil {
 				return err
 			}
+			ctx, stop := signal.NotifyContext(command.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			// Only the default image is downloaded: one the user named is theirs to provide.
+			if options.image == "" {
+				if err := sandbox.EnsureImage(ctx, engine, os.Stderr); err != nil {
+					return err
+				}
+			}
 			state, err := sandbox.PrepareState(options.stateDirectory())
 			if err != nil {
 				return err
@@ -121,8 +129,6 @@ VS Code offers its sign-in after connecting. Press Ctrl+C to stop.`,
 				}
 				fmt.Fprintf(os.Stderr, "  %-20s %s (%s)\n", bind.Target, bind.Source, mode)
 			}
-			ctx, stop := signal.NotifyContext(command.Context(), os.Interrupt, syscall.SIGTERM)
-			defer stop()
 			code, err := sandbox.Worker{
 				Agent:         agent,
 				Engine:        engine,

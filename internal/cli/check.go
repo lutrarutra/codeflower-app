@@ -91,7 +91,11 @@ func checkCommand() *cobra.Command {
 			}
 			fmt.Fprintf(out, "\nSandboxes will run with %s.\n", engine.Label)
 			if err := sandbox.CheckImage(command.Context(), engine, image); err != nil {
-				fmt.Fprintf(out, "\nThe sandbox image is missing. %v.\n", err)
+				if image == "" && errors.Is(err, sandbox.ErrNoImage) {
+					fmt.Fprintf(out, "\nThe sandbox image %s is not downloaded yet.\n", sandbox.DefaultImage)
+				} else {
+					fmt.Fprintf(out, "\nThe sandbox image is missing. %v.\n", err)
+				}
 				printSteps(out, sandbox.ImageHelp(engine.Name), "")
 				return exitError{4}
 			}

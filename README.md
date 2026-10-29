@@ -3,7 +3,20 @@
 `codeflower` starts code flower sandboxes (workers): a container with the agent (Claude Code, Codex or
 DeepSeek Harness) and the bridge VS Code connects to. It has a window for people who do not use a
 terminal, and a command line for workstations and remote clusters. It is a single static Go binary
-with no runtime dependencies. Build it with Go 1.26 or newer:
+with no runtime dependencies.
+
+## Install
+
+Download it from the [releases](https://github.com/lutrarutra/codeflower-launcher/releases):
+`codeflower-<os>-<arch>.tar.gz` (or `.zip` on Windows) holds the `codeflower` binary, and
+`codeflower-macos.dmg` holds the macOS app. The builds are not signed yet: on macOS, right-click the app
+and choose *Open* the first time; on Windows, choose *More info → Run anyway*. On a cluster:
+
+```sh
+curl -fsSL https://github.com/lutrarutra/codeflower-launcher/releases/latest/download/codeflower-linux-amd64.tar.gz | tar xz
+```
+
+Or build it with Go 1.26 or newer:
 
 ```sh
 make launcher-build          # build/codeflower for this machine
@@ -50,7 +63,10 @@ processor and memory use (per-core bars as in htop, refreshed every second), the
 
 *Start sandbox* starts it and shows the line to connect with, a *Copy* button and *Open in VS Code*,
 which hands the line to the code flower extension (`vscode://codeflower.codeflower/connect`; VS Code
-asks before connecting). Sandboxes run while the launcher runs: *Stop all and quit*, or Ctrl+C in its
+asks before connecting). Each running sandbox shows what its agent does: how many chats are
+working, how many wait for you (a plan to approve, a permission or a question; the card is outlined
+then), and whether VS Code is connected. Chats keep working when VS Code disconnects. Sandboxes run
+while the launcher runs: *Stop all and quit*, or Ctrl+C in its
 terminal, stops them. The window remembers the last choices in the user's config directory
 (`codeflower/launcher.json`).
 
@@ -78,11 +94,12 @@ codeflower run --agent claude --input ~/data/rna --input ~/data/atac --code ~/sr
 - `--engine` and `--image`: see above; `CODEFLOWER_ENGINE`, `CODEFLOWER_IMAGE` and `CODEFLOWER_AGENT`
   set defaults.
 
-On a cluster, with an Apptainer image:
+On a cluster, download the image once on the login node (compute nodes often have no internet), then
+start the worker in a job:
 
 ```sh
+codeflower pull --engine apptainer      # ~/codeflower/images/codeflower-sandbox_<version>.sif
 codeflower run --agent claude \
-  --image ./codeflower-sandbox.sif \
   --project study42 \
   --input /data/study42 --output ~/results/study42
 ```
@@ -108,16 +125,16 @@ development with the state in `.dev-state/`.
 
 ## The sandbox image
 
-The image is built from [codeflower-sandbox](https://github.com/lutrarutra/codeflower-sandbox) (the
-`sandbox/` folder of codeflower-workspace): `make sandbox-build` there (the image `codeflower-sandbox`), or
-`podman build -t codeflower-sandbox .` in that repo. For Apptainer, build it as an OCI image
-for the cluster's architecture and convert it to a SIF file there:
+The sandbox is published by [codeflower-sandbox](https://github.com/lutrarutra/codeflower-sandbox) as
+`ghcr.io/lutrarutra/codeflower-sandbox`. Each launcher release uses the `major.minor` tag of the sandbox
+it was tested with (`sandbox.ImageVersion`), so sandbox patch releases reach it without a new launcher.
 
-```sh
-make sandbox-build-linux                                  # build/codeflower-sandbox-amd64.tar
-scp build/codeflower-sandbox-amd64.tar cluster:~/
-apptainer build codeflower-sandbox.sif docker-archive://$HOME/codeflower-sandbox-amd64.tar   # on the cluster
-```
+- `codeflower run` and the window download the image when it is missing. `codeflower pull` downloads
+  it, or updates it to the newest patch release of that tag.
+- With Apptainer it is kept as `~/codeflower/images/codeflower-sandbox_<version>.sif`, or in
+  `CODEFLOWER_IMAGE_DIR`. Jobs that start at the same time wait for one download.
+- `--image` (or `CODEFLOWER_IMAGE`) uses another image, which is never downloaded automatically: for
+  example `codeflower-sandbox` built locally with `make sandbox-build`, or a `.sif` file.
 
 ## Sign-in
 

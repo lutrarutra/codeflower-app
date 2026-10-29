@@ -26,8 +26,9 @@ const (
 // workstation; a .sif image always selects Apptainer.
 var EngineNames = []string{EngineDocker, EnginePodman, EngineApptainer}
 
-// DefaultImage is the sandbox image name for Docker and Podman.
-const DefaultImage = "codeflower-sandbox"
+// DefaultImage is the published sandbox image the launcher downloads; for
+// Apptainer it is converted into DefaultSIF.
+const DefaultImage = ImageRepository + ":" + ImageVersion
 
 // EngineStatus says whether an engine can run sandboxes on this machine.
 type EngineStatus struct {
@@ -496,6 +497,12 @@ func CheckImage(ctx context.Context, engine EngineStatus, image string) error {
 		if _, err := commandOutput(ctx, engine.Executable, "image", "exists", image); err != nil {
 			return missingImage{EnginePodman, image}
 		}
+	case EngineApptainer:
+		// ResolveImage checked a file the user named; the default one is
+		// downloaded on first use.
+		if _, err := os.Stat(image); err != nil {
+			return missingImage{EngineApptainer, image}
+		}
 	}
 	return nil
 }
@@ -505,12 +512,11 @@ func ImageHelp(engine string) []Step {
 	switch engine {
 	case EngineApptainer:
 		return []Step{
-			{Text: "On a computer with Docker, build the image for the cluster from the code flower repository:", Command: "make sandbox-build-linux"},
-			{Text: "Copy build/codeflower-sandbox-amd64.tar to the cluster and convert it:", Command: "apptainer build codeflower-sandbox.sif docker-archive://codeflower-sandbox-amd64.tar"},
-			{Text: "Then pass --image codeflower-sandbox.sif, or set CODEFLOWER_IMAGE to its path."},
+			{Text: "Download it once, on a node with internet access (on a cluster, the login node; compute nodes often have none):", Command: "codeflower pull --engine apptainer"},
+			{Text: "It is saved as " + DefaultSIF() + " (set CODEFLOWER_IMAGE_DIR to keep it elsewhere). Or convert it yourself and pass --image FILE.sif:", Command: "apptainer pull codeflower-sandbox.sif docker://" + DefaultImage},
 		}
 	case EnginePodman:
-		return []Step{{Text: "Build it from the code flower repository:", Command: "podman build -f sandbox/Dockerfile -t " + DefaultImage + " ."}}
+		return []Step{{Text: "Download it (starting a sandbox also does this):", Command: "codeflower pull --engine podman"}}
 	}
-	return []Step{{Text: "Build it from the code flower repository:", Command: "make sandbox-build"}}
+	return []Step{{Text: "Download it (starting a sandbox also does this):", Command: "codeflower pull"}}
 }

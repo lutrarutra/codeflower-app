@@ -373,6 +373,33 @@ input:focus, select:focus { border-color: var(--indigo); outline: none; }
 .badge.stopped { background: var(--code); color: var(--muted); }
 .badge.failed { background: var(--pink-soft); color: var(--red); }
 .meta { overflow: hidden; text-overflow: ellipsis; }
+.activity { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.4rem; }
+.activity[hidden] { display: none; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background: var(--code);
+  color: var(--muted);
+}
+.chip.working { background: var(--teal-soft); color: var(--teal); }
+.chip.waiting { background: var(--yellow-soft); color: var(--ink); }
+.chip.working::before, .chip.waiting::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+.chip.working::before { animation: pulse 1.6s ease-in-out infinite; }
+.chip.waiting::before { background: var(--orange); }
+.worker.attention { border-color: var(--orange); box-shadow: var(--lift) var(--lift) 0 var(--orange); }
+@keyframes pulse { 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .chip.working::before { animation: none; } }
 .connect { margin-top: 0.9rem; padding: 0.8rem 0.9rem; border-radius: 12px; background: var(--teal-soft); }
 .connect[hidden] { display: none; }
 .line { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0.5rem 0; }

@@ -46,6 +46,9 @@ type Options struct {
 	Ready func(url string)
 	// Log receives progress messages for the terminal.
 	Log io.Writer
+	// Image is used when the page names none ($CODEFLOWER_IMAGE); when both
+	// are empty the published image is downloaded on first start.
+	Image string
 }
 
 const cookieName = "codeflower-launcher"
@@ -195,10 +198,12 @@ type agentInfo struct {
 }
 
 type imageStatus struct {
-	Name  string         `json:"name"`
-	Ready bool           `json:"ready"`
-	Error string         `json:"error,omitempty"`
-	Help  []sandbox.Step `json:"help,omitempty"`
+	Name  string `json:"name"`
+	Ready bool   `json:"ready"`
+	// Download: the default image is missing and is downloaded on start.
+	Download bool           `json:"download,omitempty"`
+	Error    string         `json:"error,omitempty"`
+	Help     []sandbox.Step `json:"help,omitempty"`
 }
 
 type systemInfo struct {
@@ -241,6 +246,9 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 	if image == "" {
 		image = settings.Image
 	}
+	if image == "" {
+		image = s.options.Image
+	}
 	engine, err := sandbox.ChooseEngine(statuses, requested, image)
 	if err != nil {
 		info.Problem = err.Error()
@@ -254,6 +262,7 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 		status := &imageStatus{Name: resolved, Ready: true}
 		if err := sandbox.CheckImage(r.Context(), engine, image); err != nil {
 			status.Ready = false
+			status.Download = image == "" && errors.Is(err, sandbox.ErrNoImage)
 			status.Error = err.Error()
 			status.Help = sandbox.ImageHelp(engine.Name)
 		}
