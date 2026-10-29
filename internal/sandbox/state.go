@@ -33,6 +33,7 @@ var StateDirectories = []string{
 	"harness/claude",
 	"harness/codex",
 	"tasks",
+	"runs",
 }
 
 // Apptainer is the isolation boundary, so Codex's own bubblewrap sandbox

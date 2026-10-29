@@ -3,6 +3,7 @@ package sandbox
 import (
 	"errors"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -133,6 +134,19 @@ func TestPodmanArgsKeepTheTokenOutOfTheCommandLine(t *testing.T) {
 	}
 	if args[len(args)-1] != "codeflower-sandbox" {
 		t.Fatalf("image is not last: %s", line)
+	}
+
+	args, err = PodmanArgs("/usr/bin/podman", PodmanRun{
+		Name:  "codeflower-x",
+		Image: "codeflower-sandbox",
+		State: dir,
+		Stdin: strings.NewReader(""),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(args, "-i") {
+		t.Fatalf("Podman did not attach stdin: %v", args)
 	}
 }
 

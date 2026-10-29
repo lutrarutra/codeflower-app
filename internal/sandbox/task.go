@@ -13,6 +13,7 @@ type Task struct {
 	Agent string `json:"agent"`
 	// Output is the sandbox folder for the results, e.g. /data/output/study42.
 	Output    string `json:"output"`
+	Progress  string `json:"progress,omitempty"`
 	Report    bool   `json:"report"`
 	MaxRounds int    `json:"maxRounds"`
 	// Model and Effort are values of the agent's model and effort settings,
@@ -36,6 +37,51 @@ type TaskResult struct {
 	Report     *TaskReport `json:"report,omitempty"`
 	// Settings are the model, effort and requested settings the session ran with.
 	Settings map[string]string `json:"settings,omitempty"`
+	Usage    *TaskUsage        `json:"usage,omitempty"`
+}
+
+// TaskUsage is the account quota and token/cost totals reported during a task.
+type TaskUsage struct {
+	Auth struct {
+		Kind  string `json:"kind"`
+		Plan  string `json:"plan,omitempty"`
+		Label string `json:"label,omitempty"`
+	} `json:"auth"`
+	Limits          []TaskUsageLimit `json:"limits"`
+	LimitsUpdatedAt string           `json:"limitsUpdatedAt,omitempty"`
+	Credits         *TaskCredits     `json:"credits,omitempty"`
+	CostEstimate    bool             `json:"costEstimate"`
+	Totals          struct {
+		Tokens TaskTokens `json:"tokens"`
+		Cost   *TaskCost  `json:"cost,omitempty"`
+	} `json:"totals"`
+}
+
+type TaskUsageLimit struct {
+	ID          string   `json:"id"`
+	Label       string   `json:"label"`
+	UsedPercent *float64 `json:"usedPercent"`
+	ResetsAt    *string  `json:"resetsAt"`
+	Status      string   `json:"status,omitempty"`
+}
+
+type TaskCredits struct {
+	Unlimited bool   `json:"unlimited"`
+	Balance   string `json:"balance,omitempty"`
+}
+
+type TaskTokens struct {
+	Input       int64 `json:"inputTokens"`
+	Output      int64 `json:"outputTokens"`
+	CachedRead  int64 `json:"cachedReadTokens"`
+	CachedWrite int64 `json:"cachedWriteTokens"`
+	Thought     int64 `json:"thoughtTokens"`
+	Total       int64 `json:"totalTokens"`
+}
+
+type TaskCost struct {
+	Amount   float64 `json:"amount"`
+	Currency string  `json:"currency"`
 }
 
 // TaskReport is the report a task had to write, as the sandbox found it.

@@ -37,6 +37,7 @@ type PodmanRun struct {
 	// NetDirectory, when set, isolates the sandbox: it gets no network, and
 	// this folder of sockets shared with the launcher instead of ports.
 	NetDirectory string
+	Stdin        io.Reader
 	Stdout       io.Writer
 	Stderr       io.Writer
 }
@@ -54,6 +55,9 @@ func PodmanArgs(executable string, run PodmanRun) ([]string, error) {
 		// (:z) would change it.
 		"--security-opt", "label=disable",
 		"--mount", "type=bind,source=" + run.State + ",target=" + ContainerState,
+	}
+	if run.Stdin != nil {
+		args = append(args, "-i")
 	}
 	// Rootless Podman maps the user to root inside; keep-id keeps their uid,
 	// so the files the sandbox writes stay theirs.
@@ -99,6 +103,7 @@ func RunPodman(ctx context.Context, executable string, run PodmanRun) (int, erro
 	}
 	command := exec.Command(args[0], args[1:]...)
 	command.Env = os.Environ()
+	command.Stdin = run.Stdin
 	for name, value := range run.Env {
 		command.Env = append(command.Env, name+"="+value)
 	}

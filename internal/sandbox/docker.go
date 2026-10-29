@@ -2,8 +2,10 @@ package sandbox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"runtime"
 	"sort"
@@ -35,6 +37,7 @@ type DockerRun struct {
 	// NetDirectory, when set, isolates the sandbox: it gets no network, and
 	// this folder of sockets shared with the launcher instead of ports.
 	NetDirectory string
+	Stdin        io.Reader
 	// The container's output; standard output and error when nil.
 	Stdout io.Writer
 	Stderr io.Writer
@@ -68,9 +71,11 @@ func DockerConfig(run DockerRun) (*container.Config, *container.HostConfig, erro
 
 	init := true
 	config := &container.Config{
-		Image: run.Image,
-		Env:   env,
-		User:  containerUser(),
+		Image:       run.Image,
+		Env:         env,
+		User:        containerUser(),
+		OpenStdin:   run.Stdin != nil,
+		AttachStdin: run.Stdin != nil,
 	}
 	// Mounts rather than "SOURCE:TARGET" strings, which Windows paths break.
 	host := &container.HostConfig{
@@ -145,6 +150,7 @@ func RunDocker(ctx context.Context, run DockerRun) (int, error) {
 
 	attached, err := docker.ContainerAttach(ctx, id, container.AttachOptions{
 		Stream: true,
+		Stdin:  run.Stdin != nil,
 		Stdout: true,
 		Stderr: true,
 	})
@@ -158,6 +164,20 @@ func RunDocker(ctx context.Context, run DockerRun) (int, error) {
 	waitStatus, waitError := docker.ContainerWait(ctx, id, container.WaitConditionNextExit)
 
 	go func() { _, _ = stdcopy.StdCopy(run.Stdout, run.Stderr, attached.Reader) }()
+	if run.Stdin != nil {
+		go func() {
+			_, copyErr := io.Copy(attached.Conn, run.Stdin)
+			if copyErr != nil && !errors.Is(copyErr, net.ErrClosed) && !errors.Is(copyErr, io.ErrClosedPipe) {
+				fmt.Fprintf(run.Stderr, "Could not forward terminal input to the sandbox: %v\n", copyErr)
+				return
+			}
+			if closeWriter, ok := attached.Conn.(interface{ CloseWrite() error }); ok {
+				if err := closeWriter.CloseWrite(); err != nil && !errors.Is(err, net.ErrClosed) {
+					fmt.Fprintf(run.Stderr, "Could not close the sandbox input stream: %v\n", err)
+				}
+			}
+		}()
+	}
 
 	if err := docker.ContainerStart(ctx, id, container.StartOptions{}); err != nil {
 		return 1, fmt.Errorf("could not start the container: %w", err)

@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/moby/term"
 	"github.com/spf13/cobra"
 
 	"codeflower-launcher/internal/sandbox"
@@ -28,6 +29,7 @@ func taskCommand() *cobra.Command {
 	var timeout time.Duration
 	var rounds int
 	var model, effort string
+	var outputMode string
 	var optionValues []string
 
 	command := &cobra.Command{
@@ -49,8 +51,13 @@ claude-opus-5 and high for Claude Code, gpt-6.1-sol and xhigh for Codex;
 the task stops with the agent's choices when it has no such value. Other
 settings of the agent go by their id: --option fast=on.
 
-The agent must already be signed in for the project: start
-"codeflower interactive" once, connect VS Code and sign in. The run is a
+--output-mode auto uses an attached progress view in a terminal and raw output
+when redirected; choose raw or attached to override it.
+
+If the agent offers terminal sign-in and TASK is an argument in an
+interactive terminal, "codeflower task" signs in when needed, then continues
+the task. Batch runs and tasks read from standard input still need sign-in
+beforehand; use "codeflower interactive" once and sign in there. The run is a
 session of the project, so VS Code lists it afterwards and can continue it.
 
 Exit status: 0 done, 2 not done (the agent judged it impossible, it ran out
@@ -76,6 +83,10 @@ or timed out, 1 other errors.`,
 			if timeout < 0 {
 				return fmt.Errorf("--timeout must not be negative")
 			}
+			outputMode, err = taskOutputMode(outputMode, isTerminal(os.Stdout))
+			if err != nil {
+				return err
+			}
 			if rounds < 1 {
 				return fmt.Errorf("--max-rounds must be at least 1")
 			}
@@ -86,6 +97,7 @@ or timed out, 1 other errors.`,
 			if err := options.check(); err != nil {
 				return err
 			}
+			model, effort, settings = options.taskDefaults(model, effort, settings)
 			engine, err := options.chooseEngine(command.Context())
 			if err != nil {
 				return err
@@ -106,6 +118,7 @@ or timed out, 1 other errors.`,
 				Task:      text,
 				Agent:     options.agent,
 				Output:    output.Target,
+				Progress:  progressProtocol(outputMode),
 				Report:    !skipReport,
 				MaxRounds: rounds,
 				Model:     strings.TrimSpace(model),
@@ -127,8 +140,24 @@ or timed out, 1 other errors.`,
 			}
 			worker := prepared.worker(options.agent)
 			worker.Task = id
+			worker.TaskInteractive = canSignInFromTask(args[0], isTerminal(os.Stdin))
+			if worker.TaskInteractive {
+				worker.Stdin = os.Stdin
+			}
 			started := time.Now()
+			var progress *taskProgress
+			if outputMode == "attached" {
+				progress = newTaskProgress(os.Stdout, isTerminal(os.Stdout), sandbox.AgentLabel(options.agent), task.Model, task.Effort, started)
+				progress.Start()
+				worker.Stdout = progress
+				defer progress.Close()
+			}
 			code, err := worker.Run(running, nil)
+			if progress != nil {
+				if closeErr := progress.Close(); closeErr != nil {
+					return fmt.Errorf("could not finish the attached progress view: %w", closeErr)
+				}
+			}
 			if err != nil {
 				if errors.Is(err, sandbox.ErrNoImage) {
 					return fmt.Errorf("%w\nSee `codeflower check` for what this machine has", err)
@@ -158,11 +187,66 @@ or timed out, 1 other errors.`,
 	command.Flags().DurationVar(&timeout, "timeout", 0, "stop the task after this long, e.g. 90m or 7h30m (default: no limit)")
 	command.Flags().IntVar(&rounds, "max-rounds", defaultRounds,
 		"how often the agent is sent back to work when it has not finished")
+	command.Flags().StringVar(&outputMode, "output-mode", "auto",
+		"task output: auto (attached in a terminal, raw when redirected), raw, or attached")
 	command.Flags().StringVar(&model, "model", "", "the agent's model, e.g. opus, sonnet or claude-opus-5 (default: the agent's)")
 	command.Flags().StringVar(&effort, "effort", "", "how hard the model thinks, e.g. low, medium, high or max (default: the agent's)")
 	command.Flags().StringArrayVar(&optionValues, "option", nil,
 		"another setting of the agent, ID=VALUE, e.g. fast=on (repeatable)")
 	return command
+}
+
+func taskOutputMode(requested string, terminal bool) (string, error) {
+	switch requested {
+	case "auto":
+		if terminal {
+			return "attached", nil
+		}
+		return "raw", nil
+	case "raw", "attached":
+		return requested, nil
+	default:
+		return "", fmt.Errorf("--output-mode must be auto, raw or attached: %q", requested)
+	}
+}
+
+func progressProtocol(outputMode string) string {
+	if outputMode == "attached" {
+		return "json"
+	}
+	return ""
+}
+
+func isTerminal(file *os.File) bool {
+	_, isTerminal := term.GetFdInfo(file)
+	return isTerminal
+}
+
+func canSignInFromTask(argument string, terminal bool) bool {
+	return argument != "-" && terminal
+}
+
+// taskDefaults fills the model, effort and settings the user left out from the
+// agent's entry in the config; --option values win over the config's.
+func (options sandboxOptions) taskDefaults(model, effort string, settings map[string]string) (string, string, map[string]string) {
+	defaults := options.userConfig.Agent(options.agent)
+	if strings.TrimSpace(model) == "" {
+		model = defaults.Model
+	}
+	if strings.TrimSpace(effort) == "" {
+		effort = defaults.Effort
+	}
+	if len(defaults.Options) > 0 {
+		merged := map[string]string{}
+		for id, value := range defaults.Options {
+			merged[id] = value
+		}
+		for id, value := range settings {
+			merged[id] = value
+		}
+		settings = merged
+	}
+	return model, effort, settings
 }
 
 // parseSettings reads --option ID=VALUE values.
@@ -250,6 +334,9 @@ func printTaskResult(out io.Writer, result sandbox.TaskResult, prepared prepared
 	fmt.Fprintln(out)
 	if result.Message != "" {
 		fmt.Fprintf(out, "  %s\n", result.Message)
+	}
+	if usage := taskUsageSummary(result.Usage); usage != "" {
+		fmt.Fprintf(out, "  usage    %s\n", usage)
 	}
 	if len(result.Settings) > 0 {
 		keys := slices.Sorted(maps.Keys(result.Settings))

@@ -12,11 +12,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"codeflower-launcher/internal/config"
 	"codeflower-launcher/internal/sandbox"
 )
 
@@ -233,6 +235,31 @@ type startRequest struct {
 	IsolateNetwork bool `json:"isolateNetwork"`
 }
 
+// withConfigSkills puts the config's always-mounted skills folders before the
+// chosen ones, leaving out any the user chose as well.
+func withConfigSkills(loaded *config.Config, chosen []string) []string {
+	same := func(a, b string) bool {
+		resolve := func(path string) string {
+			if absolute, err := filepath.Abs(path); err == nil {
+				path = absolute
+			}
+			if real, err := filepath.EvalSymlinks(path); err == nil {
+				path = real
+			}
+			return path
+		}
+		return resolve(a) == resolve(b)
+	}
+	folders, _ := loaded.SkillFolders()
+	var result []string
+	for _, folder := range folders {
+		if !slices.ContainsFunc(chosen, func(other string) bool { return same(folder, other) }) {
+			result = append(result, folder)
+		}
+	}
+	return append(result, chosen...)
+}
+
 var projectName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
 
 func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
@@ -266,8 +293,19 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 
+	loaded, err := config.Load(s.options.ConfigDirectory)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	apiKey, err := loaded.APIKey(request.Agent)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	binds, err := sandbox.Folders{
-		Inputs: request.Inputs, Outputs: request.Outputs, Code: request.Code, Skills: request.Skills,
+		Inputs: request.Inputs, Outputs: request.Outputs, Code: request.Code,
+		Skills: withConfigSkills(loaded, request.Skills),
 	}.Binds(nil)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -359,7 +397,7 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			code, err = sandbox.Worker{
 				Agent: request.Agent, Engine: engine, Image: image, State: state, Binds: binds,
-				Isolation: isolation, Stdout: item, Stderr: item,
+				Isolation: isolation, APIKey: apiKey, Stdout: item, Stderr: item,
 			}.Run(ctx, func(connection sandbox.Connection) {
 				item.mu.Lock()
 				item.url = connection.URL

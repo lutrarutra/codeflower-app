@@ -16,6 +16,29 @@ fail() {
   exit 1
 }
 
+printf '%s\n' \
+  "NOTICE: code flower runs autonomous AI agents that may make decisions, run commands," \
+  "and continue working without constant supervision. Their use may consume substantial" \
+  "model tokens and may incur charges under your provider's plan or API pricing." \
+  "" \
+  "Sandboxing is intended to limit access, not guarantee safety. Agents can access data" \
+  "you mount; read-write mounts may be changed or deleted. Incorrect or overly broad" \
+  "mounts may expose or damage data. Carefully review mounts, permissions, and network" \
+  "settings before each run, and keep backups of important data." \
+  "" \
+  "You are responsible for your instructions, configuration, mount choices, supervision," \
+  "and review of agent actions and results. Do not mount data you are not authorized to" \
+  "share. Use of this software is at your own risk. To the extent permitted by law, the" \
+  "software is provided as-is, without warranties, and its developers disclaim liability" \
+  "for loss, costs, or damages arising from its use." \
+  "" \
+  "To continue installation, type y and press Enter. Any other response cancels." \
+  > /dev/tty || fail "could not show the disclaimer in a terminal"
+if ! IFS= read -r answer < /dev/tty; then
+  fail "could not read confirmation from a terminal"
+fi
+[ "$answer" = y ] || fail "installation cancelled"
+
 case $(uname -s) in
   Linux) os=linux ;;
   Darwin) os=darwin ;;

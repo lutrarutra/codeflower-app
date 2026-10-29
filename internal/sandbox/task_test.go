@@ -14,7 +14,7 @@ func TestTasksAreWrittenPrivatelyAndTheirResultsRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	task := Task{Task: "Cluster the cells", Agent: "claude", Output: OutputsRoot + "/study42", Report: true, MaxRounds: 3,
-		Model: "opus", Effort: "high", Options: map[string]string{"fast": "on"}}
+		Progress: "json", Model: "opus", Effort: "high", Options: map[string]string{"fast": "on"}}
 	if err := WriteTask(state, "abc", task); err != nil {
 		t.Fatal(err)
 	}
@@ -34,12 +34,14 @@ func TestTasksAreWrittenPrivatelyAndTheirResultsRead(t *testing.T) {
 	if _, err := ReadTaskResult(state, "abc"); err == nil {
 		t.Fatal("read a result the sandbox never wrote")
 	}
-	result := `{"status":"unmet","rounds":2,"report":{"path":"/data/output/study42/report.html","exists":true,"checked":true}}`
+	result := `{"status":"unmet","rounds":2,"report":{"path":"/data/output/study42/report.html","exists":true,"checked":true},"usage":{"auth":{"kind":"subscription","plan":"max"},"limits":[{"id":"five_hour","label":"5-hour","usedPercent":25}],"costEstimate":true,"totals":{"tokens":{"totalTokens":170},"cost":{"amount":0.25,"currency":"USD"}}}}`
 	if err := os.WriteFile(filepath.Join(state, "tasks", "abc", "result.json"), []byte(result), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	got, err := ReadTaskResult(state, "abc")
-	if err != nil || got.Status != "unmet" || got.Rounds != 2 || got.Report == nil || !got.Report.Checked {
+	if err != nil || got.Status != "unmet" || got.Rounds != 2 || got.Report == nil || !got.Report.Checked ||
+		got.Usage == nil || got.Usage.Auth.Plan != "max" || got.Usage.Totals.Tokens.Total != 170 ||
+		got.Usage.Totals.Cost == nil || got.Usage.Totals.Cost.Amount != 0.25 {
 		t.Fatalf("got %+v, %v", got, err)
 	}
 }

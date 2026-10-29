@@ -18,7 +18,7 @@ func pullCommand() *cobra.Command {
 		Short: "Download or update the sandbox image",
 		Long: `Download the sandbox image ` + sandbox.DefaultImage + `, or update it to the
 newest release; --image-tag downloads another release or a commit's build.
-"codeflower interactive" and "codeflower task" download it on first use; on a
+"codeflower interactive", "codeflower run" and "codeflower task" download it on first use; on a
 cluster, run this once on the login node, as compute nodes often have no
 internet access. Apptainer keeps it as ` + sandbox.DefaultSIF() + `
 (named after the tag; set CODEFLOWER_IMAGE_DIR to keep it elsewhere).`,

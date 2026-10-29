@@ -238,6 +238,15 @@ function canStart() {
 function renderStart() {
   $('#start').disabled = !canStart();
   renderIsolation();
+  renderConfigSkills();
+}
+
+/** Skills folders every sandbox gets from the config, besides the chosen ones. */
+function renderConfigSkills() {
+  const note = $('#config-skills');
+  const folders = state.system?.configSkills ?? [];
+  note.hidden = folders.length === 0;
+  note.textContent = folders.length ? `Always mounted from ${state.system.configDirectory}: ${folders.map(short).join(', ')}` : '';
 }
 
 /** Where the allowed hosts go, or why the chosen engine cannot isolate the network here. */

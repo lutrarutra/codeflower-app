@@ -59,6 +59,10 @@ func NewToken() string {
 }
 
 // Worker is one sandbox with its agent bridge.
+// APIKeyVariable carries the API key of the config to the bridge, which
+// removes it from its environment again.
+const APIKeyVariable = "CODEFLOWER_API_KEY"
+
 type Worker struct {
 	Agent  string
 	Engine EngineStatus
@@ -74,16 +78,30 @@ type Worker struct {
 	// Isolation, when set, cuts the sandbox off the network except for what
 	// the launcher's proxy allows.
 	Isolation *Isolation
+	// APIKey, when set, is given to the agent's bridge in the environment (never
+	// in the command line); it stores the key in the agent's own files.
+	APIKey string
 	// Task, when set, is the id of a task in the project's tasks folder: the
 	// agent works on it by itself, and nothing listens for VS Code.
-	Task   string
-	Stdout io.Writer
-	Stderr io.Writer
+	Task string
+	// InitialPrompt, when set, is the id of a run prompt to send in a new
+	// session while keeping the worker available to VS Code.
+	InitialPrompt string
+	// TaskInteractive enables terminal sign-in before the task when stdin is a terminal.
+	TaskInteractive bool
+	Stdin           io.Reader
+	Stdout          io.Writer
+	Stderr          io.Writer
 }
 
 // ErrImageWithoutTasks means the sandbox started a worker for VS Code instead
 // of running its task: the image is older than tasks.
 var ErrImageWithoutTasks = errors.New("this sandbox image cannot run tasks (it started a worker for VS Code instead); " +
+	"update it with `codeflower pull`, or choose a newer --image")
+
+// ErrImageWithoutInitialPrompt means the sandbox started a worker but ignored
+// the run's initial prompt.
+var ErrImageWithoutInitialPrompt = errors.New("this sandbox image cannot start a run with an initial prompt; " +
 	"update it with `codeflower pull`, or choose a newer --image")
 
 // TaskFile is where the sandbox finds a task's description.
@@ -94,11 +112,12 @@ func TaskFile(task string) string {
 // Connection is what the bridge writes once it listens: the line VS Code
 // connects with.
 type Connection struct {
-	ID    string `json:"id"`
-	URL   string `json:"url"`
-	Host  string `json:"host"`
-	Port  int    `json:"port"`
-	Agent string `json:"agent"`
+	ID            string `json:"id"`
+	URL           string `json:"url"`
+	Host          string `json:"host"`
+	Port          int    `json:"port"`
+	Agent         string `json:"agent"`
+	InitialPrompt bool   `json:"initialPrompt,omitempty"`
 	// Token also authorizes the bridge's /status.
 	Token string `json:"token"`
 }
@@ -210,6 +229,9 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 		LauncherPID:   os.Getpid(),
 		Binds:         w.Binds,
 	})
+	if w.APIKey != "" {
+		values[APIKeyVariable] = w.APIKey
+	}
 	if w.InspectPort > 0 {
 		values["CODEFLOWER_BRIDGE_INSPECT"] = fmt.Sprintf("0.0.0.0:%d", BridgeInspectPort)
 	}
@@ -218,6 +240,12 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	}
 	if w.Task != "" {
 		values["CODEFLOWER_TASK_FILE"] = TaskFile(w.Task)
+		if w.TaskInteractive {
+			values["CODEFLOWER_TASK_INTERACTIVE"] = "1"
+		}
+	}
+	if w.InitialPrompt != "" {
+		values["CODEFLOWER_INITIAL_PROMPT_FILE"] = RunPromptFile(w.InitialPrompt)
 	}
 	connectionFile := filepath.Join(w.State, "instances", instanceID+".json")
 	defer os.Remove(connectionFile)
@@ -231,10 +259,14 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 		watching, stopWatching := context.WithCancel(ctx)
 		defer stopWatching()
 		go watchConnection(watching, connectionFile, func(Connection) { stopRunning(ErrImageWithoutTasks) })
-	} else if ready != nil || gate != nil {
+	} else if ready != nil || gate != nil || w.InitialPrompt != "" {
 		watching, stopWatching := context.WithCancel(ctx)
 		defer stopWatching()
 		go watchConnection(watching, connectionFile, func(connection Connection) {
+			if w.InitialPrompt != "" && !connection.InitialPrompt {
+				stopRunning(ErrImageWithoutInitialPrompt)
+				return
+			}
 			if gate != nil {
 				if err := gate.bridgeAnswers(); err != nil {
 					stopRunning(fmt.Errorf("the launcher cannot reach the isolated sandbox through %s: %v\n"+
@@ -264,19 +296,19 @@ func (w Worker) runEngine(ctx context.Context, instanceID string, values map[str
 	case EngineDocker:
 		return RunDocker(ctx, DockerRun{
 			Name: name, Image: w.Image, State: w.State, Binds: w.Binds, Env: values,
-			Port: port, InspectPort: w.InspectPort, NetDirectory: netDirectory, Stdout: w.Stdout, Stderr: w.Stderr,
+			Port: port, InspectPort: w.InspectPort, NetDirectory: netDirectory, Stdin: w.Stdin, Stdout: w.Stdout, Stderr: w.Stderr,
 		})
 	case EnginePodman:
 		return RunPodman(ctx, w.Engine.Executable, PodmanRun{
 			Name: name, Image: w.Image, State: w.State, Binds: w.Binds, Env: values,
-			Port: port, NetDirectory: netDirectory, Stdout: w.Stdout, Stderr: w.Stderr,
+			Port: port, NetDirectory: netDirectory, Stdin: w.Stdin, Stdout: w.Stdout, Stderr: w.Stderr,
 		})
 	case EngineApptainer:
 		args, err := ApptainerCommand(w.Engine.Executable, w.Image, w.State, w.Binds, netDirectory)
 		if err != nil {
 			return 1, err
 		}
-		return RunApptainer(ctx, args, values, w.Stdout, w.Stderr)
+		return RunApptainer(ctx, args, values, w.Stdin, w.Stdout, w.Stderr)
 	}
 	return 1, fmt.Errorf("unknown engine %q", w.Engine.Name)
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"codeflower-launcher/internal/config"
 	"codeflower-launcher/internal/sandbox"
 )
 
@@ -22,6 +23,7 @@ type commonOptions struct {
 	// imageTag picks a build of the published image instead of --image.
 	imageTag string
 	engine   string
+	config   string
 }
 
 // ProjectsDirectory holds projects started by name (--project, or the GUI).
@@ -46,6 +48,8 @@ func addCommonFlags(command *cobra.Command, options *commonOptions) {
 	addImageTagFlag(command, &options.imageTag)
 	command.Flags().StringVar(&options.engine, "engine", defaultEngine,
 		"container engine: auto, docker, podman, or apptainer (or set $CODEFLOWER_ENGINE)")
+	command.Flags().StringVar(&options.config, "config", "",
+		"config directory with config.yaml and skills (or set $CODEFLOWER_CONFIG; default ~/.codeflower)")
 }
 
 func addImageTagFlag(command *cobra.Command, tag *string) {
@@ -63,6 +67,11 @@ func imageName(image, tag string) (string, error) {
 		return "", fmt.Errorf("--image and --image-tag (or $CODEFLOWER_IMAGE and $CODEFLOWER_IMAGE_TAG) cannot be used together")
 	}
 	return sandbox.PublishedImage(tag)
+}
+
+// loadConfig reads the config directory (--config, $CODEFLOWER_CONFIG or ~/.codeflower).
+func (options commonOptions) loadConfig() (*config.Config, error) {
+	return config.Load(config.Directory(options.config))
 }
 
 func (options commonOptions) validate() error {
@@ -124,8 +133,9 @@ func Execute() int {
 		Short: "Start code flower sandboxes for Claude Code, Codex, or DeepSeek Harness",
 		Long: `Start code flower sandboxes for Claude Code, Codex, or DeepSeek Harness.
 
-Run "codeflower interactive" for a sandbox to work with from VS Code, or
-"codeflower task" to let the agent work on a task by itself.
+Run "codeflower interactive" for a sandbox to work with from VS Code,
+"codeflower run TASK" to start an initial task in a session you can continue
+there, or "codeflower task" to let the agent work on a task by itself.
 
 New to the command line? Run "codeflower gui" for a window that starts a
 sandbox with a few clicks. Run "codeflower check" to see whether this
@@ -134,7 +144,7 @@ machine can run sandboxes.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.AddCommand(interactiveCommand(), taskCommand(), pullCommand(), checkCommand(), guiCommand())
+	root.AddCommand(interactiveCommand(), runCommand(), taskCommand(), pullCommand(), checkCommand(), guiCommand())
 	if startedFromDesktop(os.Args[1:]) {
 		root.SetArgs([]string{"gui"})
 	}

@@ -89,6 +89,7 @@ func TestTaskChecksItsArguments(t *testing.T) {
 		"--output is required":   {"--agent", "claude", "Cluster the cells"},
 		"--max-rounds must be":   {"--agent", "claude", "--output", output, "--max-rounds", "0", "x"},
 		"--timeout must not be":  {"--agent", "claude", "--output", output, "--timeout", "-1m", "x"},
+		"--output-mode must be":  {"--agent", "claude", "--output", output, "--output-mode", "pretty", "x"},
 		"--agent must be one of": {"--agent", "gemini", "--output", output, "x"},
 		"--allowlist needs":      {"--agent", "claude", "--output", output, "--allowlist", "hosts.txt", "x"},
 		"unknown flag: --port":   {"--agent", "claude", "--output", output, "--port", "7710", "x"},
@@ -104,6 +105,37 @@ func TestTaskChecksItsArguments(t *testing.T) {
 	}
 }
 
+func TestRunRequiresOneNonEmptyTaskArgument(t *testing.T) {
+	cases := map[string][]string{
+		"accepts 1 arg(s)":  {},
+		"the task is empty": {""},
+	}
+	for message, args := range cases {
+		command := runCommand()
+		command.SetArgs(append([]string{"--state", t.TempDir(), "--engine", "docker"}, args...))
+		command.SetOut(new(strings.Builder))
+		command.SetErr(new(strings.Builder))
+		if err := command.Execute(); err == nil || !strings.Contains(err.Error(), message) {
+			t.Errorf("%v: got %v, want %q", args, err, message)
+		}
+	}
+}
+
+func TestRunPromptIsStoredPrivately(t *testing.T) {
+	state := t.TempDir()
+	if err := sandbox.WriteRunPrompt(state, "run-id", "Analyse the input"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := sandbox.ReadRunPrompt(state, "run-id")
+	if err != nil || got != "Analyse the input\n" {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	info, err := os.Stat(filepath.Join(state, "runs", "run-id", "prompt.txt"))
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("prompt permissions: %v, %v", info, err)
+	}
+}
+
 func TestTaskTextComesFromTheArgumentOrStandardInput(t *testing.T) {
 	if text, err := readTask("  Cluster the cells\n", nil); err != nil || text != "Cluster the cells" {
 		t.Fatalf("got %q, %v", text, err)
@@ -113,6 +145,23 @@ func TestTaskTextComesFromTheArgumentOrStandardInput(t *testing.T) {
 	}
 	if _, err := readTask("-", strings.NewReader("\n")); err == nil {
 		t.Fatal("accepted an empty task from standard input")
+	}
+}
+
+func TestTaskSignInNeedsAnInteractiveArgument(t *testing.T) {
+	if !canSignInFromTask("Cluster the cells", true) {
+		t.Fatal("an interactive task argument could not sign in")
+	}
+	for _, test := range []struct {
+		argument string
+		terminal bool
+	}{
+		{"-", true},
+		{"Cluster the cells", false},
+	} {
+		if canSignInFromTask(test.argument, test.terminal) {
+			t.Errorf("allowed task sign-in for argument %q with terminal %t", test.argument, test.terminal)
+		}
 	}
 }
 
@@ -171,5 +220,55 @@ func TestImageTagPicksAPublishedBuild(t *testing.T) {
 	}
 	if _, err := imageName("my-image", "0.2"); err == nil {
 		t.Fatal("--image and --image-tag were accepted together")
+	}
+}
+
+func TestConfigDefaultsAndSkills(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.Mkdir(filepath.Join(directory, "skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "config.yaml"), []byte(`
+engine: podman
+isolate_network: true
+agents:
+  claude: {model: opus, effort: high, options: {fast: "off", speed: slow}}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEFLOWER_ENGINE", "")
+	t.Setenv("CODEFLOWER_IMAGE", "")
+	other := t.TempDir()
+
+	options := sandboxOptions{agent: "claude", folders: sandbox.Folders{Skills: []string{other}}}
+	options.config = directory
+	options.engine = "auto"
+	options.changed = func(string) bool { return false }
+	if err := options.applyConfig(); err != nil {
+		t.Fatal(err)
+	}
+	if options.engine != "podman" || !options.isolateNetwork {
+		t.Fatalf("config not applied: %s %v", options.engine, options.isolateNetwork)
+	}
+	if len(options.folders.Skills) != 2 || options.folders.Skills[0] != filepath.Join(directory, "skills") || options.folders.Skills[1] != other {
+		t.Fatalf("skills %v", options.folders.Skills)
+	}
+	model, effort, settings := options.taskDefaults("", "low", map[string]string{"speed": "fast"})
+	if model != "opus" || effort != "low" || settings["fast"] != "off" || settings["speed"] != "fast" {
+		t.Fatalf("got %q %q %v", model, effort, settings)
+	}
+
+	// A flag or an environment variable wins over the config, and a skills
+	// folder given on the command line is not mounted twice.
+	t.Setenv("CODEFLOWER_ENGINE", "docker")
+	options = sandboxOptions{agent: "claude", folders: sandbox.Folders{Skills: []string{filepath.Join(directory, "skills")}}}
+	options.config = directory
+	options.engine = "docker"
+	options.changed = func(name string) bool { return name == "isolate-network" }
+	if err := options.applyConfig(); err != nil {
+		t.Fatal(err)
+	}
+	if options.engine != "docker" || options.isolateNetwork || len(options.folders.Skills) != 1 {
+		t.Fatalf("got %s %v %v", options.engine, options.isolateNetwork, options.folders.Skills)
 	}
 }

@@ -202,6 +202,21 @@ func TestDockerConfigMirrorsTheSandbox(t *testing.T) {
 	}
 }
 
+func TestDockerConfigAttachesStdinOnlyWhenProvided(t *testing.T) {
+	dir := tempDir(t)
+	config, _, err := DockerConfig(DockerRun{
+		Image: "codeflower-sandbox",
+		State: dir,
+		Stdin: strings.NewReader(""),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !config.AttachStdin || !config.OpenStdin {
+		t.Fatalf("stdin was not attached: %+v", config)
+	}
+}
+
 func TestDockerConfigPublishesTheInspectorOnLoopback(t *testing.T) {
 	dir := tempDir(t)
 	_, host, err := DockerConfig(DockerRun{Image: "codeflower-sandbox", State: dir, Port: 7781, InspectPort: 9339})

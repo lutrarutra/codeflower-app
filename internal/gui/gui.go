@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"codeflower-launcher/internal/config"
 	"codeflower-launcher/internal/sandbox"
 )
 
@@ -38,6 +39,8 @@ type Options struct {
 	Address string
 	// ProjectsDirectory holds projects started by name.
 	ProjectsDirectory string
+	// ConfigDirectory holds config.yaml and the skills always mounted.
+	ConfigDirectory string
 	// Version is shown in the page.
 	Version string
 	// OpenBrowser opens the page; false prints its address only.
@@ -223,6 +226,9 @@ type systemInfo struct {
 	Image    *imageStatus         `json:"image,omitempty"`
 	Agents   []agentInfo          `json:"agents"`
 	Settings Settings             `json:"settings"`
+	// ConfigSkills are the skills folders mounted from the config in every sandbox.
+	ConfigSkills    []string `json:"configSkills"`
+	ConfigDirectory string   `json:"configDirectory,omitempty"`
 	// Isolation says, per engine, why it cannot isolate the network here.
 	Isolation map[string]string `json:"isolation"`
 }
@@ -232,12 +238,19 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 	statuses := sandbox.DetectEngines(r.Context())
 	home, _ := os.UserHomeDir()
 	info := systemInfo{
-		Version:  s.options.Version,
-		Home:     home,
-		Projects: s.options.ProjectsDirectory,
-		Engines:  statuses,
-		Guide:    sandbox.Guide(),
-		Settings: settings,
+		Version:         s.options.Version,
+		Home:            home,
+		Projects:        s.options.ProjectsDirectory,
+		Engines:         statuses,
+		Guide:           sandbox.Guide(),
+		Settings:        settings,
+		ConfigDirectory: s.options.ConfigDirectory,
+	}
+	if loaded, err := config.Load(s.options.ConfigDirectory); err == nil {
+		info.ConfigSkills, _ = loaded.SkillFolders()
+	}
+	if info.ConfigSkills == nil {
+		info.ConfigSkills = []string{}
 	}
 	info.System = info.Guide.System
 	info.Isolation = map[string]string{}

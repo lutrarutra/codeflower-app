@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"codeflower-launcher/internal/config"
 	"codeflower-launcher/internal/gui"
 )
 
@@ -17,6 +18,7 @@ func guiCommand() *cobra.Command {
 	var address string
 	var port int
 	var noBrowser bool
+	var configDirectory string
 	command := &cobra.Command{
 		Use:   "gui",
 		Short: "Open a window to start sandboxes without the command line",
@@ -35,6 +37,7 @@ sandboxes. The window is served only to this computer.`,
 			return gui.Run(ctx, gui.Options{
 				Address:           listenAddress,
 				ProjectsDirectory: ProjectsDirectory(),
+				ConfigDirectory:   config.Directory(configDirectory),
 				Version:           Version,
 				OpenBrowser:       !noBrowser,
 				Log:               os.Stderr,
@@ -51,6 +54,8 @@ sandboxes. The window is served only to this computer.`,
 	command.Flags().StringVar(&address, "address", "127.0.0.1:0", "listener address (mutually exclusive with --port)")
 	command.Flags().IntVar(&port, "port", 0, "port to serve the window on (default: auto; 0 selects any free port)")
 	command.Flags().BoolVar(&noBrowser, "no-browser", false, "print the window's address instead of opening a browser")
+	command.Flags().StringVar(&configDirectory, "config", "",
+		"config directory with config.yaml and skills (or set $CODEFLOWER_CONFIG; default ~/.codeflower)")
 	return command
 }
 

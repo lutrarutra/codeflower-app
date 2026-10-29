@@ -59,12 +59,13 @@ func apptainerAllowsIsolation(ctx context.Context, executable, image string) err
 // RunApptainer runs the command with values passed as APPTAINERENV_* so they
 // reach the clean container environment without appearing in `ps`.
 // Cancelling ctx sends SIGTERM so the worker can shut down cleanly.
-func RunApptainer(ctx context.Context, args []string, values map[string]string, stdout, stderr io.Writer) (int, error) {
+func RunApptainer(ctx context.Context, args []string, values map[string]string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
 	command := exec.Command(args[0], args[1:]...)
 	command.Env = os.Environ()
 	for name, value := range values {
 		command.Env = append(command.Env, "APPTAINERENV_"+name+"="+value)
 	}
+	command.Stdin = stdin
 	command.Stdout, command.Stderr = stdout, stderr
 	return runUntilDone(ctx, command, func() { _ = command.Process.Signal(syscall.SIGTERM) })
 }

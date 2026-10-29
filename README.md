@@ -15,6 +15,8 @@ curl -fsSL https://raw.githubusercontent.com/lutrarutra/codeflower-launcher/main
 
 It installs the latest release into `~/.local/bin` after checking its checksum;
 `CODEFLOWER_INSTALL_DIR` chooses another folder and `CODEFLOWER_VERSION=vX.Y.Z` another release.
+Before downloading or installing, the script displays a safety and usage disclaimer and requires
+you to type `y` and press Enter. It needs a terminal for this confirmation and cancels otherwise.
 
 The [releases](https://github.com/lutrarutra/codeflower-launcher/releases) also have each build
 for download: `codeflower-<os>-<arch>.tar.gz` (`.zip` on Windows) with the `codeflower` binary, and
@@ -111,8 +113,24 @@ codeflower interactive --agent claude --input ~/data/rna --input ~/data/atac --c
 - `--project NAME` (default `default`): the project lives in `~/codeflower/projects/NAME`. Or give the
   directory with `--state DIR`. The project holds the sessions, the agent environment, the workspace,
   the agents' logins, caches, and connection files, created with owner-only permissions.
+- `--config DIR`: the config directory (default `~/.codeflower`, or `$CODEFLOWER_CONFIG`); see
+  [Settings](#settings).
 - `--engine`, `--image` and `--image-tag`: see above and [The sandbox image](#the-sandbox-image);
   `CODEFLOWER_ENGINE`, `CODEFLOWER_IMAGE`, `CODEFLOWER_IMAGE_TAG` and `CODEFLOWER_AGENT` set defaults.
+
+Start a new chat session with an initial task and keep it available for follow-up in VS Code:
+
+```sh
+codeflower run --agent claude --input ~/data/study42 --output ~/results/study42 \
+  "Analyse the data and generate a report"
+```
+
+`run` takes the same folder, project, network and engine options as `interactive`. It sends the
+required task string as the first prompt in a newly created session, then keeps the worker running
+so VS Code can attach while the agent works and continue the chat afterwards. The task is an ordinary
+interactive turn: the extension handles questions and permissions. Sign in with `interactive` first
+if this project has not been signed in yet. `run` replaces its former use as an alias of
+`interactive`; use `interactive` for a worker without an initial prompt.
 
 On a cluster, download the image once on the login node (compute nodes often have no internet), then
 start the worker in a job:
@@ -143,6 +161,39 @@ named `codeflower-<id>` and removed when they exit. `make dev-run AGENT=claude|c
 [codeflower-workspace](https://github.com/lutrarutra/codeflower-workspace) starts a Docker worker for
 development with the state in `.dev-state/`.
 
+## Settings
+
+`~/.codeflower/config.yaml` keeps your defaults between runs. Everything in it is optional; a
+mistyped key is an error. A flag or an environment variable beats the file, and the file beats the
+built-in default.
+
+```yaml
+engine: auto               # as --engine
+image: ""                  # as --image
+isolate_network: false     # as --isolate-network
+skills: [~/more-skills]    # more skills folders to always mount (relative paths: to this directory)
+agents:                    # claude, codex or dsh
+  claude:
+    model: opus            # for `codeflower task`, unless --model is given
+    effort: high           # likewise --effort
+    options: { fast: "on" }   # likewise --option
+  codex:
+    api_key_file: ~/.codeflower/keys/openai   # a file holding the key (chmod 600)
+  dsh:
+    api_key_env: DEEPSEEK_API_KEY             # or the name of a host environment variable
+```
+
+- The folder `~/.codeflower/skills` is mounted read-only in every sandbox when it exists, like
+  `--skills ~/.codeflower/skills`, as are the folders in `skills:`. The launcher window lists them.
+- `model`, `effort` and `options` apply to `codeflower task`. In `codeflower interactive` you choose them
+  in the chat.
+- An API key is given in one of three ways per agent: `api_key_env`, `api_key_file`, or `api_key`
+  itself. A file that holds a key (`config.yaml` with `api_key`, or the `api_key_file`) must not be
+  readable by other users (`chmod 600`). The agent can read its key in the sandbox, as it can the key
+  of a sign-in; `--isolate-network` limits where it can go. If Claude Code's settings file or Codex's
+  credential file cannot be read or contains invalid JSON, the worker stops without replacing it;
+  correct or restore that file before starting again.
+
 ## Tasks: the agent works by itself
 
 `codeflower task` starts the same sandbox without VS Code and lets the agent work on one task until it
@@ -170,9 +221,15 @@ sbatch --time=8:00:00 --signal=B:TERM@120 --wrap "codeflower task --agent claude
   them the agent's defaults apply, including what its settings file in the project says.
 - After each round the agent is asked whether the task is done. If not, it is sent back to work, at
   most `--max-rounds` times (default 3). `--timeout 90m` stops it after that long.
-- The agent must be signed in for the project already: run `codeflower interactive` once, connect
-  VS Code and sign in. The run is a session of the project, so VS Code lists it afterwards and you can
-  continue it there. Its progress is printed; `<project>/tasks/<id>/` keeps the task and its result.
+- If the agent offers terminal sign-in, `codeflower task TASK` starts it when needed when run from an
+  interactive terminal, then continues the task. Batch jobs and tasks read from standard input still
+  need sign-in beforehand; use `codeflower interactive` once and sign in there. The run is a session
+  of the project, so VS Code lists it afterwards and you can continue it there. Its progress is
+  printed; `<project>/tasks/<id>/` keeps the task and its result.
+- `--output-mode auto` uses the attached progress view when stdout is a terminal and raw output when
+  redirected. Use `--output-mode raw` to pass progress through unchanged, or `--output-mode attached`
+  to request the formatted view. The attached footer shows elapsed time, the selected model and effort,
+  and usage/quota values when the agent reports them; Claude cost is an estimate at API prices.
 - Exit status: `0` done, `2` not done (judged impossible, out of rounds, or the report failed its check), `3` not signed in,
   `130` interrupted or timed out, `1` other errors.
 
@@ -185,7 +242,7 @@ without a new launcher.
 - `--image-tag TAG` (or `CODEFLOWER_IMAGE_TAG`, or "Sandbox version" in the window) uses another build:
   a release (`0.2.1`, `v0.2.1`, or `0.2` for the newest patch of 0.2) or a commit (`sha-abc1234`, or the
   commit's hash).
-- `codeflower interactive`, `codeflower task` and the window download the image when it is missing.
+- `codeflower interactive`, `codeflower run`, `codeflower task` and the window download the image when it is missing.
   `codeflower pull [--image-tag TAG]` downloads it, or updates it to the newest build of that tag; a
   downloaded `latest` stays as it is until then.
 - With Apptainer it is kept as `~/codeflower/images/codeflower-sandbox_<tag>.sif`, or in

@@ -18,10 +18,8 @@ func interactiveCommand() *cobra.Command {
 	var port, inspectPort int
 
 	command := &cobra.Command{
-		Use: "interactive",
-		// Its name until v0.2.0; sbatch scripts still use it.
-		Aliases: []string{"run"},
-		Short:   "Start an interactive sandbox (worker) to use from VS Code",
+		Use:   "interactive",
+		Short: "Start an interactive sandbox (worker) to use from VS Code",
 		Long: `Start a sandbox for a project with one agent, to work with from VS Code.
 Each folder is mounted in a subfolder named after it: data folders read-only
 in /data/input, output folders read-write in /data/output, code folders (your
@@ -37,7 +35,9 @@ It prints a codeflower://… line: in VS Code, run "code flower: Connect to
 worker" and paste it. If the agent is not signed in for this project yet,
 VS Code offers its sign-in after connecting. Press Ctrl+C to stop.
 
-To let the agent work on a task by itself instead, see "codeflower task".`,
+To start a session with an initial task and continue it in VS Code, see
+"codeflower run". To let the agent work on a task by itself instead, see
+"codeflower task".`,
 		Example: `  codeflower interactive --agent claude --input ~/data/study42 --output ~/results/study42
   codeflower interactive --agent claude --input ~/data/rna --input ~/data/atac --code ~/src/mypkg
   codeflower interactive --agent codex --project study42 --input /data/study42
