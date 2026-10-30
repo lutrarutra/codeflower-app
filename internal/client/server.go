@@ -185,6 +185,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/workers", s.startWorker)
 	mux.HandleFunc("POST /api/workers/connect", s.connectWorker)
 	mux.HandleFunc("GET /api/workers/{id}/acp", s.relay)
+	mux.HandleFunc("GET /api/workers/{id}/sessions", s.workerSessions)
 	mux.HandleFunc("POST /api/workers/{id}/stop", s.stopWorker)
 	mux.HandleFunc("DELETE /api/workers/{id}", s.forgetWorker)
 	mux.HandleFunc("GET /api/quit", s.quitStatus)

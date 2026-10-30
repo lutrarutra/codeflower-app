@@ -51,6 +51,9 @@ func fakeBridge(t *testing.T, token string) (address string, headers chan http.H
 		case "/status":
 			w.Write([]byte(`{"agent":"claude","agentLabel":"Claude Code","connected":false,"working":0,"waiting":0,"chats":[]}`))
 			return
+		case "/sessions":
+			w.Write([]byte(`{"sessions":[{"key":"claude-abc","title":"Explore the data","harness":"claude"}]}`))
+			return
 		case connectionPath:
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -313,5 +316,24 @@ func TestConnectOnlyNeverLooksForEngines(t *testing.T) {
 	}
 	if response, data := authorized(t, web, "POST", "/api/workers", `{"agent":"claude"}`); response.StatusCode != 403 {
 		t.Fatalf("start %d %v", response.StatusCode, data)
+	}
+}
+
+func TestTheSidebarListsAWorkersChatsWithoutTakingItOver(t *testing.T) {
+	_, server := testServer(t)
+	address, headers := fakeBridge(t, "bridge-token")
+	id := connectTo(t, server, address)["id"].(string)
+	response, data := authorized(t, server, "GET", "/api/workers/"+id+"/sessions", "")
+	sessions, _ := data["sessions"].([]any)
+	if response.StatusCode != http.StatusOK || len(sessions) != 1 || sessions[0].(map[string]any)["title"] != "Explore the data" {
+		t.Fatalf("sessions: %d %v", response.StatusCode, data)
+	}
+	select {
+	case <-headers:
+		t.Fatal("listing the chats opened a window")
+	default:
+	}
+	if response, _ := authorized(t, server, "GET", "/api/workers/nope/sessions", ""); response.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown worker: %d", response.StatusCode)
 	}
 }

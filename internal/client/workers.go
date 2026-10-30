@@ -277,6 +277,62 @@ func fetchActivity(ctx context.Context, client *http.Client, url, token string) 
 	return &current, nil
 }
 
+// workerSessions lists a worker's chats through its bridge's /sessions,
+// which opens no window and so takes the worker over from none.
+func (s *Server) workerSessions(w http.ResponseWriter, r *http.Request) {
+	item := s.find(r.PathValue("id"))
+	if item == nil {
+		writeError(w, http.StatusNotFound, errors.New("no such sandbox"))
+		return
+	}
+	item.mu.Lock()
+	connection := item.connection
+	item.mu.Unlock()
+	if connection == nil {
+		writeError(w, http.StatusConflict, errors.New("the sandbox is not running"))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	url := "http://" + net.JoinHostPort(connection.Host, strconv.Itoa(connection.Port)) + "/sessions"
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	request.Header.Set("Authorization", "Bearer "+connection.Token)
+	// Straight to the bridge, as the relay goes, not through a cluster's proxy.
+	response, err := (&http.Client{Transport: &http.Transport{Proxy: nil}}).Do(request)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, errors.New("the sandbox did not answer"))
+		return
+	}
+	defer response.Body.Close()
+	switch response.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound:
+		writeError(w, http.StatusNotImplemented, errors.New("this sandbox is older than listing chats here; update it"))
+		return
+	case http.StatusUnauthorized:
+		writeError(w, http.StatusBadGateway, errUnauthorized)
+		return
+	default:
+		writeError(w, http.StatusBadGateway, fmt.Errorf("the sandbox answered %s", response.Status))
+		return
+	}
+	var listing struct {
+		Sessions []json.RawMessage `json:"sessions"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&listing); err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+	if listing.Sessions == nil {
+		listing.Sessions = []json.RawMessage{}
+	}
+	writeJSON(w, http.StatusOK, listing)
+}
+
 func slicesClone(lines []string) []string {
 	return append([]string(nil), lines...)
 }
