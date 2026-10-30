@@ -456,7 +456,7 @@ func TestIsolatedEnginesHaveNoNetworkAndNoPorts(t *testing.T) {
 	dir := tempDir(t)
 	net := "/tmp/codeflower-net-01234567"
 
-	args, err := ApptainerCommand("apptainer", "x.sif", dir, nil, net)
+	args, err := ApptainerCommand("apptainer", "x.sif", dir, dir, nil, net)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -310,7 +310,12 @@ func (w Worker) runEngine(ctx context.Context, instanceID string, values map[str
 			Port: port, NetDirectory: netDirectory, CPUs: resources.CPUs, Memory: resources.Memory, Stdin: w.Stdin, Stdout: w.Stdout, Stderr: w.Stderr,
 		})
 	case EngineApptainer:
-		args, err := ApptainerCommand(w.Engine.Executable, w.Image, w.State, w.Binds, netDirectory)
+		scratch, err := newScratch()
+		if err != nil {
+			return 1, err
+		}
+		defer os.RemoveAll(scratch)
+		args, err := ApptainerCommand(w.Engine.Executable, w.Image, w.State, scratch, w.Binds, netDirectory)
 		if err != nil {
 			return 1, err
 		}

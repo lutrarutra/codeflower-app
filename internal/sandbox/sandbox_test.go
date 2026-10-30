@@ -146,13 +146,16 @@ func TestPrepareStateIsPrivateAndKeepsUserEdits(t *testing.T) {
 
 func TestApptainerCommandConfinesTheSandbox(t *testing.T) {
 	dir := tempDir(t)
-	args, err := ApptainerCommand("apptainer", "/images/sandbox.sif", dir,
+	args, err := ApptainerCommand("apptainer", "/images/sandbox.sif", dir, "/local/codeflower-tmp-1",
 		[]Bind{{Source: dir, Target: "/data/input/study", ReadOnly: true}, {Source: dir, Target: "/scratch"}}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(args[1:5], []string{"exec", "--containall", "--no-home", "--cleanenv"}) {
 		t.Fatalf("missing confinement flags: %v", args)
+	}
+	if !strings.Contains(strings.Join(args, " "), "--workdir /local/codeflower-tmp-1") {
+		t.Errorf("/tmp is not backed by the scratch folder: %v", args)
 	}
 	for _, want := range []string{dir + ":" + ContainerState, dir + ":/data/input/study:ro", dir + ":/scratch"} {
 		if !slices.Contains(args, want) {
@@ -163,7 +166,7 @@ func TestApptainerCommandConfinesTheSandbox(t *testing.T) {
 		t.Fatalf("unexpected command tail: %v", args)
 	}
 
-	if _, err := ApptainerCommand("apptainer", "x.sif", dir, []Bind{{Source: dir, Target: "/a"}, {Source: dir, Target: "/a"}}, ""); err == nil {
+	if _, err := ApptainerCommand("apptainer", "x.sif", dir, dir, []Bind{{Source: dir, Target: "/a"}, {Source: dir, Target: "/a"}}, ""); err == nil {
 		t.Fatal("duplicate targets were accepted")
 	}
 }
