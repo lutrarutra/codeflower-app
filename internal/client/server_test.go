@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"codeflower-launcher/internal/sandbox"
+	"codeflower-app/internal/sandbox"
 )
 
 func testServer(t *testing.T) (*Server, *httptest.Server) {
@@ -22,7 +22,7 @@ func testServer(t *testing.T) (*Server, *httptest.Server) {
 	server := &Server{
 		options:  Options{ProjectsDirectory: t.TempDir(), Log: io.Discard},
 		secret:   "secret-key",
-		settings: &settingsStore{path: filepath.Join(t.TempDir(), "launcher.json")},
+		settings: &settingsStore{path: filepath.Join(t.TempDir(), "app.json")},
 		added:    &workerStore{path: filepath.Join(t.TempDir(), "workers.json")},
 		workers:  map[string]*worker{},
 		quit:     make(chan struct{}),
@@ -40,7 +40,7 @@ func testServer(t *testing.T) (*Server, *httptest.Server) {
 
 func noRedirects(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
 
-func TestOnlyTheOpeningBrowserMayUseTheLauncher(t *testing.T) {
+func TestOnlyTheOpeningBrowserMayUseTheApp(t *testing.T) {
 	_, server := testServer(t)
 	client := &http.Client{CheckRedirect: noRedirects}
 
@@ -157,8 +157,8 @@ func TestStartChecksTheChoicesBeforeAnyContainerRuns(t *testing.T) {
 	}
 }
 
-func TestSettingsFromSingleFolderLaunchersBecomeLists(t *testing.T) {
-	store := &settingsStore{path: filepath.Join(t.TempDir(), "launcher.json")}
+func TestSettingsFromSingleFolderAppsBecomeLists(t *testing.T) {
+	store := &settingsStore{path: filepath.Join(t.TempDir(), "app.json")}
 	if err := os.WriteFile(store.path, []byte(`{"agent":"codex","input":"/d/in","output":"/d/out"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}

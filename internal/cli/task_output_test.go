@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"codeflower-launcher/internal/sandbox"
+	"codeflower-app/internal/sandbox"
 )
 
 func TestTaskOutputModeSelectsRawOrAttached(t *testing.T) {

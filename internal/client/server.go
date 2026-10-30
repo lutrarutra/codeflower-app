@@ -28,8 +28,8 @@ import (
 	"sync"
 	"time"
 
-	"codeflower-launcher/internal/config"
-	"codeflower-launcher/internal/sandbox"
+	"codeflower-app/internal/config"
+	"codeflower-app/internal/sandbox"
 )
 
 //go:embed page
@@ -74,7 +74,7 @@ type Options struct {
 	Notify func(Notice)
 }
 
-const cookieName = "codeflower-launcher"
+const cookieName = "codeflower-app"
 
 // Server serves the page and owns the sandboxes it started.
 type Server struct {
@@ -118,7 +118,7 @@ func Run(ctx context.Context, options Options) error {
 	}
 	listener, err := net.Listen("tcp", options.Address)
 	if err != nil {
-		return fmt.Errorf("could not open the launcher window: %w", err)
+		return fmt.Errorf("could not open the app window: %w", err)
 	}
 	server := &Server{
 		options:       options,
@@ -191,7 +191,7 @@ func (s *Server) routes() http.Handler {
 
 // guard admits only this user's browser: the page is opened with a secret,
 // which becomes a cookie. Other local users, and other websites (by DNS
-// rebinding or cross-site requests), cannot drive the launcher.
+// rebinding or cross-site requests), cannot drive the app.
 func (s *Server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.allowedHost(r.Host) {
@@ -223,7 +223,7 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		if err != nil || subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(s.secret)) != 1 {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusForbidden)
-			fmt.Fprintln(w, "Open the code flower launcher with the address it printed, or start it again.")
+			fmt.Fprintln(w, "Open the code flower app with the address it printed, or start it again.")
 			return
 		}
 		if r.Method != http.MethodGet && r.Header.Get("Content-Type") != "application/json" {
@@ -399,7 +399,7 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 }
 
 // image is the image the page asks for, by name or as a build of the
-// published image; when it names neither, the launcher's options apply.
+// published image; when it names neither, the app's options apply.
 // Empty is the latest published image.
 func (s *Server) image(name, tag string) (string, error) {
 	name, tag = strings.TrimSpace(name), strings.TrimSpace(tag)

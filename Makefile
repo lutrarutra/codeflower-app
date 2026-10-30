@@ -1,29 +1,29 @@
-.PHONY: launcher-build launcher-build-linux launcher-build-all launcher-dist launcher-app launcher-test launcher-install
+.PHONY: app-build app-build-linux app-build-all app-dist app-macos app-test app-install
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LAUNCHER_LDFLAGS := -X codeflower-launcher/internal/cli.Version=$(VERSION)
+APP_LDFLAGS := -X codeflower-app/internal/cli.Version=$(VERSION)
 
-# The launcher is a static Go binary: build it for this machine, or for the
-# cluster with launcher-build-linux and copy it there.
-launcher-build:
-	CGO_ENABLED=0 go build -ldflags "$(LAUNCHER_LDFLAGS)" -o build/codeflower ./cmd/codeflower
+# The app is a static Go binary: build it for this machine, or for the
+# cluster with app-build-linux and copy it there.
+app-build:
+	CGO_ENABLED=0 go build -ldflags "$(APP_LDFLAGS)" -o build/codeflower ./cmd/codeflower
 
-launcher-build-linux:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$(LAUNCHER_LDFLAGS)" \
+app-build-linux:
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$(APP_LDFLAGS)" \
 		-o build/codeflower-linux-amd64 ./cmd/codeflower
 
-# Launchers for every desktop system, e.g. to hand to users who start
+# Binaries for every desktop system, e.g. to hand to users who start
 # sandboxes with "codeflower client": build/codeflower-<os>-<arch>[.exe].
-launcher-build-all:
+app-build-all:
 	for target in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 windows/amd64; do \
 		os=$${target%/*}; arch=$${target#*/}; ext=; [ $$os = windows ] && ext=.exe; \
-		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -ldflags "$(LAUNCHER_LDFLAGS)" \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -ldflags "$(APP_LDFLAGS)" \
 			-o build/codeflower-$$os-$$arch$$ext ./cmd/codeflower || exit 1; \
 	done
 
-# The release archives of launcher-build-all, with checksums: build/dist/codeflower-<os>-<arch>.tar.gz
+# The release archives of app-build-all, with checksums: build/dist/codeflower-<os>-<arch>.tar.gz
 # (.zip for Windows), each holding the binary as codeflower[.exe].
-launcher-dist: launcher-build-all
+app-dist: app-build-all
 	rm -rf build/dist build/stage && mkdir -p build/dist
 	for binary in build/codeflower-*-*; do \
 		name=$$(basename $$binary .exe); ext=; case $$binary in *.exe) ext=.exe;; esac; \
@@ -35,12 +35,12 @@ launcher-dist: launcher-build-all
 	cd build/dist && shasum -a 256 * > SHA256SUMS
 
 # The macOS app (double-click opens the window), as build/dist/codeflower-macos.dmg; needs macOS.
-launcher-app: launcher-build-all
+app-macos: app-build-all
 	scripts/macos-app.sh build/codeflower-darwin-arm64 build/codeflower-darwin-amd64 $(VERSION) build/dist
 
-launcher-test:
+app-test:
 	go vet ./... && go test ./...
 
 # Installs codeflower into $(shell go env GOPATH 2>/dev/null || echo ~/go)/bin.
-launcher-install:
-	CGO_ENABLED=0 go install -ldflags "$(LAUNCHER_LDFLAGS)" ./cmd/codeflower
+app-install:
+	CGO_ENABLED=0 go install -ldflags "$(APP_LDFLAGS)" ./cmd/codeflower

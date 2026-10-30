@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"codeflower-launcher/internal/sandbox"
+	"codeflower-app/internal/sandbox"
 )
 
 type taskProgressEvent struct {

@@ -18,8 +18,8 @@ import (
 	"sync"
 	"time"
 
-	"codeflower-launcher/internal/config"
-	"codeflower-launcher/internal/sandbox"
+	"codeflower-app/internal/config"
+	"codeflower-app/internal/sandbox"
 )
 
 func fsSub(files fs.FS, dir string) (fs.FS, error) {
@@ -673,7 +673,7 @@ func newSettingsStore() *settingsStore {
 	if err != nil {
 		return &settingsStore{}
 	}
-	return &settingsStore{path: filepath.Join(dir, "codeflower", "launcher.json")}
+	return &settingsStore{path: filepath.Join(dir, "codeflower", "app.json")}
 }
 
 func (store *settingsStore) load() Settings {
@@ -683,7 +683,7 @@ func (store *settingsStore) load() Settings {
 	}
 	if data, err := os.ReadFile(store.path); err == nil {
 		_ = json.Unmarshal(data, &settings)
-		// Launchers before multiple folders saved one input and one output.
+		// Versions before multiple folders saved one input and one output.
 		var single struct{ Input, Output string }
 		if json.Unmarshal(data, &single) == nil {
 			if settings.Inputs == nil && single.Input != "" {

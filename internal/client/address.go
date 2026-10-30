@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"codeflower-launcher/internal/sandbox"
+	"codeflower-app/internal/sandbox"
 )
 
 // The line a worker prints on start, e.g. codeflower://10.20.3.17:41234?token=Qm9…

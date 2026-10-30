@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"codeflower-launcher/internal/sandbox"
+	"codeflower-app/internal/sandbox"
 )
 
 func printSteps(out io.Writer, steps []sandbox.Step, indent string) {

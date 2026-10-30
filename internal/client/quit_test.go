@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"codeflower-launcher/internal/sandbox"
+	"codeflower-app/internal/sandbox"
 )
 
 // wrapUpBridge answers /wrap-up with answer, and /status with the wrap-up

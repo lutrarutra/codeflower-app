@@ -1,4 +1,4 @@
-// Package config reads the launcher's persistent settings: config.yaml in the
+// Package config reads the app's persistent settings: config.yaml in the
 // config directory (default ~/.codeflower), and the skills folder next to it.
 package config
 

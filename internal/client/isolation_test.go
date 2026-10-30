@@ -6,7 +6,7 @@ import (
 )
 
 func TestTheWindowRemembersNetworkIsolation(t *testing.T) {
-	store := &settingsStore{path: filepath.Join(t.TempDir(), "launcher.json")}
+	store := &settingsStore{path: filepath.Join(t.TempDir(), "app.json")}
 	store.save(Settings{Agent: "claude", IsolateNetwork: true})
 	if !store.load().IsolateNetwork {
 		t.Fatal("network isolation was forgotten")

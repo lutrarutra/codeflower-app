@@ -21,7 +21,7 @@ import (
 	"github.com/moby/term"
 	"github.com/spf13/cobra"
 
-	"codeflower-launcher/internal/sandbox"
+	"codeflower-app/internal/sandbox"
 )
 
 const defaultRounds = 3

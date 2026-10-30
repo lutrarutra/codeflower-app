@@ -7,7 +7,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"codeflower-launcher/assets"
+	"codeflower-app/assets"
 )
 
 // The notification area icon is the shell's own (Shell_NotifyIcon), with a

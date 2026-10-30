@@ -21,8 +21,8 @@ import (
 )
 
 // DockerRun describes a sandbox container for workstations without
-// Apptainer. The launcher owns the container: it has a fixed name and is
-// stopped and removed when the launcher exits.
+// Apptainer. The app owns the container: it has a fixed name and is
+// stopped and removed when the app exits.
 type DockerRun struct {
 	Name  string
 	Image string
@@ -35,7 +35,7 @@ type DockerRun struct {
 	// development; the bridge listens on BridgeInspectPort inside.
 	InspectPort int
 	// NetDirectory, when set, isolates the sandbox: it gets no network, and
-	// this folder of sockets shared with the launcher instead of ports.
+	// this folder of sockets shared with the app instead of ports.
 	NetDirectory string
 	// CPUs and Memory (bytes) limit the container when set.
 	CPUs   int

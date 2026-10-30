@@ -68,7 +68,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Build every release target
-        run: make launcher-dist
+        run: make app-dist
 
   # Installs the latest release with the script the README tells people to pipe into sh.
   install:

@@ -8,10 +8,10 @@ import (
 	"github.com/ebitengine/purego"
 	"github.com/ebitengine/purego/objc"
 
-	"codeflower-launcher/assets"
+	"codeflower-app/assets"
 )
 
-// The menu bar icon talks to AppKit through purego, so the launcher still
+// The menu bar icon talks to AppKit through purego, so the app still
 // builds without cgo for every system.
 
 func init() {

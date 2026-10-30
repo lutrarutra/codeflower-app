@@ -1,4 +1,4 @@
-module codeflower-launcher
+module codeflower-app
 
 go 1.26.0
 

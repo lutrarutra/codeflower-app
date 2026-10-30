@@ -46,7 +46,7 @@ type WorkerSettings struct {
 	HostState     string
 	Engine        string
 	SlurmJobID    string
-	LauncherPID   int
+	AppPID   int
 	// Binds are listed for VS Code, which shows them next to the workspace.
 	Binds []Bind
 }
@@ -67,7 +67,7 @@ func WorkerEnvironment(settings WorkerSettings) map[string]string {
 	values["CODEFLOWER_LISTEN_HOST"] = settings.ListenHost
 	values["CODEFLOWER_ADVERTISE_HOST"] = settings.AdvertiseHost
 	values["CODEFLOWER_PORT"] = itoa(settings.Port)
-	values["CODEFLOWER_LAUNCHER_PID"] = itoa(settings.LauncherPID)
+	values["CODEFLOWER_APP_PID"] = itoa(settings.AppPID)
 	// Shown in VS Code next to the worker.
 	values["CODEFLOWER_HOST_STATE"] = settings.HostState
 	values["CODEFLOWER_ENGINE"] = settings.Engine

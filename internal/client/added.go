@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	"codeflower-launcher/internal/sandbox"
+	"codeflower-app/internal/sandbox"
 )
 
 // connectWorker adds a worker running elsewhere (a batch job, another

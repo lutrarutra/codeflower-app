@@ -55,7 +55,7 @@ func (r Resources) With(override Resources) Resources {
 	return r
 }
 
-// Summary is a one-line description for the launcher's output.
+// Summary is a one-line description for the app's output.
 func (r Resources) Summary() string {
 	var parts []string
 	if r.CPUs > 0 {
@@ -176,7 +176,7 @@ var schedulerQuery = func(ctx context.Context, name string, args ...string) (str
 	return string(output), err
 }
 
-// DetectResources reads the allocation of the batch job the launcher runs in:
+// DetectResources reads the allocation of the batch job the app runs in:
 // Slurm, PBS Pro/OpenPBS/Torque, LSF, Grid Engine or HTCondor. Outside a job
 // it returns nothing.
 func DetectResources(ctx context.Context, getenv func(string) string) Resources {

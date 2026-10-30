@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"codeflower-launcher/internal/sandbox"
+	"codeflower-app/internal/sandbox"
 )
 
 func interactiveCommand() *cobra.Command {
@@ -27,7 +27,7 @@ repositories and packages, which the agent may change) read-write in
 /data/code, and skills folders read-only in /data/skills, where the agent
 loads them from.
 
-With --isolate-network the sandbox has no network of its own: the launcher
+With --isolate-network the sandbox has no network of its own: the app
 is its only way out, and lets it reach only its agent's service and the hosts
 in the allowlist file. Edit the file while the sandbox runs to allow more.
 

@@ -1,13 +1,13 @@
 <p align="center">
-  <img src="assets/icon.png" width="112" height="112" alt="code flower launcher icon">
+  <img src="assets/icon.png" width="112" height="112" alt="code flower app icon">
 </p>
 
-<h1 align="center">code flower launcher</h1>
+<h1 align="center">code flower app</h1>
 
 <p align="center">Start code flower sandboxes from a window or the command line.</p>
 
 <p align="center">
-  <b><img src="assets/icon.png" width="20" height="20" alt=""> launcher</b>
+  <b><img src="assets/icon.png" width="20" height="20" alt=""> app</b>
   &nbsp;·&nbsp;
   <a href="https://github.com/lutrarutra/codeflower-sandbox"><img src="https://raw.githubusercontent.com/lutrarutra/codeflower-sandbox/main/assets/icon.svg" width="20" height="20" alt=""> sandbox</a>
   &nbsp;·&nbsp;
@@ -70,7 +70,7 @@ flowchart LR
 On Linux (also on clusters) and macOS:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/lutrarutra/codeflower-launcher/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/lutrarutra/codeflower-app/main/install.sh | sh
 ```
 
 It installs the latest release into `~/.local/bin` after checking its checksum;
@@ -78,7 +78,7 @@ It installs the latest release into `~/.local/bin` after checking its checksum;
 Before downloading or installing, the script displays a safety and usage disclaimer and requires
 you to type `y` and press Enter. It needs a terminal for this confirmation and cancels otherwise.
 
-The [releases](https://github.com/lutrarutra/codeflower-launcher/releases) also have each build
+The [releases](https://github.com/lutrarutra/codeflower-app/releases) also have each build
 for download: `codeflower-<os>-<arch>.tar.gz` (`.zip` on Windows) with the `codeflower` binary, and
 `codeflower-macos.dmg` with the macOS app. The builds are not signed yet: on macOS, right-click the
 app and choose *Open* the first time; on Windows, choose *More info → Run anyway*.
@@ -86,10 +86,10 @@ app and choose *Open* the first time; on Windows, choose *More info → Run anyw
 Or build it with Go 1.26 or newer:
 
 ```sh
-make launcher-build          # build/codeflower for this machine
-make launcher-install        # or install it into $(go env GOPATH)/bin
-make launcher-build-linux    # build/codeflower-linux-amd64 for an x86_64 cluster
-make launcher-build-all      # Linux, macOS and Windows binaries, e.g. to hand out
+make app-build          # build/codeflower for this machine
+make app-install        # or install it into $(go env GOPATH)/bin
+make app-build-linux    # build/codeflower-linux-amd64 for an x86_64 cluster
+make app-build-all      # Linux, macOS and Windows binaries, e.g. to hand out
 ```
 
 ## Container engines
@@ -142,7 +142,7 @@ working, how many wait for you (a plan to approve, a permission or a question; t
 then), and whether VS Code is connected. Chats keep working when VS Code disconnects. *Isolate the
 network* does what `--isolate-network` does (below), with the project's allowlist file shown on the
 sandbox's card; the client says when this computer cannot isolate, as with Docker on macOS.
-The client remembers the last choices in the user's config directory (`codeflower/launcher.json`).
+The client remembers the last choices in the user's config directory (`codeflower/app.json`).
 
 Where the desktop has a system tray, the client also shows an icon there: in the notification area
 on Windows, in the menu bar on macOS, and on Linux desktops with a StatusNotifierItem host (KDE,
@@ -199,7 +199,7 @@ codeflower interactive --agent claude --input ~/data/rna --input ~/data/atac --c
   `--skills DIR`: a skill (a folder with a `SKILL.md`) or a folder of skills, read-only at
   `/data/skills/NAME`; each skill is installed for the agent (Claude Code, Codex and dsh).
   All four can be repeated; NAME is the folder's own name.
-- `--isolate-network`: the sandbox gets no network of its own. The launcher is its only way out and lets
+- `--isolate-network`: the sandbox gets no network of its own. The app is its only way out and lets
   it reach only its agent's service and the hosts in the allowlist file, refusing (and printing) the rest.
   `--allowlist FILE` names the file (default: `PROJECT.allowed-hosts.txt` next to the project
   directory, created with an explanation). One host per line, `*.example.org` for subdomains,
@@ -208,8 +208,8 @@ codeflower interactive --agent claude --input ~/data/rna --input ~/data/atac --c
   `@ncbi`, `@ensembl`, `@uniprot`, `@ebi` (the new file lists them with their hosts). The agent is told
   how this works and asks you for what it needs, e.g. `@pypi` to install packages.
   It needs no administrator rights: Docker and Podman on Linux, or an Apptainer that lets users run
-  `apptainer exec --net --network none` (the launcher checks and says so). Docker Desktop on macOS
-  and Windows cannot share the launcher's sockets with the sandbox, so it does not work there.
+  `apptainer exec --net --network none` (the app checks and says so). Docker Desktop on macOS
+  and Windows cannot share the app's sockets with the sandbox, so it does not work there.
 - `--bind SOURCE[:TARGET[:ro|rw]]`: more mounts (repeatable). Without a target it maps to
   `/data/input/NAME`; binds are read-only unless `:rw` is given.
 - `--project NAME` (default `default`): the project lives in `~/codeflower/projects/NAME`. Or give the
@@ -259,7 +259,7 @@ private, for example `sbatch --output=$HOME/.codeflower-logs/%j.out` with that d
 The same information is also written to a mode-`0600` file in `<project>/instances/` for scripts.
 
 Under Slurm, wrap it in `sbatch` and add `--signal=B:TERM@120` so the worker can shut down cleanly
-before walltime. The launcher tells the agent what the job may use: it reads the allocation of a
+before walltime. The app tells the agent what the job may use: it reads the allocation of a
 Slurm, PBS Pro/OpenPBS/Torque, LSF, Grid Engine or HTCondor job (CPUs, memory, GPUs and when the job
 ends, as far as the scheduler gives them), and `--cpus`, `--memory 32G` and `--time-limit 8h` replace
 those figures or give them outside a job. Docker and Podman also enforce `--cpus` and `--memory`;
@@ -375,8 +375,8 @@ codeflower task --continue ~/codeflower/projects/study42/tasks/1a2b3c "Also comp
 ## The sandbox image
 
 The sandbox is published by [codeflower-sandbox](https://github.com/lutrarutra/codeflower-sandbox) as
-`ghcr.io/lutrarutra/codeflower-sandbox`. The launcher uses its `latest` tag, so sandbox releases reach it
-without a new launcher.
+`ghcr.io/lutrarutra/codeflower-sandbox`. The app uses its `latest` tag, so sandbox releases reach it
+without a new app.
 
 - `--image-tag TAG` (or `CODEFLOWER_IMAGE_TAG`, or "Sandbox version" in the window) uses another build:
   a release (`0.2.1`, `v0.2.1`, or `0.2` for the newest patch of 0.2) or a commit (`sha-abc1234`, or the
@@ -399,7 +399,7 @@ runs inside the sandbox and stores the login in the project:
 - DeepSeek Harness: a DeepSeek API key and/or an OpenAI-compatible endpoint.
 
 The sandbox needs internet access for sign-in and for model calls (with `--isolate-network`, the
-launcher's own access, through the node's `HTTPS_PROXY` if it has one). Anthropic does not permit third-party
+app's own access, through the node's `HTTPS_PROXY` if it has one). Anthropic does not permit third-party
 products to offer Claude.ai login, but does not prevent users from signing in to the unmodified Claude
 Code binary with their own subscription; whether using it through code flower is covered is not settled,
 so check that your use is permitted, or use an API key.
@@ -407,7 +407,7 @@ so check that your use is permitted, or use an API key.
 ## Tests
 
 ```sh
-make launcher-test   # go vet and go test; `make test` in codeflower-workspace runs every component
+make app-test   # go vet and go test; `make test` in codeflower-workspace runs every component
 ```
 
 The local test environment does not include Apptainer or a cluster, so run the image under Apptainer and

@@ -18,7 +18,7 @@ import (
 	"github.com/docker/docker/client"
 )
 
-// The published sandbox image. The launcher follows its newest release;
+// The published sandbox image. The app follows its newest release;
 // --image-tag picks another release or a commit's build.
 const (
 	ImageRepository = "ghcr.io/lutrarutra/codeflower-sandbox"
@@ -62,13 +62,13 @@ func publishedTag(image string) (string, bool) {
 }
 
 // IsPublished says whether image names a build of the published image, which
-// the launcher downloads itself; another image is the user's to provide.
+// the app downloads itself; another image is the user's to provide.
 func IsPublished(image string) bool {
 	_, ok := publishedTag(image)
 	return ok
 }
 
-// ImageDirectory holds the Apptainer image files the launcher downloads:
+// ImageDirectory holds the Apptainer image files the app downloads:
 // $CODEFLOWER_IMAGE_DIR, or ~/codeflower/images next to the projects.
 func ImageDirectory() string {
 	if directory := os.Getenv("CODEFLOWER_IMAGE_DIR"); directory != "" {
@@ -119,7 +119,7 @@ func PublishedName(image string) string {
 }
 
 // pullImage downloads a build of the published image; without refresh, an
-// Apptainer image another launcher downloaded meanwhile is kept.
+// Apptainer image another app downloaded meanwhile is kept.
 func pullImage(ctx context.Context, engine EngineStatus, image string, refresh bool, out io.Writer) error {
 	tag, ok := publishedTag(image)
 	if !ok {
@@ -251,7 +251,7 @@ func pullApptainer(ctx context.Context, executable, name, target string, refresh
 		return err
 	}
 	defer unlock()
-	// Another launcher may have finished the download while this one waited.
+	// Another app may have finished the download while this one waited.
 	if _, err := os.Stat(target); err == nil && !refresh {
 		return nil
 	}

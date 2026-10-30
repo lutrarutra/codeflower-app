@@ -14,8 +14,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"codeflower-launcher/internal/config"
-	"codeflower-launcher/internal/sandbox"
+	"codeflower-app/internal/config"
+	"codeflower-app/internal/sandbox"
 )
 
 // interactive says whether the user can answer questions on this terminal.
@@ -205,7 +205,7 @@ func (options *sandboxOptions) applyConfig() error {
 	return nil
 }
 
-// resolvedPath is a folder as the launcher mounts it, to tell the same folder apart.
+// resolvedPath is a folder as the app mounts it, to tell the same folder apart.
 func resolvedPath(folder string) string {
 	absolute, err := filepath.Abs(folder)
 	if err != nil {

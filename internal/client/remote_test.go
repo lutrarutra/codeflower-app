@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"codeflower-launcher/internal/sandbox"
+	"codeflower-app/internal/sandbox"
 )
 
 func TestAddressesParseLikeTheExtension(t *testing.T) {

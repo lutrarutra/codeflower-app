@@ -5,7 +5,7 @@ import (
 	"image/png"
 	"testing"
 
-	"codeflower-launcher/assets"
+	"codeflower-app/assets"
 )
 
 func TestTheMenuBarIconIsATemplate(t *testing.T) {

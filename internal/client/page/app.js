@@ -28,7 +28,7 @@ async function api(path, options = {}) {
     body: options.body ? JSON.stringify(options.body) : undefined
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || `The launcher answered ${response.status}`);
+  if (!response.ok) throw new Error(data.error || `The app answered ${response.status}`);
   return data;
 }
 
@@ -194,7 +194,7 @@ const FOLDER_KINDS = {
   skills: { root: '/data/skills', title: 'Choose a skill, or a folder of skills', noun: 'skills' }
 };
 
-/** Where each folder appears in the sandbox; the same names as the launcher's folderName. */
+/** Where each folder appears in the sandbox; the same names as the app's folderName. */
 function targets(kind) {
   const used = new Set();
   return state.folders[kind].map((path) => {
@@ -282,7 +282,7 @@ async function firstLoad() {
   try {
     state.system = await api('/api/system');
   } catch (error) {
-    $('#engine-body').replaceChildren(statusLine('bad', 'Could not reach the launcher', error.message));
+    $('#engine-body').replaceChildren(statusLine('bad', 'Could not reach the app', error.message));
     return;
   }
   const settings = state.system.settings || {};
@@ -796,7 +796,7 @@ async function refreshResources() {
   try {
     renderResources(await api('/api/resources'));
   } catch {
-    // The launcher may be busy or gone; the next refresh tries again.
+    // The app may be busy or gone; the next refresh tries again.
   } finally {
     loadingResources = false;
   }

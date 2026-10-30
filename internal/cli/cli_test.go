@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"codeflower-launcher/internal/sandbox"
+	"codeflower-app/internal/sandbox"
 )
 
 func TestInteractiveRequiresAKnownAgent(t *testing.T) {

@@ -15,7 +15,7 @@ import (
 // ApptainerCommand confines the sandbox: no home, a clean environment, its
 // own PID and IPC namespaces, and only the project plus explicit binds. With
 // netDirectory it also has no network, only that folder of sockets shared
-// with the launcher. The sandbox's /tmp and /var/tmp live in scratch, as
+// with the app. The sandbox's /tmp and /var/tmp live in scratch, as
 // --containall otherwise makes them a tmpfs of `sessiondir max size` (16 MB
 // by default).
 func ApptainerCommand(executable, image, state, scratch string, binds []Bind, netDirectory string) ([]string, error) {
@@ -43,7 +43,7 @@ func ApptainerCommand(executable, image, state, scratch string, binds []Bind, ne
 const scratchPrefix = "codeflower-tmp-"
 
 // newScratch makes the private folder behind the sandbox's /tmp, in the
-// launcher's temporary folder ($TMPDIR, which on a cluster is usually the
+// app's temporary folder ($TMPDIR, which on a cluster is usually the
 // job's local disk), rather than sharing the node's /tmp with the sandbox.
 func newScratch() (string, error) {
 	scratch, err := os.MkdirTemp("", scratchPrefix)

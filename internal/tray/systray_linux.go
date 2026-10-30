@@ -3,7 +3,7 @@ package tray
 import (
 	"fyne.io/systray"
 
-	"codeflower-launcher/assets"
+	"codeflower-app/assets"
 )
 
 const notifies = false

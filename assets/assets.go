@@ -1,4 +1,4 @@
-// Package assets holds the launcher's icons.
+// Package assets holds the app's icons.
 package assets
 
 import _ "embed"

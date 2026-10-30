@@ -1,13 +1,13 @@
 #!/bin/sh
-# Installs the code flower launcher from its latest GitHub release:
+# Installs the code flower app from its latest GitHub release:
 #
-#   curl -fsSL https://raw.githubusercontent.com/lutrarutra/codeflower-launcher/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/lutrarutra/codeflower-app/main/install.sh | sh
 #
 # CODEFLOWER_VERSION=v0.1.0 installs that release instead, and
 # CODEFLOWER_INSTALL_DIR chooses the folder (default ~/.local/bin).
 set -eu
 
-repo=lutrarutra/codeflower-launcher
+repo=lutrarutra/codeflower-app
 version=${CODEFLOWER_VERSION:-latest}
 directory=${CODEFLOWER_INSTALL_DIR:-$HOME/.local/bin}
 

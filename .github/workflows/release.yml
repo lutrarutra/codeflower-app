@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: Build even if the launcher did not change since the previous tag
+        description: Build even if the app did not change since the previous tag
         type: boolean
         default: false
 
@@ -45,7 +45,7 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "The launcher did not change since $previous: nothing released for $GITHUB_REF_NAME." >> "$GITHUB_STEP_SUMMARY"
+            echo "The app did not change since $previous: nothing released for $GITHUB_REF_NAME." >> "$GITHUB_STEP_SUMMARY"
           fi
 
   ci:
@@ -68,7 +68,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Build the archives
-        run: make launcher-dist VERSION="$GITHUB_REF_NAME"
+        run: make app-dist VERSION="$GITHUB_REF_NAME"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -139,7 +139,7 @@ jobs:
           ## Install
 
           \`\`\`sh
-          curl -fsSL https://raw.githubusercontent.com/lutrarutra/codeflower-launcher/main/install.sh | sh
+          curl -fsSL https://raw.githubusercontent.com/lutrarutra/codeflower-app/main/install.sh | sh
           \`\`\`
 
           | System | Download |
@@ -152,7 +152,7 @@ jobs:
           The builds are not signed yet. On macOS, right-click the app and choose *Open* the first time
           (or *System Settings → Privacy & Security → Open Anyway*). On Windows, choose *More info → Run anyway*.
 
-          This launcher runs the sandbox image \`$image\`, which it downloads on first use (\`codeflower pull\`).
+          This app runs the sandbox image \`$image\`, which it downloads on first use (\`codeflower pull\`).
           NOTES
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" dist/* --clobber

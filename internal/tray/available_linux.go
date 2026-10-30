@@ -1,6 +1,6 @@
 package tray
 
-import "codeflower-launcher/internal/desktop"
+import "codeflower-app/internal/desktop"
 
 // available: a graphical session whose bus has a StatusNotifierItem host
 // (KDE, XFCE, Cinnamon, GNOME with the AppIndicator extension). Stock GNOME,

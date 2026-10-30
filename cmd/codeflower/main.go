@@ -5,7 +5,7 @@ package main
 import (
 	"os"
 
-	"codeflower-launcher/internal/cli"
+	"codeflower-app/internal/cli"
 )
 
 func main() {

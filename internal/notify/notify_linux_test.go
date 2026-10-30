@@ -10,7 +10,7 @@ import (
 
 	"github.com/godbus/dbus/v5"
 
-	"codeflower-launcher/assets"
+	"codeflower-app/assets"
 )
 
 func TestNotifyArguments(t *testing.T) {

@@ -136,7 +136,7 @@ func TestAllowlistIsReadAgainWhenItChanges(t *testing.T) {
 		t.Fatal("pypi.org is not allowed by the file")
 	}
 	if allowed, byUser := list.allows("api.anthropic.com", 443); !allowed || byUser {
-		t.Fatal("the provider's host is not allowed by the launcher")
+		t.Fatal("the provider's host is not allowed by the app")
 	}
 	writeAllowlist(t, path, "conda.anaconda.org\n")
 	if allowed, _ := list.allows("pypi.org", 443); allowed {

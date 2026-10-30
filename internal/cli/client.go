@@ -16,10 +16,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"codeflower-launcher/internal/client"
-	"codeflower-launcher/internal/config"
-	"codeflower-launcher/internal/notify"
-	"codeflower-launcher/internal/tray"
+	"codeflower-app/internal/client"
+	"codeflower-app/internal/config"
+	"codeflower-app/internal/notify"
+	"codeflower-app/internal/tray"
 )
 
 func clientCommand() *cobra.Command {

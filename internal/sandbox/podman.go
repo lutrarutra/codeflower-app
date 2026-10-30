@@ -25,7 +25,7 @@ func (e missingImage) Error() string {
 func (e missingImage) Is(target error) bool { return target == ErrNoImage }
 
 // PodmanRun describes a sandbox container run with the podman command, which
-// needs no daemon. Like Docker, the launcher owns the container.
+// needs no daemon. Like Docker, the app owns the container.
 type PodmanRun struct {
 	Name  string
 	Image string
@@ -35,7 +35,7 @@ type PodmanRun struct {
 	// Port is published on 127.0.0.1 when set.
 	Port int
 	// NetDirectory, when set, isolates the sandbox: it gets no network, and
-	// this folder of sockets shared with the launcher instead of ports.
+	// this folder of sockets shared with the app instead of ports.
 	NetDirectory string
 	// CPUs and Memory (bytes) limit the container when set.
 	CPUs   int

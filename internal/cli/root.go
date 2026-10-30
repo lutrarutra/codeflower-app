@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"codeflower-launcher/internal/config"
-	"codeflower-launcher/internal/sandbox"
+	"codeflower-app/internal/config"
+	"codeflower-app/internal/sandbox"
 )
 
 // Version is set at build time with -ldflags.

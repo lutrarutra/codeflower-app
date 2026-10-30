@@ -20,11 +20,11 @@ import (
 	"time"
 )
 
-// A network-isolated sandbox has no network of its own. The launcher shares
+// A network-isolated sandbox has no network of its own. The app shares
 // a folder with it holding two Unix sockets: the bridge listens on one, which
-// the launcher forwards VS Code's connections to, and the launcher's proxy
+// the app forwards VS Code's connections to, and the app's proxy
 // listens on the other, the sandbox's only way out. Nothing else on the
-// machine sees either: the launcher opens no port for the proxy.
+// machine sees either: the app opens no port for the proxy.
 const (
 	ContainerNet = "/codeflower-net"
 	bridgeSocket = "bridge.sock"
@@ -40,7 +40,7 @@ type Isolation struct {
 	Allowlist string
 }
 
-// isolatedEnvironment routes the sandbox's traffic through the launcher.
+// isolatedEnvironment routes the sandbox's traffic through the app.
 func isolatedEnvironment(values map[string]string) {
 	for _, name := range []string{"HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"} {
 		values[name] = SandboxProxy
@@ -57,11 +57,11 @@ func isolatedEnvironment(values map[string]string) {
 
 // IsolationProblem says why an engine cannot isolate the network here, or
 // returns nil. Docker and Podman outside Linux run in a VM, which cannot
-// connect sockets shared with the launcher; Apptainer is checked when the
+// connect sockets shared with the app; Apptainer is checked when the
 // sandbox starts, as sites decide whether users may isolate it.
 func IsolationProblem(engine string) error {
 	if engine != EngineApptainer && runtime.GOOS != "linux" {
-		return fmt.Errorf("network isolation needs Linux: %s on %s runs in a VM that cannot share the launcher's sockets",
+		return fmt.Errorf("network isolation needs Linux: %s on %s runs in a VM that cannot share the app's sockets",
 			engineLabel(engine), systemLabel())
 	}
 	return nil
@@ -109,7 +109,7 @@ func newNetDirectory(instanceID string) (string, error) {
 	return directory, nil
 }
 
-// removeStaleNetDirectories removes folders left by launchers that were
+// removeStaleNetDirectories removes folders left by apps that were
 // killed: their proxy socket no longer answers.
 func removeStaleNetDirectories(base string) {
 	entries, err := os.ReadDir(base)
@@ -198,7 +198,7 @@ func pipe(clientConn net.Conn, client io.Reader, target net.Conn) {
 	<-done
 }
 
-// gateway is the launcher's side of an isolated sandbox.
+// gateway is the app's side of an isolated sandbox.
 type gateway struct {
 	directory string
 	ingress   net.Listener
@@ -278,7 +278,7 @@ func (g *gateway) forwardToBridge(conn net.Conn) {
 	pipe(conn, conn, bridge)
 }
 
-// bridgeAnswers checks that the launcher can reach the bridge's socket,
+// bridgeAnswers checks that the app can reach the bridge's socket,
 // which fails where the engine cannot share sockets with the host.
 func (g *gateway) bridgeAnswers() error {
 	conn, err := net.DialTimeout("unix", filepath.Join(g.directory, bridgeSocket), 5*time.Second)

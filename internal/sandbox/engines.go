@@ -15,7 +15,7 @@ import (
 	"github.com/docker/docker/client"
 )
 
-// Engines the launcher can run the sandbox with.
+// Engines the app can run the sandbox with.
 const (
 	EngineDocker    = "docker"
 	EnginePodman    = "podman"
@@ -26,7 +26,7 @@ const (
 // workstation; a .sif image always selects Apptainer.
 var EngineNames = []string{EngineDocker, EnginePodman, EngineApptainer}
 
-// DefaultImage is the published sandbox image the launcher downloads; for
+// DefaultImage is the published sandbox image the app downloads; for
 // Apptainer it is converted into DefaultSIF.
 const DefaultImage = ImageRepository + ":" + DefaultImageTag
 
@@ -521,7 +521,7 @@ func ImageHelp(engine, image string) []Step {
 	}
 	switch {
 	case !published:
-		return []Step{{Text: "Download or build " + image + " yourself; the launcher downloads only the published image " + ImageRepository + "."}}
+		return []Step{{Text: "Download or build " + image + " yourself; the app downloads only the published image " + ImageRepository + "."}}
 	case engine == EngineApptainer:
 		return []Step{
 			{Text: "Download it once, on a node with internet access (on a cluster, the login node; compute nodes often have none):", Command: pull},

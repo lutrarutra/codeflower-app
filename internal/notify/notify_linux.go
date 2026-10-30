@@ -11,8 +11,8 @@ import (
 
 	"github.com/godbus/dbus/v5"
 
-	"codeflower-launcher/assets"
-	"codeflower-launcher/internal/desktop"
+	"codeflower-app/assets"
+	"codeflower-app/internal/desktop"
 )
 
 // The freedesktop notification service, which GNOME, KDE and the other

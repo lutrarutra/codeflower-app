@@ -76,7 +76,7 @@ type Worker struct {
 	// InspectPort publishes the bridge's Node inspector (development, Docker).
 	InspectPort int
 	// Isolation, when set, cuts the sandbox off the network except for what
-	// the launcher's proxy allows.
+	// the app's proxy allows.
 	Isolation *Isolation
 	// APIKey, when set, is given to the agent's bridge in the environment (never
 	// in the command line); it stores the key in the agent's own files.
@@ -91,7 +91,7 @@ type Worker struct {
 	InitialPrompt string
 	// TaskInteractive enables terminal sign-in before the task when stdin is a terminal.
 	TaskInteractive bool
-	// Resources the user gave replace those of the batch job the launcher runs in.
+	// Resources the user gave replace those of the batch job the app runs in.
 	Resources Resources
 	Stdin     io.Reader
 	Stdout    io.Writer
@@ -186,7 +186,7 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 		fmt.Fprintf(w.Stderr, "  resources %s\n", resources.Summary())
 	}
 
-	// An isolated sandbox has no network: the launcher holds VS Code's port
+	// An isolated sandbox has no network: the app holds VS Code's port
 	// and is its only way out, for as long as it runs.
 	var netDirectory string
 	var gate *gateway
@@ -229,7 +229,7 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 		HostState:     w.State,
 		Engine:        w.Engine.Name,
 		SlurmJobID:    os.Getenv("SLURM_JOB_ID"),
-		LauncherPID:   os.Getpid(),
+		AppPID:   os.Getpid(),
 		Binds:         w.Binds,
 	})
 	resources.environment(values)
@@ -273,7 +273,7 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 			}
 			if gate != nil {
 				if err := gate.bridgeAnswers(); err != nil {
-					stopRunning(fmt.Errorf("the launcher cannot reach the isolated sandbox through %s: %v\n"+
+					stopRunning(fmt.Errorf("the app cannot reach the isolated sandbox through %s: %v\n"+
 						"Docker Desktop on macOS and Windows cannot share sockets with the host; "+
 						"isolate the network on Linux, or run without --isolate-network", netDirectory, err))
 					return

@@ -176,7 +176,7 @@ const (
 	TaskInterrupted = 130
 )
 
-// ExitCode is the launcher's exit code for the result.
+// ExitCode is the app's exit code for the result.
 func (r TaskResult) ExitCode() int {
 	switch r.Status {
 	case "completed":
