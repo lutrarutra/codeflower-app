@@ -1,4 +1,22 @@
-# Launcher
+<p align="center">
+  <img src="assets/icon.png" width="112" height="112" alt="code flower launcher icon">
+</p>
+
+<h1 align="center">code flower launcher</h1>
+
+<p align="center">Start code flower sandboxes from a window or the command line.</p>
+
+<p align="center">
+  <b><img src="assets/icon.png" width="20" height="20" alt=""> launcher</b>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/lutrarutra/codeflower-sandbox"><img src="https://raw.githubusercontent.com/lutrarutra/codeflower-sandbox/main/assets/icon.svg" width="20" height="20" alt=""> sandbox</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/lutrarutra/codeflower-vsc-extension"><img src="https://raw.githubusercontent.com/lutrarutra/codeflower-vsc-extension/main/media/icon.svg" width="20" height="20" alt=""> VS Code extension</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/lutrarutra/storyteller"><img src="https://raw.githubusercontent.com/lutrarutra/storyteller/main/assets/icon.svg" width="20" height="20" alt=""> storyteller</a>
+  &nbsp;·&nbsp;
+  <a href="https://codeflower.dev">codeflower.dev</a>
+</p>
 
 `codeflower` starts code flower sandboxes (workers): a container with the agent (Claude Code, Codex or
 DeepSeek Harness) and the bridge VS Code connects to. It has a window for people who do not use a
@@ -84,24 +102,6 @@ network* does what `--isolate-network` does (below), with the project's allowlis
 sandbox's card; the client says when this computer cannot isolate, as with Docker on macOS.
 The client remembers the last choices in the user's config directory (`codeflower/launcher.json`).
 
-`codeflower client --connect-only` (or `client: {connect_only: true}` in `config.yaml`) never starts
-sandboxes and does not look for an engine, e.g. on a cluster's login node.
-
-The page is served on `127.0.0.1` with an automatically assigned port by default. Choose a fixed
-port with `codeflower client --port 8080`, or use `--port 0` for automatic selection. The advanced
-`--address` option sets the full listener address and cannot be combined with `--port`. A one-time
-key in the address becomes a cookie, so other users of the machine and other websites cannot use it.
-On a remote machine, forward the port (`ssh -N -L 8080:localhost:8080 login-node`; the client prints
-the command when you are logged in over SSH) and open the printed address with `localhost:8080`.
-
-Pages talk to a sandbox's agent through the client: `GET /api/workers/{id}/acp` is a WebSocket
-that the client passes on to the sandbox's bridge with its token, as browsers cannot send the
-bridge's `Authorization` header. This is what a web version of the chat will use.
-
-## The command line
-
-```sh
-codeflower interactive --agent claude --input ~/data/study42 --output ~/results/study42
 Where the desktop has a system tray, the client also shows an icon there: in the notification area
 on Windows, in the menu bar on macOS, and on Linux desktops with a StatusNotifierItem host (KDE,
 XFCE, Cinnamon, or GNOME with the AppIndicator extension; stock GNOME, WSL and SSH sessions have
@@ -128,6 +128,24 @@ calls the quit off, and chats already asked finish their wrap-up. Sandboxes adde
 and those started with `codeflower run`, `task` or `interactive`, keep running. A sandbox whose image
 is older than wrap-ups on request is stopped with the others without one.
 
+`codeflower client --connect-only` (or `client: {connect_only: true}` in `config.yaml`) never starts
+sandboxes and does not look for an engine, e.g. on a cluster's login node.
+
+The page is served on `127.0.0.1` with an automatically assigned port by default. Choose a fixed
+port with `codeflower client --port 8080`, or use `--port 0` for automatic selection. The advanced
+`--address` option sets the full listener address and cannot be combined with `--port`. A one-time
+key in the address becomes a cookie, so other users of the machine and other websites cannot use it.
+On a remote machine, forward the port (`ssh -N -L 8080:localhost:8080 login-node`; the client prints
+the command when you are logged in over SSH) and open the printed address with `localhost:8080`.
+
+Pages talk to a sandbox's agent through the client: `GET /api/workers/{id}/acp` is a WebSocket
+that the client passes on to the sandbox's bridge with its token, as browsers cannot send the
+bridge's `Authorization` header. This is what a web version of the chat will use.
+
+## The command line
+
+```sh
+codeflower interactive --agent claude --input ~/data/study42 --output ~/results/study42
 codeflower interactive --agent claude --input ~/data/rna --input ~/data/atac --code ~/src/mypkg
 ```
 
