@@ -16,7 +16,9 @@ const state = {
   agent: 'claude',
   folders: { inputs: [], outputs: [], code: [], skills: [] },
   guideTab: 0,
-  workers: []
+  workers: [],
+  // A quit waits for chats to wrap up.
+  quitting: false
 };
 
 async function api(path, options = {}) {
@@ -481,6 +483,10 @@ function renderWorker(worker) {
   const badge = $('.badge', card);
   badge.className = `badge ${worker.status}`;
   badge.textContent = STATUS_TEXT[worker.status] || worker.status;
+  if (worker.quitting === 'asked' && worker.status === 'ready') {
+    badge.className = 'badge stopping';
+    badge.textContent = 'wrapping up';
+  }
   const added = worker.source === 'added';
   $('h3', card).textContent = added ? `${worker.label || 'Sandbox'} · ${worker.address}` : `${worker.label} · ${worker.project}`;
   $('.elsewhere', card).hidden = !added;
@@ -621,6 +627,8 @@ async function refreshWorkers() {
   try {
     state.workers = await api('/api/workers');
   } catch {
+    // The client stopped while it was quitting.
+    if (state.quitting) showStopped();
     return;
   }
   const container = $('#workers');
@@ -632,18 +640,94 @@ async function refreshWorkers() {
     }
   }
   container.replaceChildren(...nodes);
+  // A quit may have begun elsewhere: Ctrl+C in the terminal, or the tray.
+  if (state.quitting || state.workers.some((worker) => worker.quitting)) {
+    const plan = await api('/api/quit').catch(() => ({ stopping: true }));
+    if (plan.stopping) showStopped();
+    else renderQuitting(plan);
+  }
 }
 
-$('#quit').addEventListener('click', async () => {
-  const running = state.workers.filter((worker) => worker.source !== 'added' && ['starting', 'ready'].includes(worker.status)).length;
-  if (running && !confirm(`Stop ${running} running sandbox${running === 1 ? '' : 'es'} and quit the launcher?`)) return;
-  await api('/api/quit', { method: 'POST', body: {} }).catch(() => {});
+// Quitting: chats working in the sandboxes started here are asked to save
+// their work first; sandboxes running elsewhere keep running.
+
+const plural = (count, noun, nouns = `${noun}s`) => `${count} ${count === 1 ? noun : nouns}`;
+
+function showStopped() {
   document.body.replaceChildren(
     element('main', { style: 'padding-top:4rem;text-align:center' }, [
-      element('h1', { text: 'The launcher has stopped.' }),
+      element('h1', { text: 'The client has stopped.' }),
       element('p', { class: 'muted', text: 'You can close this tab. Start code flower again to run another sandbox.' })
     ])
   );
+}
+
+async function askToQuit() {
+  let plan;
+  try {
+    plan = await api('/api/quit');
+  } catch {
+    return;
+  }
+  if (plan.stopping) return showStopped();
+  if (plan.quitting) return renderQuitting(plan);
+  if (!plan.working) {
+    if (plan.sandboxes && !confirm(`Stop ${plural(plan.sandboxes, 'running sandbox', 'running sandboxes')} and quit the client?`)) return;
+    return quit(true);
+  }
+  const them = plan.working === 1 ? 'it' : 'them';
+  $('#quit-text').textContent =
+    `${plural(plan.working, 'chat')} in ${plural(plan.busy, 'sandbox', 'sandboxes')} started here ${plan.working === 1 ? 'is' : 'are'} working. ` +
+    `Wrap up and quit stops ${them} and asks ${them} to save results, update the report and write down how to continue; ` +
+    `each sandbox stops when its chats are done, at most after ${plan.minutes} minutes. Quit now stops the sandboxes at once, and unsaved work is lost.`;
+  $('#quit-elsewhere').textContent = plan.elsewhere
+    ? `${plural(plan.elsewhere, 'sandbox', 'sandboxes')} running elsewhere ${plan.elsewhere === 1 ? 'keeps' : 'keep'} running.`
+    : '';
+  const dialog = $('#quit-dialog');
+  dialog.returnValue = '';
+  dialog.showModal();
+}
+
+async function quit(wrapUp) {
+  let plan;
+  try {
+    plan = await api('/api/quit', { method: 'POST', body: { wrapUp } });
+  } catch {
+    plan = { stopping: true };
+  }
+  if (plan.stopping) showStopped();
+  else renderQuitting(plan);
+}
+
+function renderQuitting(plan) {
+  const banner = $('#quitting');
+  state.quitting = Boolean(plan?.quitting);
+  banner.hidden = !state.quitting;
+  if (!state.quitting) return;
+  const states = Object.values(plan.quitting.workers);
+  const waiting = states.filter((value) => value === 'asked').length;
+  const deadline = new Date(plan.quitting.deadline);
+  const minutes = Math.max(0, Math.ceil((deadline - Date.now()) / 60_000));
+  const at = deadline.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  $('#quitting-text').textContent =
+    `The working chats were asked to save their work. Waiting for ${plural(waiting, 'sandbox', 'sandboxes')} of ${states.length}; ` +
+    `the client stops every sandbox it started and quits when they are done, or at ${at} (in ${plural(minutes, 'minute')}). ` +
+    'Keep running calls the quit off; chats already asked finish their wrap-up.';
+}
+
+$('#quit').addEventListener('click', askToQuit);
+$('#quit-dialog').addEventListener('close', () => {
+  const choice = $('#quit-dialog').returnValue;
+  if (choice === 'wrap-up') quit(true);
+  else if (choice === 'now') quit(false);
+});
+$('#quitting-stop').addEventListener('click', () => quit(false));
+$('#quitting-keep').addEventListener('click', async () => {
+  try {
+    renderQuitting(await api('/api/quit', { method: 'DELETE', body: {} }));
+  } catch {
+    showStopped();
+  }
 });
 
 // This computer's processors and memory, refreshed like htop
@@ -719,6 +803,11 @@ async function refreshResources() {
 }
 
 firstLoad();
+// The tray opens the page with quit=1 to ask before quitting.
+if (new URLSearchParams(location.search).has('quit')) {
+  history.replaceState(null, '', '/');
+  askToQuit();
+}
 refreshWorkers();
 refreshResources();
 setInterval(refreshWorkers, 1500);

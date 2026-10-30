@@ -63,6 +63,15 @@ type Options struct {
 	// UIDirectory serves the page from a folder instead of the built-in one
 	// (development).
 	UIDirectory string
+	// WrapUp is how long quitting waits at most for the chats in the
+	// sandboxes to wrap up; DefaultWrapUp when zero.
+	WrapUp time.Duration
+	// Started receives the control of the running client, for the terminal
+	// and the tray, once it listens.
+	Started func(*Control)
+	// Notify, if set, is told when a chat in a connected sandbox waits for
+	// the user or ends its turn (desktop notifications).
+	Notify func(Notice)
 }
 
 const cookieName = "codeflower-launcher"
@@ -84,6 +93,9 @@ type Server struct {
 	workers  map[string]*worker
 	order    []string
 	lastSeen time.Time
+	// quitting is a wrap-up in progress before the client quits.
+	quitting *quitting
+	// quit closes when the client quits and stops its sandboxes.
 	quit     chan struct{}
 	quitOnce sync.Once
 	cpu      cpuSampler
@@ -127,8 +139,13 @@ func Run(ctx context.Context, options Options) error {
 	go func() { _ = httpServer.Serve(listener) }()
 
 	url := fmt.Sprintf("http://%s/?key=%s", server.host, server.secret)
+	forget := recordInstance(options.ConfigDirectory, url)
+	defer forget()
 	if options.Ready != nil {
 		options.Ready(url)
+	}
+	if options.Started != nil {
+		options.Started(&Control{server: server, URL: url})
 	}
 	if options.OpenBrowser {
 		if err := openBrowser(url); err != nil {
@@ -140,6 +157,8 @@ func Run(ctx context.Context, options Options) error {
 	case <-ctx.Done():
 	case <-server.quit:
 	}
+	// A client started from now on is a new one.
+	forget()
 	server.stopAll()
 	shutdown, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -164,7 +183,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/workers/{id}/acp", s.relay)
 	mux.HandleFunc("POST /api/workers/{id}/stop", s.stopWorker)
 	mux.HandleFunc("DELETE /api/workers/{id}", s.forgetWorker)
+	mux.HandleFunc("GET /api/quit", s.quitStatus)
 	mux.HandleFunc("POST /api/quit", s.quitHandler)
+	mux.HandleFunc("DELETE /api/quit", s.cancelQuit)
 	return s.guard(mux)
 }
 
@@ -187,7 +208,14 @@ func (s *Server) guard(next http.Handler) http.Handler {
 				http.SetCookie(w, &http.Cookie{
 					Name: cookieName, Value: s.secret, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode,
 				})
-				http.Redirect(w, r, "/", http.StatusSeeOther)
+				// The rest of the query stays, e.g. quit=1 from the tray.
+				query := r.URL.Query()
+				query.Del("key")
+				target := "/"
+				if len(query) > 0 {
+					target += "?" + query.Encode()
+				}
+				http.Redirect(w, r, target, http.StatusSeeOther)
 				return
 			}
 		}
@@ -496,10 +524,9 @@ func (s *Server) createFolder(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, folderEntry{Name: name, Path: path})
 }
 
-func (s *Server) quitHandler(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-	s.quitOnce.Do(func() { close(s.quit) })
-}
+// OpenBrowser opens the client's page (or any address) in the user's
+// browser, e.g. from the tray or for a client already running.
+func OpenBrowser(url string) error { return openBrowser(url) }
 
 // openBrowser opens the page in the user's browser.
 func openBrowser(url string) error {

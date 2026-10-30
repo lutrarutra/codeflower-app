@@ -80,7 +80,7 @@ func (s *Server) addWorker(saved savedWorker, connection sandbox.Connection) *wo
 	}
 	s.workers[item.ID] = item
 	s.order = append(s.order, item.ID)
-	go item.watchActivity(ctx)
+	go item.watchActivity(ctx, s.noticesFor(item))
 	return item
 }
 

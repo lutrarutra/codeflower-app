@@ -18,6 +18,15 @@
 </header>
 
 <main>
+  <section class="card quitting" id="quitting" role="status" hidden>
+    <h2>Wrapping up before quitting</h2>
+    <p id="quitting-text"></p>
+    <div class="quitting-actions">
+      <button type="button" class="pill" id="quitting-keep">Keep running</button>
+      <button type="button" class="pill pill-danger" id="quitting-stop">Stop now</button>
+    </div>
+  </section>
+
   <section class="card" id="connect-card">
     <h2>Sandboxes</h2>
     <form class="connect-form" id="connect-form" autocomplete="off">
@@ -139,6 +148,19 @@
   <span class="muted small" id="footer-note">Sandboxes started here run while this client runs. Closing the browser tab does not stop them.</span>
   <button type="button" class="link" id="quit">Stop all and quit</button>
 </footer>
+
+<dialog id="quit-dialog" aria-labelledby="quit-title">
+  <form method="dialog" class="quit-dialog">
+    <h3 id="quit-title">Quit code flower?</h3>
+    <p id="quit-text"></p>
+    <p class="muted small" id="quit-elsewhere"></p>
+    <footer>
+      <button class="pill" value="cancel">Keep running</button>
+      <button class="pill pill-danger" value="now">Quit now</button>
+      <button class="pill pill-primary" value="wrap-up" autofocus>Wrap up and quit</button>
+    </footer>
+  </form>
+</dialog>
 
 <dialog id="browser">
   <form method="dialog" class="browser">

@@ -39,6 +39,15 @@ type Agent struct {
 type Client struct {
 	// ConnectOnly: never start sandboxes here, e.g. on a login node.
 	ConnectOnly bool `yaml:"connect_only"`
+	// WrapUpMinutes: how long quitting waits at most for the chats in the
+	// client's sandboxes to wrap up (default 10).
+	WrapUpMinutes int `yaml:"wrap_up_minutes"`
+	// Tray: show an icon in the system tray or menu bar where there is one
+	// (default true).
+	Tray *bool `yaml:"tray"`
+	// Notifications: tell the desktop when a chat waits for an answer or
+	// ends its turn (default true).
+	Notifications *bool `yaml:"notifications"`
 }
 
 // Config is the content of config.yaml; every field is optional.

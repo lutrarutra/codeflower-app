@@ -90,6 +90,9 @@ type workerView struct {
 	Activity *activity `json:"activity,omitempty"`
 	// Relays counts the pages connected to the worker through this client.
 	Relays int `json:"relays"`
+	// Quitting: what the worker does while the client quits (asked, done,
+	// unsupported, stopped).
+	Quitting string `json:"quitting,omitempty"`
 }
 
 func (w *worker) view() workerView {
@@ -113,6 +116,20 @@ type activity struct {
 	Chats      []chatActivity `json:"chats"`
 	// Missing from bridges older than usage tracking.
 	Usage *usage `json:"usage,omitempty"`
+	// WrapUp: the chats were asked to wrap up (missing from older bridges).
+	WrapUp *wrapUpActivity `json:"wrapUp,omitempty"`
+	// Ended lists the turns that ended in the last minute, and Turns counts
+	// all that ended (both missing from older bridges).
+	Ended []endedTurn `json:"ended,omitempty"`
+	Turns *int        `json:"turns,omitempty"`
+}
+
+// wrapUpActivity is the bridge's latest wrap-up: why (time, quit), whether
+// its chats are still at it (running, done), and how many were asked.
+type wrapUpActivity struct {
+	Reason string `json:"reason"`
+	State  string `json:"state"`
+	Chats  int    `json:"chats"`
 }
 
 // usage is the agent's login, its subscription quota, and the tokens and
@@ -150,6 +167,7 @@ type usageLimit struct {
 }
 
 type chatActivity struct {
+	Key   string `json:"key"`
 	Title string `json:"title"`
 	// State is working or waiting; WaitingFor is plan, permission or question.
 	State      string `json:"state"`
@@ -160,8 +178,9 @@ const activityInterval = 3 * time.Second
 
 // watchActivity polls the worker's bridge until ctx ends, with the
 // connection the worker has at each poll (an added worker's token can change).
-// The token stays here; the page only gets the counts and titles.
-func (w *worker) watchActivity(ctx context.Context) {
+// The token stays here; the page only gets the counts and titles. polled, if
+// set, gets each poll's activity (nil when the bridge did not answer).
+func (w *worker) watchActivity(ctx context.Context, polled func(*activity)) {
 	client := &http.Client{Timeout: 2 * time.Second}
 	ticker := time.NewTicker(activityInterval)
 	defer ticker.Stop()
@@ -201,6 +220,9 @@ func (w *worker) watchActivity(ctx context.Context) {
 			}
 		}
 		w.mu.Unlock()
+		if polled != nil && ctx.Err() == nil {
+			polled(current)
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -471,7 +493,7 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 					item.status = "ready"
 				}
 				item.mu.Unlock()
-				go item.watchActivity(watching)
+				go item.watchActivity(watching, s.noticesFor(item))
 			})
 		}
 		stopWatching()
@@ -511,7 +533,11 @@ func (s *Server) listWorkers(w http.ResponseWriter, _ *http.Request) {
 	s.mu.Lock()
 	views := make([]workerView, 0, len(s.order))
 	for index := len(s.order) - 1; index >= 0; index-- {
-		views = append(views, s.workers[s.order[index]].view())
+		view := s.workers[s.order[index]].view()
+		if s.quitting != nil {
+			view.Quitting = s.quitting.Workers[view.ID]
+		}
+		views = append(views, view)
 	}
 	s.mu.Unlock()
 	writeJSON(w, http.StatusOK, views)
@@ -533,15 +559,20 @@ func (s *Server) stopWorker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, errors.New("this sandbox runs elsewhere; stop it where it was started, or remove it from the list"))
 		return
 	}
-	item.mu.Lock()
-	if item.status == "starting" || item.status == "ready" {
-		item.status = "stopping"
-		item.appendLine("Stopping…")
-	}
-	item.mu.Unlock()
-	item.cancel()
-	item.relays.closeAll()
+	item.stop()
 	writeJSON(w, http.StatusOK, item.view())
+}
+
+// stop stops a sandbox the client started and closes the pages relayed to it.
+func (w *worker) stop() {
+	w.mu.Lock()
+	if w.status == "starting" || w.status == "ready" {
+		w.status = "stopping"
+		w.appendLine("Stopping…")
+	}
+	w.mu.Unlock()
+	w.cancel()
+	w.relays.closeAll()
 }
 
 func (s *Server) forgetWorker(w http.ResponseWriter, r *http.Request) {

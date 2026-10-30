@@ -3,12 +3,16 @@ module codeflower-launcher
 go 1.26.0
 
 require (
+	fyne.io/systray v1.12.2
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.8.2
+	github.com/ebitengine/purego v0.11.1
+	github.com/godbus/dbus/v5 v5.1.0
 	github.com/moby/term v0.5.2
 	github.com/shirou/gopsutil/v4 v4.26.9
 	github.com/spf13/cobra v1.10.2
 	go.yaml.in/yaml/v3 v3.0.5
+	golang.org/x/sys v0.49.0
 )
 
 require (
@@ -20,7 +24,6 @@ require (
 	github.com/containerd/log v0.2.0 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
-	github.com/ebitengine/purego v0.11.1 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
@@ -45,7 +48,6 @@ require (
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
 	go.opentelemetry.io/otel/metric v1.47.0 // indirect
 	go.opentelemetry.io/otel/trace v1.47.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/time v0.16.0 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 )

@@ -81,8 +81,7 @@ asks before connecting). Each running sandbox shows what its agent does: how man
 working, how many wait for you (a plan to approve, a permission or a question; the card is outlined
 then), and whether VS Code is connected. Chats keep working when VS Code disconnects. *Isolate the
 network* does what `--isolate-network` does (below), with the project's allowlist file shown on the
-sandbox's card; the client says when this computer cannot isolate, as with Docker on macOS. Sandboxes
-started here run while the client runs: *Stop all and quit*, or Ctrl+C in its terminal, stops them.
+sandbox's card; the client says when this computer cannot isolate, as with Docker on macOS.
 The client remembers the last choices in the user's config directory (`codeflower/launcher.json`).
 
 `codeflower client --connect-only` (or `client: {connect_only: true}` in `config.yaml`) never starts
@@ -103,6 +102,32 @@ bridge's `Authorization` header. This is what a web version of the chat will use
 
 ```sh
 codeflower interactive --agent claude --input ~/data/study42 --output ~/results/study42
+Where the desktop has a system tray, the client also shows an icon there: in the notification area
+on Windows, in the menu bar on macOS, and on Linux desktops with a StatusNotifierItem host (KDE,
+XFCE, Cinnamon, or GNOME with the AppIndicator extension; stock GNOME, WSL and SSH sessions have
+none). A click on it, or *Open code flower*, opens the page again after its tab was closed. Started
+by a double-click, the icon replaces the console window, and the client logs to `client.log` in the
+config directory. `--no-tray` (or `client: {tray: false}`) turns the icon off. Starting the client
+again while it runs (`client.json` in the config directory, readable only by you, holds its address)
+opens the running one instead.
+
+When a chat in a sandbox the client is connected to asks you a question, wants a permission or a
+plan approved, or ends its turn, the client tells the desktop; a click on the notification opens the
+sandbox in VS Code. On Linux this needs a desktop with a notification service (GNOME, KDE and the
+others have one), with or without the tray; on macOS it needs the app (`code flower.app`, which asks
+once whether to allow them) and on Windows the tray icon. Turns you stop yourself, and the wrap-up
+when quitting, are not told. `--no-notifications` (or `client: {notifications: false}`) turns them
+off.
+
+Sandboxes started here run while the client runs. Quitting it (*Stop all and quit* on the page,
+*Quit* in the tray, or Ctrl+C in its terminal) first says what it will do, then asks the chats
+working in those sandboxes to save their results, bring their reports up to date and write down how
+to continue, and stops each sandbox when its chats are done, at most after 10 minutes
+(`client: {wrap_up_minutes: N}`). *Stop now* (or Ctrl+C again) stops them at once; *Keep running*
+calls the quit off, and chats already asked finish their wrap-up. Sandboxes added by their address,
+and those started with `codeflower run`, `task` or `interactive`, keep running. A sandbox whose image
+is older than wrap-ups on request is stopped with the others without one.
+
 codeflower interactive --agent claude --input ~/data/rna --input ~/data/atac --code ~/src/mypkg
 ```
 

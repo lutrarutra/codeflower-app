@@ -17,3 +17,12 @@ func ownConsole() bool {
 	count, _, _ := getConsoleProcessList.Call(uintptr(unsafe.Pointer(&processes[0])), uintptr(len(processes)))
 	return count == 1
 }
+
+// hideConsole closes the console Windows made for a double-clicked program,
+// once the tray icon takes its place.
+func hideConsole() {
+	freeConsole := syscall.NewLazyDLL("kernel32.dll").NewProc("FreeConsole")
+	if freeConsole.Find() == nil {
+		_, _, _ = freeConsole.Call()
+	}
+}

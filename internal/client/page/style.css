@@ -152,6 +152,7 @@ main {
 .pill-primary { background: var(--indigo); color: var(--on-accent); }
 .pill-teal { background: var(--teal); color: var(--on-accent); }
 .pill-small { padding: 0.15rem 0.75rem; font-size: 0.86em; }
+.pill-danger { background: var(--pink-soft); color: var(--red); }
 .pill-large { padding: 0.6rem 1.6rem; font-size: 1.05rem; }
 
 .icon-button {
@@ -449,6 +450,16 @@ footer {
   align-items: center;
   justify-content: space-between;
 }
+
+/* Quitting */
+.quitting { background: var(--yellow-soft); }
+.quitting[hidden] { display: none; }
+.quitting h2 { margin-top: 0; }
+.quitting-actions, .quit-dialog > footer { display: flex; gap: 0.6rem; justify-content: flex-end; flex-wrap: wrap; }
+.quit-dialog { padding: 1.25rem 1.4rem; }
+.quit-dialog h3 { margin-top: 0; }
+.quit-dialog > footer { margin: 1.25rem 0 0; padding: 0; max-width: none; flex-direction: row; align-items: center; }
+#quit-dialog { width: min(520px, calc(100vw - 32px)); }
 
 /* Folder browser */
 dialog {

@@ -3,3 +3,5 @@
 package cli
 
 func ownConsole() bool { return false }
+
+func hideConsole() {}

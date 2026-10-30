@@ -146,7 +146,7 @@ sandbox with a few clicks, or connects to one running elsewhere. Run
 	}
 	root.AddCommand(interactiveCommand(), runCommand(), taskCommand(), pullCommand(), checkCommand(), clientCommand())
 	if startedFromDesktop(os.Args[1:]) {
-		root.SetArgs([]string{"client"})
+		root.SetArgs([]string{"client", "--desktop"})
 	}
 	if err := root.Execute(); err != nil {
 		if exit, ok := err.(exitError); ok {

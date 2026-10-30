@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,7 +20,7 @@ import (
 func testServer(t *testing.T) (*Server, *httptest.Server) {
 	t.Helper()
 	server := &Server{
-		options:  Options{ProjectsDirectory: t.TempDir()},
+		options:  Options{ProjectsDirectory: t.TempDir(), Log: io.Discard},
 		secret:   "secret-key",
 		settings: &settingsStore{path: filepath.Join(t.TempDir(), "launcher.json")},
 		added:    &workerStore{path: filepath.Join(t.TempDir(), "workers.json")},
@@ -215,7 +216,7 @@ func TestShowsWhatTheSandboxAgentDoesWithoutItsToken(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	stopped := make(chan struct{})
 	go func() {
-		item.watchActivity(ctx)
+		item.watchActivity(ctx, nil)
 		close(stopped)
 	}()
 	deadline := time.Now().Add(5 * time.Second)
