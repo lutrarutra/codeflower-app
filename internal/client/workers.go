@@ -37,6 +37,9 @@ const (
 	sourceStarted = "started"
 	// sourceAdded: a worker running elsewhere, added by its codeflower:// line.
 	sourceAdded = "added"
+	// sourceLocal: a sandbox started on this computer outside this client,
+	// found through its run's registration; it is listed while it runs.
+	sourceLocal = "local"
 )
 
 // worker is a sandbox the client started, or one running elsewhere that the
@@ -56,13 +59,16 @@ type worker struct {
 	// Allowlist is the file of allowed hosts when the network is isolated.
 	Allowlist string    `json:"allowlist,omitempty"`
 	Started   time.Time `json:"started"`
+	// Kind of a local sandbox's run: worker, run or task (which has no chat).
+	Kind string `json:"kind,omitempty"`
 
 	mu sync.Mutex
 	// Agent and Label of an added worker are known once its bridge answers.
 	agent string
 	label string
 	// status of a started worker: starting, ready, stopping, stopped, failed;
-	// of an added one: connecting, ready, unreachable, unauthorized.
+	// of an added one: connecting, ready, unreachable, unauthorized; of a
+	// local one: starting, ready, unreachable, stopping, or task.
 	status string
 	url    string
 	// connection holds the token; it never leaves the client.
@@ -76,6 +82,9 @@ type worker struct {
 	partial bytes.Buffer
 	cancel  context.CancelFunc
 	done    chan struct{}
+	// run is how a local sandbox registered, and watching its watchers' context.
+	run      *sandbox.Running
+	watching context.Context
 }
 
 type workerView struct {
@@ -205,6 +214,14 @@ func (w *worker) watchActivity(ctx context.Context, polled func(*activity)) {
 			current = nil
 		}
 		w.activity = current
+		if w.Source == sourceLocal && ctx.Err() == nil && w.status != "stopping" {
+			// The run is listed until it ends; meanwhile its bridge answers or not.
+			if err == nil {
+				w.status, w.err = "ready", ""
+			} else {
+				w.status = "unreachable"
+			}
+		}
 		if w.Source == sourceAdded && ctx.Err() == nil {
 			// An added worker's status is whether its bridge answers.
 			switch {
@@ -559,6 +576,20 @@ func (s *Server) stopWorker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, errors.New("this sandbox runs elsewhere; stop it where it was started, or remove it from the list"))
 		return
 	}
+	if item.Source == sourceLocal {
+		// Its run stops it, as Ctrl+C in its terminal would, and the list
+		// drops it once the run has ended.
+		if err := item.run.Stop(); err != nil {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
+		item.mu.Lock()
+		item.status = "stopping"
+		item.mu.Unlock()
+		item.relays.closeAll()
+		writeJSON(w, http.StatusOK, item.view())
+		return
+	}
 	item.stop()
 	writeJSON(w, http.StatusOK, item.view())
 }
@@ -580,6 +611,10 @@ func (s *Server) forgetWorker(w http.ResponseWriter, r *http.Request) {
 	item := s.find(id)
 	if item == nil {
 		writeError(w, http.StatusNotFound, errors.New("no such sandbox"))
+		return
+	}
+	if item.Source == sourceLocal {
+		writeError(w, http.StatusConflict, errors.New("this sandbox runs on this computer and is listed while it runs; stop it to remove it"))
 		return
 	}
 	if item.Source == sourceAdded {

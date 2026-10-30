@@ -246,6 +246,17 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	}
 	connectionFile := filepath.Join(w.State, "instances", instanceID+".json")
 	defer os.Remove(connectionFile)
+	kind := "worker"
+	switch {
+	case w.Task != "":
+		kind = "task"
+	case w.InitialPrompt != "":
+		kind = "run"
+	}
+	defer register(Running{
+		ID: instanceID, ConnectionFile: connectionFile, Project: filepath.Base(w.State), State: w.State,
+		Agent: w.Agent, Engine: w.Engine.Name, Kind: kind, PID: os.Getpid(), Started: time.Now(),
+	})()
 
 	// Stopping the run with a cause reports that cause instead of the exit.
 	running, stopRunning := context.WithCancelCause(ctx)

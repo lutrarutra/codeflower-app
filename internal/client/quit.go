@@ -105,7 +105,7 @@ func (s *Server) quitPlan() QuitPlan {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, item := range s.workers {
-		if item.Source == sourceAdded {
+		if item.Source != sourceStarted {
 			plan.Elsewhere++
 		}
 	}

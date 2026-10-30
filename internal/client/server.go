@@ -136,6 +136,9 @@ func Run(ctx context.Context, options Options) error {
 		server.loopback = address.IP.IsLoopback()
 	}
 	server.loadAdded()
+	watching, stopWatching := context.WithCancel(context.Background())
+	defer stopWatching()
+	go server.watchLocal(watching)
 	httpServer := &http.Server{Handler: server.routes(), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = httpServer.Serve(listener) }()
 
