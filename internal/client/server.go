@@ -204,9 +204,13 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
+		if r.URL.Path == "/frame" && r.Method == http.MethodGet {
+			serveFrame(w)
+			return
+		}
 		w.Header().Set("X-Frame-Options", "DENY")
-		// connect-src: the relay's WebSockets, on this origin only. Interactive
-		// reports will need frames of their own once the chat is served here.
+		// connect-src: the relay's WebSockets, on this origin only; frames
+		// (default-src): /frame, where interactive reports run.
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'")
 		if key := r.URL.Query().Get("key"); key != "" && r.URL.Path == "/" {
 			if subtle.ConstantTimeCompare([]byte(key), []byte(s.secret)) == 1 {

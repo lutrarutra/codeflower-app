@@ -249,3 +249,34 @@ func TestShowsWhatTheSandboxAgentDoesWithoutItsToken(t *testing.T) {
 		t.Fatal("a wrong token was accepted")
 	}
 }
+
+func TestReportFrameIsServedWithoutTheCookieUnderItsOwnPolicy(t *testing.T) {
+	_, server := testServer(t)
+	response, err := http.Get(server.URL + "/frame?load=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	policy := response.Header.Get("Content-Security-Policy")
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "cf-frame-ready") {
+		t.Fatalf("status %d: %s", response.StatusCode, body)
+	}
+	if !strings.HasPrefix(policy, "default-src 'none'") || !strings.Contains(policy, "frame-ancestors 'self'") || strings.Contains(policy, "connect-src") {
+		t.Fatalf("policy %q", policy)
+	}
+	if response.Header.Get("X-Frame-Options") != "" || len(response.Cookies()) != 0 {
+		t.Fatalf("headers %v", response.Header)
+	}
+
+	// Another host name is still refused, and the page itself still may not be framed.
+	request, _ := http.NewRequest("GET", server.URL+"/frame", nil)
+	request.Host = "attacker.example"
+	if response, _ := http.DefaultClient.Do(request); response.StatusCode != http.StatusForbidden {
+		t.Fatalf("foreign host: %d", response.StatusCode)
+	}
+	response, _ = authorized(t, server, "GET", "/", "")
+	if response.Header.Get("X-Frame-Options") != "DENY" {
+		t.Fatalf("page headers %v", response.Header)
+	}
+}
