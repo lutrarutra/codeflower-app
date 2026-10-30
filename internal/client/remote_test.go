@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -229,7 +230,7 @@ func TestAddedWorkersAreRememberedPrivately(t *testing.T) {
 		t.Fatalf("pasted again: %v", again)
 	}
 	info, err := os.Stat(first.added.path)
-	if err != nil || info.Mode().Perm() != 0o600 {
+	if err != nil || runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("store %v %v", info, err)
 	}
 	data, _ := os.ReadFile(first.added.path)
