@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v3"
+
+	"codeflower-app/internal/agents"
 )
 
 // FileName is the config file in the config directory.
@@ -103,7 +105,7 @@ func Load(directory string) (*Config, error) {
 	}
 	for name := range config.Agents {
 		if !knownAgent(name) {
-			return nil, fmt.Errorf("%s: unknown agent %q under agents: use claude, codex or dsh", config.Path, name)
+			return nil, fmt.Errorf("%s: unknown agent %q under agents: use %s", config.Path, name, strings.Join(agents.IDs(), ", "))
 		}
 	}
 	if config.hasInlineKey() {
@@ -115,7 +117,8 @@ func Load(directory string) (*Config, error) {
 }
 
 func knownAgent(name string) bool {
-	return name == "claude" || name == "codex" || name == "dsh"
+	_, ok := agents.Get(name)
+	return ok
 }
 
 func (c *Config) hasInlineKey() bool {

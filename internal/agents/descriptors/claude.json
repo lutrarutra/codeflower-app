@@ -1,0 +1,28 @@
+{
+  "id": "claude",
+  "name": "Claude Code",
+  "description": "Anthropic. Sign in with a Claude subscription or an API key.",
+  "color": "orange",
+  "order": 10,
+  "launch": "@agentclientprotocol/claude-agent-acp/dist/index.js",
+  "home": {
+    "variable": "CLAUDE_CONFIG_DIR",
+    "path": "harness/claude"
+  },
+  "env": {},
+  "credentialVariables": [
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN"
+  ],
+  "providerHosts": [
+    "api.anthropic.com",
+    "claude.ai",
+    "platform.claude.com",
+    "console.anthropic.com"
+  ],
+  "goal": {
+    "maxLength": 4000
+  },
+  "costEstimate": true
+}

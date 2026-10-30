@@ -3,6 +3,8 @@ package sandbox
 import (
 	"encoding/json"
 	"strings"
+
+	"codeflower-app/internal/agents"
 )
 
 // ContainerEnvironment keeps every tool's state, logins, and installs in the
@@ -11,11 +13,8 @@ func ContainerEnvironment() map[string]string {
 	state := ContainerState
 	env := state + "/env"
 	cache := state + "/cache"
-	return map[string]string{
+	values := map[string]string{
 		"HOME":                    state + "/home",
-		"DSH_HOME":                state + "/dsh-home",
-		"CLAUDE_CONFIG_DIR":       state + "/harness/claude",
-		"CODEX_HOME":              state + "/harness/codex",
 		"CODEFLOWER_SESSIONS_DIR": state + "/sessions",
 		"CODEFLOWER_RUN_DIR":      state + "/run",
 		"CODEFLOWER_WORKSPACE":    state + "/workspace",
@@ -33,6 +32,11 @@ func ContainerEnvironment() map[string]string {
 		"CODEFLOWER_PREPEND_PATH": strings.Join(
 			[]string{env + "/venv/bin", env + "/npm/bin", env + "/cargo/bin"}, ":"),
 	}
+	// Each agent's home (CLAUDE_CONFIG_DIR, CODEX_HOME, DSH_HOME, …), from its descriptor.
+	for _, descriptor := range agents.All() {
+		values[descriptor.Home.Variable] = state + "/" + descriptor.Home.Path
+	}
+	return values
 }
 
 // WorkerSettings describe one worker for the bridge inside the sandbox.
@@ -46,7 +50,7 @@ type WorkerSettings struct {
 	HostState     string
 	Engine        string
 	SlurmJobID    string
-	AppPID   int
+	AppPID        int
 	// Binds are listed for VS Code, which shows them next to the workspace.
 	Binds []Bind
 }

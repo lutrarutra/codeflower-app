@@ -12,15 +12,20 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"codeflower-app/internal/agents"
 )
 
 // ProviderHosts are the services each agent signs in to and works with; a
-// network-isolated sandbox can always reach them.
-var ProviderHosts = map[string][]string{
-	"claude": {"api.anthropic.com", "claude.ai", "platform.claude.com", "console.anthropic.com"},
-	"codex":  {"api.openai.com", "auth.openai.com", "chatgpt.com"},
-	"dsh":    {"api.deepseek.com"},
-}
+// network-isolated sandbox can always reach them. They come from the agents'
+// descriptors.
+var ProviderHosts = func() map[string][]string {
+	hosts := map[string][]string{}
+	for _, descriptor := range agents.All() {
+		hosts[descriptor.ID] = descriptor.ProviderHosts
+	}
+	return hosts
+}()
 
 // AllowlistPreset is a set of hosts one service needs, allowed by a single
 // "@name" line in the allowlist file.

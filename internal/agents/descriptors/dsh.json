@@ -1,0 +1,35 @@
+{
+  "id": "dsh",
+  "name": "DeepSeek Harness",
+  "description": "DeepSeek, or any OpenAI-compatible endpoint, with an API key.",
+  "color": "indigo",
+  "order": 30,
+  "launch": "@deepseek-ai/dsh/lib/bin.js",
+  "home": {
+    "variable": "DSH_HOME",
+    "path": "dsh-home"
+  },
+  "env": {},
+  "credentialVariables": [
+    "DEEPSEEK_API_KEY",
+    "CODEFLOWER_OPENAI_COMPAT_API_KEY"
+  ],
+  "providerHosts": [
+    "api.deepseek.com"
+  ],
+  "files": {
+    "profiles/codeflower/package.json": {
+      "name": "codeflower",
+      "private": true,
+      "dsh": {
+        "profile": {
+          "bundles": [
+            "@deepseek-ai/dsh-base",
+            "@deepseek-ai/dsh-acp-app"
+          ]
+        }
+      }
+    },
+    "profiles/codeflower/cordis.patch.yml": "[]\n"
+  }
+}

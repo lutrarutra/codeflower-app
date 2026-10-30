@@ -13,23 +13,16 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"codeflower-app/internal/agents"
 )
 
-// Agents a worker can run.
-var Agents = []string{"claude", "codex", "dsh"}
-
-var agentLabels = map[string]string{
-	"claude": "Claude Code",
-	"codex":  "Codex",
-	"dsh":    "DeepSeek Harness",
-}
+// Agents a worker can run, the default first, from their descriptors.
+var Agents = agents.IDs()
 
 // AgentLabel is the agent's product name.
 func AgentLabel(agent string) string {
-	if label, ok := agentLabels[agent]; ok {
-		return label
-	}
-	return agent
+	return agents.Label(agent)
 }
 
 // Where the user's folders appear in the sandbox, each in a subfolder named
@@ -229,7 +222,7 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 		HostState:     w.State,
 		Engine:        w.Engine.Name,
 		SlurmJobID:    os.Getenv("SLURM_JOB_ID"),
-		AppPID:   os.Getpid(),
+		AppPID:        os.Getpid(),
 		Binds:         w.Binds,
 	})
 	resources.environment(values)

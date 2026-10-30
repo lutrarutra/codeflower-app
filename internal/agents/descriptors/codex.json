@@ -1,0 +1,30 @@
+{
+  "id": "codex",
+  "name": "Codex",
+  "description": "OpenAI. Sign in with ChatGPT or an OpenAI API key.",
+  "color": "teal",
+  "order": 20,
+  "launch": "@agentclientprotocol/codex-acp/dist/index.js",
+  "home": {
+    "variable": "CODEX_HOME",
+    "path": "harness/codex"
+  },
+  "env": {
+    "NO_BROWSER": "1"
+  },
+  "credentialVariables": [
+    "OPENAI_API_KEY",
+    "CODEX_API_KEY"
+  ],
+  "providerHosts": [
+    "api.openai.com",
+    "auth.openai.com",
+    "chatgpt.com"
+  ],
+  "files": {
+    "config.toml": "# Written once by codeflower; edit freely.\nsandbox_mode = \"danger-full-access\"\napproval_policy = \"on-request\"\n"
+  },
+  "goal": {
+    "maxLength": 4000
+  }
+}

@@ -28,6 +28,7 @@ import (
 	"sync"
 	"time"
 
+	"codeflower-app/internal/agents"
 	"codeflower-app/internal/config"
 	"codeflower-app/internal/sandbox"
 )
@@ -271,8 +272,10 @@ func readJSON(r *http.Request, value any) error {
 }
 
 type agentInfo struct {
-	ID    string `json:"id"`
-	Label string `json:"label"`
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+	Color       string `json:"color,omitempty"`
 }
 
 type imageStatus struct {
@@ -357,8 +360,8 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 			info.Isolation[engine.Name] = err.Error()
 		}
 	}
-	for _, agent := range sandbox.Agents {
-		info.Agents = append(info.Agents, agentInfo{ID: agent, Label: sandbox.AgentLabel(agent)})
+	for _, agent := range agents.All() {
+		info.Agents = append(info.Agents, agentInfo{ID: agent.ID, Label: agent.Name, Description: agent.Description, Color: agent.Color})
 	}
 	requested := r.URL.Query().Get("engine")
 	if requested == "" {

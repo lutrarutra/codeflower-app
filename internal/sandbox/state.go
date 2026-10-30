@@ -1,12 +1,13 @@
 package sandbox
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"codeflower-app/internal/agents"
 )
 
 // ContainerState is where the project directory appears inside the sandbox.
@@ -15,33 +16,18 @@ const ContainerState = "/codeflower-state"
 // Entrypoint prepares the project environment and starts the bridge.
 const Entrypoint = "/opt/codeflower/entrypoint.sh"
 
-const dshProfile = "codeflower"
-
-var dshBundles = []string{"@deepseek-ai/dsh-base", "@deepseek-ai/dsh-acp-app"}
-
 // StateDirectories are created privately in every project.
 var StateDirectories = []string{
 	"instances",
 	"sessions",
 	"run",
-	"dsh-home",
 	"workspace",
 	"env",
 	"cache",
 	"home",
-	"harness",
-	"harness/claude",
-	"harness/codex",
 	"tasks",
 	"runs",
 }
-
-// Apptainer is the isolation boundary, so Codex's own bubblewrap sandbox
-// stays off; approval prompts still reach the chat.
-const codexConfig = `# Written once by codeflower; edit freely.
-sandbox_mode = "danger-full-access"
-approval_policy = "on-request"
-`
 
 func privateDirectory(path string) error {
 	if err := os.MkdirAll(path, 0o700); err != nil {
@@ -55,6 +41,25 @@ func privateDirectory(path string) error {
 		return fmt.Errorf("state path must be a real directory: %s", path)
 	}
 	return os.Chmod(path, 0o700)
+}
+
+// privateDirectories creates each directory of the slash-separated path
+// below base privately.
+func privateDirectories(base, path string) error {
+	current := base
+	for _, part := range strings.Split(path, "/") {
+		if part == "" || part == "." {
+			continue
+		}
+		if part == ".." {
+			return fmt.Errorf("path leaves its folder: %s", path)
+		}
+		current = filepath.Join(current, part)
+		if err := privateDirectory(current); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // writeOnce creates a file with private permissions unless it already exists,
@@ -95,26 +100,25 @@ func PrepareState(dir string) (string, error) {
 		}
 	}
 
-	profile := filepath.Join(state, "dsh-home", "profiles", dshProfile)
-	if err := privateDirectory(profile); err != nil {
-		return "", err
-	}
-	manifest, err := json.MarshalIndent(map[string]any{
-		"name":    dshProfile,
-		"private": true,
-		"dsh":     map[string]any{"profile": map[string]any{"bundles": dshBundles}},
-	}, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	if err := writeOnce(filepath.Join(profile, "package.json"), append(manifest, '\n')); err != nil {
-		return "", err
-	}
-	if err := writeOnce(filepath.Join(profile, "cordis.patch.yml"), []byte("[]\n")); err != nil {
-		return "", err
-	}
-	if err := writeOnce(filepath.Join(state, "harness", "codex", "config.toml"), []byte(codexConfig)); err != nil {
-		return "", err
+	// Each agent's home, with the files its descriptor writes once (e.g. Codex
+	// runs without its own bubblewrap sandbox, since Apptainer is the boundary).
+	for _, descriptor := range agents.All() {
+		if err := privateDirectories(state, descriptor.Home.Path); err != nil {
+			return "", err
+		}
+		home := filepath.Join(state, filepath.FromSlash(descriptor.Home.Path))
+		for name, raw := range descriptor.Files {
+			content, err := agents.FileContent(raw)
+			if err != nil {
+				return "", fmt.Errorf("agent %s, file %s: %w", descriptor.ID, name, err)
+			}
+			if err := privateDirectories(home, filepath.ToSlash(filepath.Dir(name))); err != nil {
+				return "", err
+			}
+			if err := writeOnce(filepath.Join(home, filepath.FromSlash(name)), content); err != nil {
+				return "", err
+			}
+		}
 	}
 	return state, nil
 }

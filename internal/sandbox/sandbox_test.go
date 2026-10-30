@@ -128,9 +128,20 @@ func TestPrepareStateIsPrivateAndKeepsUserEdits(t *testing.T) {
 	if err != nil || !strings.Contains(string(content), `sandbox_mode = "danger-full-access"`) {
 		t.Fatalf("codex config: %q %v", content, err)
 	}
+	// The agents' homes and files come from their descriptors, as they were written before those.
 	manifest, err := os.ReadFile(filepath.Join(state, "dsh-home", "profiles", "codeflower", "package.json"))
-	if err != nil || !strings.Contains(string(manifest), "@deepseek-ai/dsh-acp-app") {
+	want := "{\n  \"dsh\": {\n    \"profile\": {\n      \"bundles\": [\n        \"@deepseek-ai/dsh-base\",\n" +
+		"        \"@deepseek-ai/dsh-acp-app\"\n      ]\n    }\n  },\n  \"name\": \"codeflower\",\n  \"private\": true\n}\n"
+	if err != nil || string(manifest) != want {
 		t.Fatalf("dsh profile: %q %v", manifest, err)
+	}
+	if patch, _ := os.ReadFile(filepath.Join(state, "dsh-home", "profiles", "codeflower", "cordis.patch.yml")); string(patch) != "[]\n" {
+		t.Fatalf("dsh patch: %q", patch)
+	}
+	for _, name := range []string{"harness", "harness/claude", "harness/codex", "dsh-home", "dsh-home/profiles/codeflower"} {
+		if info, err := os.Stat(filepath.Join(state, name)); err != nil || (runtime.GOOS != "windows" && info.Mode().Perm() != 0o700) {
+			t.Errorf("%s: %v %v", name, info, err)
+		}
 	}
 
 	if err := os.WriteFile(config, []byte("# mine\n"), 0o600); err != nil {
@@ -234,7 +245,7 @@ func TestDockerConfigPublishesTheInspectorOnLoopback(t *testing.T) {
 
 func TestEnvironmentKeepsToolStateInTheProject(t *testing.T) {
 	env := WorkerEnvironment(WorkerSettings{Agent: "claude", InstanceID: "id", Token: "t", Port: 1, HostState: "/home/me/p", Engine: "apptainer"})
-	for _, name := range []string{"HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "VIRTUAL_ENV", "CONDA_ENVS_DIRS", "CODEFLOWER_SESSIONS_DIR"} {
+	for _, name := range []string{"HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "DSH_HOME", "VIRTUAL_ENV", "CONDA_ENVS_DIRS", "CODEFLOWER_SESSIONS_DIR"} {
 		if !strings.HasPrefix(env[name], ContainerState) {
 			t.Errorf("%s = %q is outside the project", name, env[name])
 		}

@@ -1,4 +1,4 @@
-.PHONY: app-build app-build-linux app-build-all app-dist app-macos app-test app-install
+.PHONY: app-build app-build-linux app-build-all app-dist app-macos app-test app-install agents page
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 APP_LDFLAGS := -X codeflower-app/internal/cli.Version=$(VERSION)
@@ -44,3 +44,20 @@ app-test:
 # Installs codeflower into $(shell go env GOPATH 2>/dev/null || echo ~/go)/bin.
 app-install:
 	CGO_ENABLED=0 go install -ldflags "$(APP_LDFLAGS)" ./cmd/codeflower
+
+# The agents' descriptors, copied from the sandbox the app works with (the
+# workspace's checkout, or SANDBOX_SRC); commit the result.
+SANDBOX_SRC ?= ../sandbox
+agents:
+	rm -f internal/agents/descriptors/*.json
+	for file in $(SANDBOX_SRC)/dsh-plugins/acp-ws/src/agents/*/agent.json; do \
+		cp $$file internal/agents/descriptors/$$(basename $$(dirname $$file)).json; \
+	done
+
+# The page (codeflower client's window), built from codeflower-ui (the workspace's
+# checkout, or UI_SRC) into internal/client/page, which is embedded; commit the result.
+UI_SRC ?= ../ui
+page:
+	npm --prefix $(UI_SRC) run build:web
+	rm -rf internal/client/page
+	cp -R $(UI_SRC)/dist-web internal/client/page
