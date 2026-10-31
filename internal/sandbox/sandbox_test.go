@@ -1,13 +1,17 @@
 package sandbox
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
 	"testing"
+
+	"codeflower-app/internal/config"
 )
 
 func tempDir(t *testing.T) string {
@@ -269,5 +273,70 @@ func TestEnvironmentKeepsToolStateInTheProject(t *testing.T) {
 func TestDefaultAdvertiseHostIsNotLoopback(t *testing.T) {
 	if host := DefaultAdvertiseHost(); strings.HasPrefix(host, "127.") || host == "" {
 		t.Fatalf("got %q", host)
+	}
+}
+
+func TestWorkerMountsTheGalleryAndGivesTheImageKeyInAFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a shell script as the engine")
+	}
+	directory := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(directory, "config"))
+	state := filepath.Join(directory, "project")
+	if err := os.MkdirAll(state, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(directory, "out")
+	// The engine notes what the sandbox would get, including the key file while it runs.
+	engine := filepath.Join(directory, "apptainer")
+	script := "#!/bin/sh\nenv | grep '^APPTAINERENV_' | sort > " + out + "\n" +
+		"stat -c %a " + state + "/run/image-key-* >> " + out + "\ncat " + state + "/run/image-key-* >> " + out + "\necho \"$@\" >> " + out + "\n"
+	if err := os.WriteFile(engine, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gallery, err := IconsBind(filepath.Join(directory, "icons"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(filepath.Join(directory, "icons")); err != nil || !info.IsDir() || gallery.ReadOnly || gallery.Target != IconsRoot {
+		t.Fatalf("gallery bind %+v: %v", gallery, err)
+	}
+	worker := Worker{
+		Agent:  "claude",
+		Engine: EngineStatus{Name: EngineApptainer, Executable: engine},
+		Image:  filepath.Join(directory, "image.sif"),
+		State:  state,
+		Binds:  []Bind{gallery},
+		Images: &config.ImageGeneration{Provider: "google", Model: "gemini-test", Key: "image-secret"},
+		Stdout: io.Discard, Stderr: io.Discard,
+	}
+	if code, err := worker.Run(context.Background(), nil); code != 0 || err != nil {
+		t.Fatalf("run: %d, %v", code, err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := string(data)
+	for _, want := range []string{
+		"APPTAINERENV_CODEFLOWER_ICONS=/data/icons\n",
+		"APPTAINERENV_CODEFLOWER_IMAGE_PROVIDER=google\n",
+		"APPTAINERENV_CODEFLOWER_IMAGE_MODEL=gemini-test\n",
+		"APPTAINERENV_CODEFLOWER_IMAGE_KEY_FILE=/codeflower-state/run/image-key-",
+		"\n600\nimage-secret\n",
+		gallery.Source + ":/data/icons",
+	} {
+		if !strings.Contains(seen, want) {
+			t.Errorf("the sandbox did not get %q:\n%s", want, seen)
+		}
+	}
+	if strings.Contains(seen, "APPTAINERENV_CODEFLOWER_IMAGE_KEY=") || strings.Count(seen, "image-secret") != 1 {
+		t.Errorf("the key must only be in the file:\n%s", seen)
+	}
+	if left, _ := filepath.Glob(filepath.Join(state, "run", "image-key-*")); len(left) != 0 {
+		t.Fatalf("the key file outlived the worker: %v", left)
+	}
+	if hosts := worker.providerHosts(); !slices.Contains(hosts, "generativelanguage.googleapis.com") || !slices.Contains(hosts, ProviderHosts["claude"][0]) {
+		t.Fatalf("an isolated sandbox reaches %v", hosts)
 	}
 }

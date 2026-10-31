@@ -119,3 +119,67 @@ func TestSkillFolders(t *testing.T) {
 		t.Fatalf("got %v, missing %v", folders, missing)
 	}
 }
+
+func TestIconsFolder(t *testing.T) {
+	directory := t.TempDir()
+	loaded, err := Load(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.IconsFolder(); got != filepath.Join(directory, IconsFolder) {
+		t.Fatalf("default: %q", got)
+	}
+	write(t, directory, "icons: {folder: gallery}\n", 0o644)
+	if loaded, _ = Load(directory); loaded.IconsFolder() != filepath.Join(directory, "gallery") {
+		t.Fatalf("relative: %q", loaded.IconsFolder())
+	}
+	write(t, directory, "icons: {folder: \"off\"}\n", 0o644)
+	if loaded, _ = Load(directory); loaded.IconsFolder() != "" {
+		t.Fatalf("off: %q", loaded.IconsFolder())
+	}
+	if (&Config{}).IconsFolder() != "" {
+		t.Fatal("a config without a directory has no gallery")
+	}
+}
+
+func TestImageGeneration(t *testing.T) {
+	directory := t.TempDir()
+	loaded, err := Load(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if images, err := loaded.ImageGeneration(); images != nil || err != nil {
+		t.Fatalf("none configured: %+v, %v", images, err)
+	}
+	t.Setenv("CF_TEST_IMAGE_KEY", "sk-image")
+	write(t, directory, "images: {provider: openai, model: gpt-image-2, api_key_env: CF_TEST_IMAGE_KEY}\n", 0o644)
+	if loaded, err = Load(directory); err != nil {
+		t.Fatal(err)
+	}
+	images, err := loaded.ImageGeneration()
+	if err != nil || *images != (ImageGeneration{Provider: "openai", Model: "gpt-image-2", Key: "sk-image"}) {
+		t.Fatalf("got %+v, %v", images, err)
+	}
+	write(t, directory, "images: {provider: google}\n", 0o644)
+	if loaded, err = Load(directory); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loaded.ImageGeneration(); err == nil || !strings.Contains(err.Error(), "needs one of api_key") {
+		t.Fatalf("no key: %v", err)
+	}
+	for _, content := range []string{"images: {provider: midjourney}\n", "images: {model: x}\n"} {
+		write(t, directory, content, 0o644)
+		if _, err := Load(directory); err == nil {
+			t.Fatalf("accepted %q", content)
+		}
+	}
+	if runtime.GOOS != "windows" {
+		write(t, directory, "images: {provider: openai, api_key: secret}\n", 0o644)
+		if err := os.Chmod(filepath.Join(directory, FileName), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(directory); err == nil || !strings.Contains(err.Error(), "chmod 600") {
+			t.Fatalf("an inline image key in a readable file: %v", err)
+		}
+	}
+}

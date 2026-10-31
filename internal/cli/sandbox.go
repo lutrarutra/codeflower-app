@@ -240,7 +240,9 @@ type preparedSandbox struct {
 	binds     []sandbox.Bind
 	isolation *sandbox.Isolation
 	// apiKey is the agent's key from the config, if any.
-	apiKey    string
+	apiKey string
+	// images is the image model from the config, if any.
+	images    *config.ImageGeneration
 	resources sandbox.Resources
 }
 
@@ -257,6 +259,14 @@ func (options sandboxOptions) prepare(ctx context.Context, engine sandbox.Engine
 // prepareWith is prepare with the mounts already chosen, e.g. a continued task's.
 func (options sandboxOptions) prepareWith(ctx context.Context, engine sandbox.EngineStatus, what string, binds []sandbox.Bind) (preparedSandbox, error) {
 	apiKey, err := options.userConfig.APIKey(options.agent)
+	if err != nil {
+		return preparedSandbox{}, err
+	}
+	images, err := options.userConfig.ImageGeneration()
+	if err != nil {
+		return preparedSandbox{}, err
+	}
+	binds, err = withIcons(binds, options.userConfig.IconsFolder())
 	if err != nil {
 		return preparedSandbox{}, err
 	}
@@ -291,8 +301,12 @@ func (options sandboxOptions) prepareWith(ctx context.Context, engine sandbox.En
 	fmt.Fprintf(os.Stderr, "Starting %s for %s with %s (%s)\n", what, sandbox.AgentLabel(options.agent), engine.Label, image)
 	fmt.Fprintf(os.Stderr, "  project  %s\n", state)
 	if isolation != nil {
+		hosts := sandbox.ProviderHosts[options.agent]
+		if images != nil {
+			hosts = append(append([]string(nil), hosts...), config.ImageProviders[images.Provider])
+		}
 		fmt.Fprintf(os.Stderr, "  network  isolated: only %s and the hosts in %s\n",
-			strings.Join(sandbox.ProviderHosts[options.agent], ", "), isolation.Allowlist)
+			strings.Join(hosts, ", "), isolation.Allowlist)
 	}
 	for _, bind := range binds {
 		mode := "read-write"
@@ -302,14 +316,37 @@ func (options sandboxOptions) prepareWith(ctx context.Context, engine sandbox.En
 		origin := ""
 		if options.configSkills[bind.Source] {
 			origin = ", from the config"
+		} else if bind.Target == sandbox.IconsRoot {
+			origin = ", the icon gallery"
 		}
 		fmt.Fprintf(os.Stderr, "  %-20s %s (%s%s)\n", bind.Target, bind.Source, mode, origin)
 	}
 	if apiKey != "" {
 		fmt.Fprintf(os.Stderr, "  api key  from the config, for %s\n", sandbox.AgentLabel(options.agent))
 	}
+	if images != nil {
+		fmt.Fprintf(os.Stderr, "  images   %s, from the config, for generating icons\n", images.Provider)
+	}
 	return preparedSandbox{engine: engine, image: image, state: state, binds: binds, isolation: isolation, apiKey: apiKey,
-		resources: options.resources}, nil
+		images: images, resources: options.resources}, nil
+}
+
+// withIcons adds the icon gallery's mount, unless it is off or already there
+// (a continued task's saved mounts).
+func withIcons(binds []sandbox.Bind, folder string) ([]sandbox.Bind, error) {
+	if folder == "" {
+		return binds, nil
+	}
+	for _, bind := range binds {
+		if bind.Target == sandbox.IconsRoot {
+			return binds, nil
+		}
+	}
+	bind, err := sandbox.IconsBind(folder)
+	if err != nil {
+		return nil, err
+	}
+	return append(binds, bind), nil
 }
 
 // worker is the prepared sandbox as a worker for agent.
@@ -322,6 +359,7 @@ func (p preparedSandbox) worker(agent string) sandbox.Worker {
 		Binds:     p.binds,
 		Isolation: p.isolation,
 		APIKey:    p.apiKey,
+		Images:    p.images,
 		Resources: p.resources,
 	}
 }

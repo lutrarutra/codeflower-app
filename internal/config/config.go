@@ -25,6 +25,16 @@ const FileName = "config.yaml"
 // config directory.
 const SkillsFolder = "skills"
 
+// IconsFolder is the user's icon gallery in the config directory, mounted
+// read-write in every sandbox so all projects share it.
+const IconsFolder = "icons"
+
+// ImageProviders are the services `images:` may name, with their API host.
+var ImageProviders = map[string]string{
+	"openai": "api.openai.com",
+	"google": "generativelanguage.googleapis.com",
+}
+
 // Agent holds the defaults for one agent.
 type Agent struct {
 	Model   string            `yaml:"model"`
@@ -35,6 +45,29 @@ type Agent struct {
 	APIKey     string `yaml:"api_key"`
 	APIKeyEnv  string `yaml:"api_key_env"`
 	APIKeyFile string `yaml:"api_key_file"`
+}
+
+// Icons configures the icon gallery.
+type Icons struct {
+	// Folder replaces <config dir>/icons; "off" mounts no gallery.
+	Folder string `yaml:"folder"`
+}
+
+// Images configures the image model codeflower-sketch generates icons with.
+type Images struct {
+	Provider string `yaml:"provider"`
+	// Model replaces the provider's default model.
+	Model      string `yaml:"model"`
+	APIKey     string `yaml:"api_key"`
+	APIKeyEnv  string `yaml:"api_key_env"`
+	APIKeyFile string `yaml:"api_key_file"`
+}
+
+// ImageGeneration is a configured image model with its resolved key.
+type ImageGeneration struct {
+	Provider string
+	Model    string
+	Key      string
 }
 
 // Client configures codeflower client.
@@ -59,6 +92,8 @@ type Config struct {
 	IsolateNetwork *bool            `yaml:"isolate_network"`
 	Skills         []string         `yaml:"skills"`
 	Agents         map[string]Agent `yaml:"agents"`
+	Icons          Icons            `yaml:"icons"`
+	Images         Images           `yaml:"images"`
 	Client         Client           `yaml:"client"`
 
 	// Directory is the config directory; Path is the file, whether or not it exists.
@@ -108,6 +143,13 @@ func Load(directory string) (*Config, error) {
 			return nil, fmt.Errorf("%s: unknown agent %q under agents: use %s", config.Path, name, strings.Join(agents.IDs(), ", "))
 		}
 	}
+	if provider := config.Images.Provider; provider != "" {
+		if _, ok := ImageProviders[provider]; !ok {
+			return nil, fmt.Errorf("%s: unknown provider %q under images: use openai or google", config.Path, provider)
+		}
+	} else if config.Images != (Images{}) {
+		return nil, fmt.Errorf("%s: images: needs a provider (openai or google)", config.Path)
+	}
 	if config.hasInlineKey() {
 		if err := checkPrivate(config.Path); err != nil {
 			return nil, err
@@ -122,6 +164,9 @@ func knownAgent(name string) bool {
 }
 
 func (c *Config) hasInlineKey() bool {
+	if c.Images.APIKey != "" {
+		return true
+	}
 	for _, agent := range c.Agents {
 		if agent.APIKey != "" {
 			return true
@@ -181,25 +226,62 @@ func (c *Config) SkillFolders() (folders, missing []string) {
 // APIKey resolves the agent's API key; it is empty when none is configured.
 func (c *Config) APIKey(agent string) (string, error) {
 	entry := c.Agent(agent)
+	return c.resolveKey("agents."+agent, entry.APIKey, entry.APIKeyEnv, entry.APIKeyFile)
+}
+
+// IconsFolder is the icon gallery's folder on this computer, or "" when the
+// config turns the gallery off.
+func (c *Config) IconsFolder() string {
+	if c == nil || c.Directory == "" || c.Icons.Folder == "off" {
+		return ""
+	}
+	if c.Icons.Folder == "" {
+		return filepath.Join(c.Directory, IconsFolder)
+	}
+	path := expandHome(c.Icons.Folder)
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(c.Directory, path)
+	}
+	return path
+}
+
+// ImageGeneration is the configured image model, or nil when there is none.
+func (c *Config) ImageGeneration() (*ImageGeneration, error) {
+	if c == nil || c.Images.Provider == "" {
+		return nil, nil
+	}
+	key, err := c.resolveKey("images", c.Images.APIKey, c.Images.APIKeyEnv, c.Images.APIKeyFile)
+	if err != nil {
+		return nil, err
+	}
+	if key == "" {
+		return nil, fmt.Errorf("%s: images: needs one of api_key, api_key_env and api_key_file", c.Path)
+	}
+	return &ImageGeneration{Provider: c.Images.Provider, Model: c.Images.Model, Key: key}, nil
+}
+
+// resolveKey reads a key given inline, in a host environment variable, or in
+// a private file; section names the config entry in errors.
+func (c *Config) resolveKey(section, inline, variable, file string) (string, error) {
 	given := 0
-	for _, set := range []bool{entry.APIKey != "", entry.APIKeyEnv != "", entry.APIKeyFile != ""} {
+	for _, set := range []bool{inline != "", variable != "", file != ""} {
 		if set {
 			given++
 		}
 	}
 	switch {
 	case given > 1:
-		return "", fmt.Errorf("%s: agents.%s has more than one of api_key, api_key_env and api_key_file", c.Path, agent)
-	case entry.APIKey != "":
-		return entry.APIKey, nil
-	case entry.APIKeyEnv != "":
-		key := strings.TrimSpace(os.Getenv(entry.APIKeyEnv))
+		return "", fmt.Errorf("%s: %s has more than one of api_key, api_key_env and api_key_file", c.Path, section)
+	case inline != "":
+		return inline, nil
+	case variable != "":
+		key := strings.TrimSpace(os.Getenv(variable))
 		if key == "" {
-			return "", fmt.Errorf("%s: agents.%s.api_key_env names %s, which is not set", c.Path, agent, entry.APIKeyEnv)
+			return "", fmt.Errorf("%s: %s.api_key_env names %s, which is not set", c.Path, section, variable)
 		}
 		return key, nil
-	case entry.APIKeyFile != "":
-		path := expandHome(entry.APIKeyFile)
+	case file != "":
+		path := expandHome(file)
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(c.Directory, path)
 		}
@@ -208,7 +290,7 @@ func (c *Config) APIKey(agent string) (string, error) {
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return "", fmt.Errorf("%s: agents.%s.api_key_file: %w", c.Path, agent, err)
+			return "", fmt.Errorf("%s: %s.api_key_file: %w", c.Path, section, err)
 		}
 		key := strings.TrimSpace(string(data))
 		if key == "" {

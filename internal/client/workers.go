@@ -463,6 +463,11 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	images, err := loaded.ImageGeneration()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	binds, err := sandbox.Folders{
 		Inputs: request.Inputs, Outputs: request.Outputs, Code: request.Code,
 		Skills: withConfigSkills(loaded, request.Skills),
@@ -470,6 +475,14 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
+	}
+	if folder := loaded.IconsFolder(); folder != "" {
+		bind, err := sandbox.IconsBind(folder)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		binds = append(binds, bind)
 	}
 
 	named, err := s.image(request.Image, request.ImageTag)
@@ -563,7 +576,7 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			code, err = sandbox.Worker{
 				Agent: request.Agent, Engine: engine, Image: image, State: state, Binds: binds,
-				Isolation: isolation, APIKey: apiKey, Stdout: item, Stderr: item,
+				Isolation: isolation, APIKey: apiKey, Images: images, Stdout: item, Stderr: item,
 			}.Run(ctx, func(connection sandbox.Connection) {
 				item.mu.Lock()
 				item.url = connection.URL

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"codeflower-app/internal/agents"
+	"codeflower-app/internal/config"
 )
 
 // Agents a worker can run, the default first, from their descriptors.
@@ -32,7 +33,17 @@ const (
 	OutputsRoot = "/data/output"
 	CodeRoot    = "/data/code"
 	SkillsRoot  = "/data/skills"
+	// IconsRoot is the user's icon gallery, shared by all their projects.
+	IconsRoot = "/data/icons"
 )
+
+// IconsBind mounts the icon gallery, creating its folder when needed.
+func IconsBind(folder string) (Bind, error) {
+	if err := os.MkdirAll(expandHome(folder), 0o755); err != nil {
+		return Bind{}, fmt.Errorf("icon gallery: %w", err)
+	}
+	return NewBind(folder, IconsRoot, false)
+}
 
 // NewInstanceID returns a random UUIDv4.
 func NewInstanceID() string {
@@ -74,6 +85,9 @@ type Worker struct {
 	// APIKey, when set, is given to the agent's bridge in the environment (never
 	// in the command line); it stores the key in the agent's own files.
 	APIKey string
+	// Images, when set, lets codeflower-sketch generate icons: the key is
+	// given in a private file for the worker's lifetime.
+	Images *config.ImageGeneration
 	// Task, when set, is the id of a task in the project's tasks folder: the
 	// agent works on its attempt TaskAttempt by itself, and nothing listens
 	// for VS Code.
@@ -202,7 +216,7 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 			ingress = net.JoinHostPort(ingressHost, itoa(port))
 		}
 		log := func(message string) { fmt.Fprintln(w.Stderr, message) }
-		list := newAllowlist(w.Isolation.Allowlist, ProviderHosts[w.Agent], log)
+		list := newAllowlist(w.Isolation.Allowlist, w.providerHosts(), log)
 		gate, err = startGateway(netDirectory, ingress, list, log)
 		if err != nil {
 			os.RemoveAll(netDirectory)
@@ -228,6 +242,21 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	resources.environment(values)
 	if w.APIKey != "" {
 		values[APIKeyVariable] = w.APIKey
+	}
+	for _, bind := range w.Binds {
+		if bind.Target == IconsRoot {
+			values["CODEFLOWER_ICONS"] = IconsRoot
+		}
+	}
+	if w.Images != nil {
+		keyFile, err := writeImageKey(w.State, instanceID, w.Images.Key)
+		if err != nil {
+			return 1, err
+		}
+		defer os.Remove(keyFile)
+		values["CODEFLOWER_IMAGE_PROVIDER"] = w.Images.Provider
+		values["CODEFLOWER_IMAGE_MODEL"] = w.Images.Model
+		values["CODEFLOWER_IMAGE_KEY_FILE"] = ContainerState + "/run/" + filepath.Base(keyFile)
 	}
 	if w.InspectPort > 0 {
 		values["CODEFLOWER_BRIDGE_INSPECT"] = fmt.Sprintf("0.0.0.0:%d", BridgeInspectPort)
@@ -296,6 +325,31 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 		return 1, cause
 	}
 	return code, err
+}
+
+// providerHosts are the hosts an isolated sandbox always reaches: the agent's
+// service, and the image model's when one is configured.
+func (w Worker) providerHosts() []string {
+	hosts := append([]string(nil), ProviderHosts[w.Agent]...)
+	if w.Images != nil {
+		hosts = append(hosts, config.ImageProviders[w.Images.Provider])
+	}
+	return hosts
+}
+
+// writeImageKey puts the image model's key in the project's run folder, where
+// codeflower-sketch reads it; it is not in the environment, which the bridge
+// keeps free of credentials.
+func writeImageKey(state, instanceID, key string) (string, error) {
+	directory := filepath.Join(state, "run")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(directory, "image-key-"+instanceID)
+	if err := os.WriteFile(path, []byte(key+"\n"), 0o600); err != nil {
+		return "", fmt.Errorf("could not write the image key: %w", err)
+	}
+	return path, nil
 }
 
 // Apptainer runs in the job's own limits, so only Docker and Podman, whose

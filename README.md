@@ -292,14 +292,27 @@ agents:                    # claude, codex or dsh
     api_key_file: ~/.codeflower/keys/openai   # a file holding the key (chmod 600)
   dsh:
     api_key_env: DEEPSEEK_API_KEY             # or the name of a host environment variable
+icons:
+  folder: ~/.codeflower/icons   # the icon gallery (the default); "off" mounts none
+images:                    # optional: lets the agent generate icons it cannot find
+  provider: openai         # or google
+  model: gpt-image-1       # optional; the provider's default otherwise
+  api_key_env: OPENAI_API_KEY
 ```
 
 - The folder `~/.codeflower/skills` is mounted read-only in every sandbox when it exists, like
   `--skills ~/.codeflower/skills`, as are the folders in `skills:`. The client lists them.
+- The icon gallery (`~/.codeflower/icons`) is mounted read-write at `/data/icons` in every sandbox,
+  so all your projects share it. It holds the icons you imported for schematic figures (the
+  codeflower-sketch skill): Servier Medical Art and SciDraw files you downloaded and attached in the
+  chat, with their licenses and credits. Code flower ships and downloads no icons.
+- With `images:`, the agent can generate an icon after asking you. Its key is given in a private file
+  in the project's `run/` folder while the sandbox runs, and with `--isolate-network` the provider's
+  API host is allowed.
 - `model`, `effort` and `options` apply to `codeflower task`. In `codeflower interactive` you choose them
   in the chat.
-- An API key is given in one of three ways per agent: `api_key_env`, `api_key_file`, or `api_key`
-  itself. A file that holds a key (`config.yaml` with `api_key`, or the `api_key_file`) must not be
+- An API key is given in one of three ways per agent, and for `images:`: `api_key_env`,
+  `api_key_file`, or `api_key` itself. A file that holds a key (`config.yaml` with `api_key`, or the `api_key_file`) must not be
   readable by other users (`chmod 600`). The agent can read its key in the sandbox, as it can the key
   of a sign-in; `--isolate-network` limits where it can go. If Claude Code's settings file or Codex's
   credential file cannot be read or contains invalid JSON, the worker stops without replacing it;
