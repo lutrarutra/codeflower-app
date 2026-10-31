@@ -75,7 +75,7 @@ fi
 base="https://github.com/$repo/releases/download/$version"
 archive="codeflower-$version-$os-$arch.tar.gz"
 
-echo "Downloading $archive…"
+echo "Downloading ${archive}…"
 if ! download "$base/$archive" "$work/$archive"; then
   # Releases up to v0.10.0 named their archives without the version.
   archive="codeflower-$os-$arch.tar.gz"
