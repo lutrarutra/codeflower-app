@@ -267,11 +267,8 @@ With "tunnel: {hardened: true}" name the sandboxes (by name or ID, as
 				return err
 			}
 			link := tunnel.PairingLink(state, secret)
+			printQR(os.Stdout, link)
 			fmt.Printf("Open this link in the browser to pair (once, within 10 minutes):\n\n  %s\n\n", link)
-			if term.IsTerminal(os.Stdout.Fd()) {
-				qrterminal.GenerateHalfBlock(link, qrterminal.L, os.Stdout)
-				fmt.Println()
-			}
 			fmt.Printf("The page shows this computer's key fingerprint: %s\n", tunnel.Fingerprint(state.PublicKey))
 			if _, running := client.Running(dir); !running {
 				fmt.Println(`Start "codeflower client" before opening the link: it answers the pairing.`)
@@ -280,6 +277,17 @@ With "tunnel: {hardened: true}" name the sandboxes (by name or ID, as
 		},
 	}
 	return command
+}
+
+// printQR prints a QR code of `text` when `out` is a terminal; phones scan it
+// to open the link.
+func printQR(out io.Writer, text string) {
+	file, ok := out.(*os.File)
+	if !ok || !term.IsTerminal(file.Fd()) {
+		return
+	}
+	qrterminal.GenerateHalfBlock(text, qrterminal.L, out)
+	fmt.Fprintln(out)
 }
 
 func randomSecret() string {
@@ -577,6 +585,7 @@ func tunnelConnectCommand(directory func() string) *cobra.Command {
 			return tunnel.Run(command.Context(), tunnel.Options{
 				ConfigDirectory: dir,
 				Version:         version,
+				Connected:       func(pageURL string) { fmt.Println(client.ConnectedPrefix + pageURL) },
 				DialApp:         func(ctx context.Context) (net.Conn, error) { return (&net.Dialer{}).DialContext(ctx, "unix", socket) },
 				Notify:          notify,
 				Log:             os.Stderr,

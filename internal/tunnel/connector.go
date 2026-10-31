@@ -40,6 +40,9 @@ type Options struct {
 	DialApp func(ctx context.Context) (net.Conn, error)
 	Notify  func(Notice)
 	Log     io.Writer
+	// Connected, if set, is told the address of the page through the tunnel
+	// each time the connector connects.
+	Connected func(pageURL string)
 }
 
 const (
@@ -217,6 +220,9 @@ func (c *connector) session(ctx context.Context, state *State) error {
 	}
 	defer control.CloseNow()
 	fmt.Fprintf(c.options.Log, "tunnel: connected to %s as %s\n", api.Base.Host, state.ConnectorID)
+	if c.options.Connected != nil {
+		c.options.Connected(PageURL(state))
+	}
 	// Once connected, earlier problems are over and may be told again.
 	c.mu.Lock()
 	clear(c.warned)

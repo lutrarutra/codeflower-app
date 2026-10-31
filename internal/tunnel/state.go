@@ -217,3 +217,14 @@ func RemoveState(configDirectory string) error {
 	}
 	return err
 }
+
+// PageURL is where paired browsers open this computer's code flower.
+func PageURL(state *State) string {
+	return strings.TrimRight(state.URL, "/") + "/m/" + state.ConnectorID + "/"
+}
+
+// Expected: signed in and on, so the client should come online.
+func Expected(configDirectory string) bool {
+	state, err := LoadState(configDirectory)
+	return err == nil && !state.Off
+}

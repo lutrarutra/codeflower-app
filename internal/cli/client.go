@@ -119,8 +119,14 @@ call the quit off. Sandboxes running elsewhere keep running.`,
 				UIDirectory:       uiDirectory,
 				WrapUp:            time.Duration(loaded.Client.WrapUpMinutes) * time.Minute,
 				Tunnel:            &client.TunnelOptions{Hardened: loaded.Tunnel.Hardened, Manage: loaded.Tunnel.Manage},
-				Ready: func(address string) {
+				Ready: func(address, tunnelURL string) {
+					if tunnelURL != "" {
+						printQR(log, tunnelURL)
+					}
 					fmt.Fprintf(log, "code flower client is open at:\n\n  %s\n\n", address)
+					if tunnelURL != "" {
+						fmt.Fprintf(log, "and through the tunnel, in paired browsers:\n\n  %s\n\n", tunnelURL)
+					}
 					if hint := forwardingHint(address); hint != "" {
 						fmt.Fprint(log, hint)
 					}
@@ -130,6 +136,11 @@ call the quit off. Sandboxes running elsewhere keep running.`,
 						fmt.Fprintln(log, "Keep this running while you use your sandboxes; press Ctrl+C to stop the ones it started and quit.")
 					}
 					fmt.Fprintln(log, "For the command line instead, run: codeflower --help")
+				},
+				TunnelReady: func(tunnelURL string) {
+					fmt.Fprintln(log)
+					printQR(log, tunnelURL)
+					fmt.Fprintf(log, "The tunnel is connected: paired browsers open code flower at:\n\n  %s\n\n", tunnelURL)
 				},
 				Started: func(control *client.Control) {
 					go client.HandleSignals(control, signals, log)

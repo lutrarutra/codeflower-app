@@ -49,8 +49,12 @@ type Options struct {
 	Version string
 	// OpenBrowser opens the page; false prints its address only.
 	OpenBrowser bool
-	// Ready receives the page's address (with its secret) once listening.
-	Ready func(url string)
+	// Ready receives the page's address (with its secret) once listening, and
+	// the page's address through the tunnel when the tunnel connected by then.
+	Ready func(url, tunnelURL string)
+	// TunnelReady receives the page's address through the tunnel when the
+	// tunnel first connects after Ready (it came online later).
+	TunnelReady func(tunnelURL string)
 	// Log receives progress messages for the terminal.
 	Log io.Writer
 	// Image, or the build of the published image ImageTag names, is used
@@ -160,9 +164,7 @@ func Run(ctx context.Context, options Options) error {
 	watching, stopWatching := context.WithCancel(context.Background())
 	defer stopWatching()
 	go server.watchLocal(watching)
-	if options.Tunnel != nil && options.ConfigDirectory != "" {
-		go server.runTunnel(watching, *options.Tunnel)
-	}
+	tunnelURL := server.startTunnel(watching)
 	httpServer := &http.Server{Handler: server.routes(), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = httpServer.Serve(listener) }()
 
@@ -170,7 +172,7 @@ func Run(ctx context.Context, options Options) error {
 	forget := recordInstance(options.ConfigDirectory, url)
 	defer forget()
 	if options.Ready != nil {
-		options.Ready(url)
+		options.Ready(url, tunnelURL())
 	}
 	if options.Started != nil {
 		options.Started(&Control{server: server, URL: url})
