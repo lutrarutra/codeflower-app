@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"strings"
@@ -53,7 +54,8 @@ const (
 	idleLimit     = 30 * time.Minute
 	maxBody       = 16 << 20
 	maxFrame      = MaxPlaintext + 16 + 1
-	// accessNoticeEvery: how often the same device's use is announced.
+	// accessNoticeEvery: how often the same device's use is announced from
+	// the same address; a new address is announced at once.
 	accessNoticeEvery = time.Hour
 )
 
@@ -64,7 +66,7 @@ type connector struct {
 	mu        sync.Mutex
 	state     *State
 	streams   map[*stream]struct{}
-	announced map[string]time.Time
+	announced map[string]announcement
 	// warned: notices already shown for this problem, so a reconnect loop
 	// does not repeat them.
 	warned map[string]time.Time
@@ -83,7 +85,7 @@ func Run(ctx context.Context, options Options) error {
 	c := &connector{
 		options:   options,
 		streams:   map[*stream]struct{}{},
-		announced: map[string]time.Time{},
+		announced: map[string]announcement{},
 		warned:    map[string]time.Time{},
 		app: &http.Client{
 			Transport: &http.Transport{
@@ -259,9 +261,10 @@ func (c *connector) session(ctx context.Context, state *State) error {
 		var message struct {
 			Type   string `json:"type"`
 			Stream string `json:"stream"`
+			IP     string `json:"ip"`
 		}
 		if json.Unmarshal(data, &message) == nil && message.Type == "open" && message.Stream != "" {
-			go c.serveStream(ctx, api, state, message.Stream)
+			go c.serveStream(ctx, api, state, message.Stream, browserAddress(message.IP))
 		}
 	}
 }
@@ -345,7 +348,16 @@ func (s *stream) receive(ctx context.Context) (byte, []byte, error) {
 	return Unframe(plaintext)
 }
 
-func (c *connector) serveStream(ctx context.Context, api *API, state *State, id string) {
+// browserAddress is the address the tunnel reports for a browser, if it is one.
+// Only the tunnel vouches for it, so it is shown, never trusted.
+func browserAddress(reported string) string {
+	if addr, err := netip.ParseAddr(reported); err == nil {
+		return addr.Unmap().String()
+	}
+	return ""
+}
+
+func (c *connector) serveStream(ctx context.Context, api *API, state *State, id, ip string) {
 	header := api.Header()
 	header.Set("Authorization", "Bearer "+state.Token)
 	dialing, cancel := context.WithTimeout(ctx, dialBackLimit)
@@ -403,7 +415,7 @@ func (c *connector) serveStream(ctx context.Context, api *API, state *State, id 
 		ws.Close(1002, "Bad request")
 		return
 	}
-	c.announce(device)
+	c.announce(device, ip)
 	switch open.Kind {
 	case "http":
 		c.serveHTTP(ctx, s, open)
@@ -449,17 +461,28 @@ func (c *connector) authorize(responder *Responder) (Device, string) {
 	return device, ""
 }
 
-// announce tells the user when a device uses the tunnel, at most hourly per device.
-func (c *connector) announce(device Device) {
+type announcement struct {
+	at time.Time
+	ip string
+}
+
+// announce tells the user when a device uses the tunnel and from where: at
+// most hourly per device, unless it comes from another address.
+func (c *connector) announce(device Device, ip string) {
 	c.mu.Lock()
 	last, seen := c.announced[device.Key]
-	if seen && time.Since(last) < accessNoticeEvery {
+	if seen && last.ip == ip && time.Since(last.at) < accessNoticeEvery {
 		c.mu.Unlock()
 		return
 	}
-	c.announced[device.Key] = time.Now()
+	c.announced[device.Key] = announcement{at: time.Now(), ip: ip}
 	c.mu.Unlock()
-	c.options.Notify(Notice{Title: "Remote access to code flower", Body: fmt.Sprintf("%q is using code flower through the tunnel.", device.Label)})
+	body := fmt.Sprintf("%q is using code flower through the tunnel.", device.Label)
+	if ip != "" {
+		body = fmt.Sprintf("%q connected from %s.", device.Label, ip)
+	}
+	fmt.Fprintf(c.options.Log, "tunnel: %s\n", body)
+	c.options.Notify(Notice{Title: "Remote access to code flower", Body: body})
 }
 
 // trusted are the headers the client reads to scope a remote request.

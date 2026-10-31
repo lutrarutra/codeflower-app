@@ -27,6 +27,8 @@ type fakeTunnel struct {
 	control  *websocket.Conn
 	browsers map[string]*websocket.Conn
 	next     int
+	// ip: the browser address the open message reports, if set.
+	ip string
 }
 
 func newFakeTunnel(t *testing.T) *fakeTunnel {
@@ -79,8 +81,9 @@ func newFakeTunnel(t *testing.T) *fakeTunnel {
 		id := strings.Repeat("s", tunnel.next)
 		tunnel.browsers[id] = conn
 		control := tunnel.control
+		message, _ := json.Marshal(map[string]string{"type": "open", "stream": id, "ip": tunnel.ip})
 		tunnel.mu.Unlock()
-		control.Write(context.Background(), websocket.MessageText, []byte(`{"type":"open","stream":"`+id+`"}`))
+		control.Write(context.Background(), websocket.MessageText, message)
 		<-r.Context().Done()
 	})
 	tunnel.Server = httptest.NewServer(mux)
@@ -344,6 +347,48 @@ func TestRequestsReachTheAppWithTheDevicesScopeAndNotTheBrowsersClaims(t *testin
 	json.Unmarshal(body.Bytes(), &seen)
 	if seen["method"] != "POST" || seen["body"] != `{"hello":1}` || seen["device"] != "Phone" || seen["workers"] != "*" {
 		t.Fatalf("the app saw %v", seen)
+	}
+}
+
+func TestDeviceUseIsAnnouncedWithItsAddressAgainWhenTheAddressChanges(t *testing.T) {
+	r := startRig(t)
+	phone := pairedPhone(t, r)
+	<-r.notices // paired
+	request := func(ip string) {
+		r.tunnel.mu.Lock()
+		r.tunnel.ip = ip
+		r.tunnel.mu.Unlock()
+		b := r.open(t, phone, Hello{})
+		open, _ := JSONFrame(KindOpen, OpenRequest{Kind: "http", Method: "GET", Path: "/echo"})
+		b.send(t, open)
+		b.send(t, Frame(KindEnd, nil))
+		if kind, _ := b.receive(t); kind != KindHead {
+			t.Fatalf("expected a response, got kind %d", kind)
+		}
+	}
+	expect := func(body string) {
+		t.Helper()
+		select {
+		case notice := <-r.notices:
+			if notice.Body != body {
+				t.Fatalf("notice %q, want %q", notice.Body, body)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("no notice %q", body)
+		}
+	}
+	request("::ffff:203.0.113.4")
+	expect(`"Phone" connected from 203.0.113.4.`)
+	request("203.0.113.4")
+	request("2001:db8::1")
+	expect(`"Phone" connected from 2001:db8::1.`)
+	// Not an address: the notice leaves it out.
+	request("<b>nope</b>")
+	expect(`"Phone" is using code flower through the tunnel.`)
+	select {
+	case notice := <-r.notices:
+		t.Fatalf("unexpected notice %+v", notice)
+	default:
 	}
 }
 
