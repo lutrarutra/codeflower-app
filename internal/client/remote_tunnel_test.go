@@ -83,6 +83,16 @@ func TestRemoteBrowsersSeeOnlyTheirWorkersAndNoBridgeTokens(t *testing.T) {
 
 func TestRemoteBrowsersCannotConnectAnywhereQuitOrManageUnlessAllowed(t *testing.T) {
 	page, _, _ := tunnelPage(t, false)
+	_, body := remoteRequest(t, page, http.MethodGet, "/api/system", "*")
+	var system struct {
+		Capabilities map[string]any `json:"capabilities"`
+	}
+	if json.Unmarshal(body, &system) != nil || system.Capabilities["start"] != false || system.Capabilities["connect"] != false || system.Capabilities["connectOnly"] != true {
+		t.Fatalf("remote capabilities: %s", body)
+	}
+	if response, body := remoteRequest(t, page, http.MethodPost, "/api/workers", "*"); response.StatusCode != http.StatusForbidden || !strings.Contains(string(body), "manage: true") {
+		t.Fatalf("starting without manage: %d %s", response.StatusCode, body)
+	}
 	for _, refused := range []struct{ method, path string }{
 		{http.MethodPost, "/api/workers/connect"},
 		{http.MethodPost, "/api/quit"},

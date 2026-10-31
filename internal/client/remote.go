@@ -64,7 +64,7 @@ func (h *remote) routes() http.Handler {
 	}
 	mux.Handle("GET /", http.FileServerFS(assets))
 	mux.HandleFunc("GET /frame", func(w http.ResponseWriter, _ *http.Request) { serveFrame(w) })
-	mux.HandleFunc("GET /api/system", s.system)
+	mux.HandleFunc("GET /api/system", h.system)
 	mux.HandleFunc("GET /api/resources", s.resources)
 	mux.HandleFunc("GET /api/quit", s.quitStatus)
 	mux.HandleFunc("GET /api/workers", h.listWorkers)
@@ -76,8 +76,49 @@ func (h *remote) routes() http.Handler {
 		mux.HandleFunc("POST /api/folders", s.createFolder)
 		mux.HandleFunc("POST /api/workers", s.startWorker)
 		mux.Handle("DELETE /api/workers/{id}", h.scoped(s.forgetWorker))
+	} else {
+		off := refuse(manageOff)
+		for _, pattern := range []string{"GET /api/folders", "POST /api/folders", "POST /api/workers", "DELETE /api/workers/{id}"} {
+			mux.HandleFunc(pattern, off)
+		}
+	}
+	local := refuse("This is only possible on the computer itself, not through the tunnel.")
+	for _, pattern := range []string{"POST /api/workers/connect", "POST /api/quit", "DELETE /api/quit"} {
+		mux.HandleFunc(pattern, local)
 	}
 	return h.guard(mux)
+}
+
+const manageOff = `Starting sandboxes through the tunnel is off. To allow it, set "tunnel: {manage: true}" in config.yaml on that computer and restart codeflower client.`
+
+func refuse(message string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		writeError(w, http.StatusForbidden, errors.New(message))
+	}
+}
+
+// system is the client's, with what remote browsers may do: never connect to
+// new addresses, and start sandboxes only with manage.
+func (h *remote) system(w http.ResponseWriter, r *http.Request) {
+	recorder := httptest.NewRecorder()
+	h.server.system(recorder, r)
+	var info map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &info); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	capabilities, _ := info["capabilities"].(map[string]any)
+	if capabilities == nil {
+		capabilities = map[string]any{}
+	}
+	capabilities["connect"] = false
+	if !h.manage {
+		capabilities["start"] = false
+		capabilities["connectOnly"] = true
+		capabilities["startDisabledReason"] = manageOff
+	}
+	info["capabilities"] = capabilities
+	writeJSON(w, recorder.Code, info)
 }
 
 func (h *remote) guard(next http.Handler) http.Handler {
