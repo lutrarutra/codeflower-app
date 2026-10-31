@@ -29,8 +29,8 @@ questions, or continue the session. Unlike "task", this command keeps the
 worker running for interactive follow-up.
 
 The session is saved in the project and appears in the extension's sessions
-list. If the agent is not signed in yet, sign in with "codeflower interactive"
-first.
+list. If the agent is not signed in yet, the task waits until you connect
+and sign in.
 
 It prints a codeflower://… line: in VS Code, run "code flower: Connect to
 worker" and paste it. Press Ctrl+C to stop.`,
