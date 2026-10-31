@@ -1,8 +1,8 @@
 {
   "/m/verify/": "64eba7e589c111b23f72df10c6a77c1a2d6d29bd38a3c785a9b0202307ec6e97",
   "/p": "9e0663fdfe0c1ff7325e98a3afbba2cd2608247fe1379568da9ca85336bebda6",
-  "/sw.js": "900c5259cdad208a78b2c953efdf433f3a1e252d45f7ea870aafc3cb2406cf21",
+  "/sw.js": "8aa6bab4f7cf66f46fcffb8400fa9be258e89e8eb4f4f2fe74e13444dd285fbd",
   "/tunnel/envelope.js": "31aa828538e311f33fbb4e9e9c2184f9c8cc4fd2c2105dd9afce74dffabed469",
   "/tunnel/m.js": "3b5d918078d756e456c440892ee51baeac908b22ef1cc9a3b208ea3646276d14",
-  "/tunnel/p.js": "0c04def5e45d2f8788752702b6f8183b955778c511fc584eb8381620b0824d20"
+  "/tunnel/p.js": "ca91b41f9ffa7c89b0963ae87a8960118dc1ef3410136aa2a1596ddace1f1a06"
 }

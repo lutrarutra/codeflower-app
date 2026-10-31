@@ -62,8 +62,9 @@ func TestRemoteBrowsersSeeOnlyTheirWorkersAndNoBridgeTokens(t *testing.T) {
 		t.Fatalf("a bridge token reached the remote browser: %s", body)
 	}
 	for _, worker := range all {
-		if _, has := worker["url"]; has {
-			t.Fatalf("the worker's address was listed: %v", worker)
+		// The page needs an address to offer the worker's chats, without its token.
+		if address, _ := worker["url"].(string); !strings.HasSuffix(address, "?token=…") {
+			t.Fatalf("the worker's address: %v", worker["url"])
 		}
 	}
 

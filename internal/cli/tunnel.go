@@ -108,6 +108,7 @@ func askEUOnly(in io.Reader, out io.Writer) (bool, error) {
 
 func tunnelLoginCommand(directory func() string) *cobra.Command {
 	var url, name string
+	var noBrowser bool
 	command := &cobra.Command{
 		Use:   "login",
 		Short: "Sign this computer in to the tunnel",
@@ -169,7 +170,9 @@ Signing in again replaces this computer's connector: paired browsers must pair a
 			}
 			fmt.Printf("\nOpen this page, sign in, and approve the code:\n\n  %s\n\n  code: %s\n  name: %s\n  key fingerprint: %s\n\n",
 				code.VerificationURL, code.UserCode, name, tunnel.Fingerprint(publicKey))
-			_ = client.OpenBrowser(code.VerificationURL)
+			if !noBrowser {
+				_ = client.OpenBrowser(code.VerificationURL)
+			}
 			fmt.Println("Waiting for the approval…")
 			connectorID, token, err := waitForApproval(ctx, api, code)
 			if err != nil {
@@ -196,6 +199,7 @@ Signing in again replaces this computer's connector: paired browsers must pair a
 	}
 	command.Flags().StringVar(&url, "url", "", "the tunnel to use, saved in config.yaml (default "+tunnel.DefaultURL+")")
 	command.Flags().StringVar(&name, "name", "", "this computer's name in your account (default: its host name)")
+	command.Flags().BoolVar(&noBrowser, "no-browser", false, "print the approval page's address instead of opening a browser")
 	return command
 }
 

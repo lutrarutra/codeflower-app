@@ -579,8 +579,10 @@ func openBrowser(url string) error {
 		candidates = [][]string{{"rundll32", "url.dll,FileProtocolHandler", url}}
 	default:
 		if sandbox.IsWSL() {
-			// The Windows browser reaches WSL's 127.0.0.1 through localhost forwarding.
-			candidates = append(candidates, []string{"wslview", url}, []string{"explorer.exe", url})
+			// The Windows browser reaches WSL's 127.0.0.1 through localhost
+			// forwarding. Not explorer.exe: given a URL with a query string
+			// (?key=…), it opens a File Explorer window instead.
+			candidates = append(candidates, []string{"wslview", url}, []string{"rundll32.exe", "url.dll,FileProtocolHandler", url})
 		}
 		candidates = append(candidates, []string{"xdg-open", url}, []string{"sensible-browser", url})
 	}

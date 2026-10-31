@@ -148,8 +148,9 @@ func (h *remote) scoped(handler http.HandlerFunc) http.Handler {
 
 var tokenInText = regexp.MustCompile(`token=[^&\s"']+`)
 
-// listWorkers lists only the workers the device may use, without their
-// addresses: those carry the bridges' tokens, which remote browsers never need.
+// listWorkers lists only the workers the device may use, with the bridges'
+// tokens blanked out of their addresses: remote browsers never need them (the
+// page only checks that a worker has an address).
 func (h *remote) listWorkers(w http.ResponseWriter, r *http.Request) {
 	recorder := httptest.NewRecorder()
 	h.server.listWorkers(recorder, r)
@@ -165,7 +166,9 @@ func (h *remote) listWorkers(w http.ResponseWriter, r *http.Request) {
 		if !scope.allows(id) {
 			continue
 		}
-		delete(view, "url")
+		if address, ok := view["url"].(string); ok {
+			view["url"] = tokenInText.ReplaceAllString(address, "token=…")
+		}
 		if lines, ok := view["log"].([]any); ok {
 			for index, line := range lines {
 				if text, ok := line.(string); ok {
