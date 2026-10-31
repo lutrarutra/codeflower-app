@@ -1,0 +1,2 @@
+# Compared byte for byte (TestVectors), so no CRLF on Windows checkouts.
+internal/tunnel/testdata/*.json text eol=lf
