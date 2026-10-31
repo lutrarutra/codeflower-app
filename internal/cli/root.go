@@ -144,6 +144,17 @@ sandbox with a few clicks, or connects to one running elsewhere. Run
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	update := root.Flags().Bool("update", false, "download the latest release and replace this program with it")
+	root.RunE = func(command *cobra.Command, _ []string) error {
+		if !*update {
+			return command.Help()
+		}
+		u, err := newUpdater(os.Stdout)
+		if err != nil {
+			return err
+		}
+		return u.run(command.Context())
+	}
 	root.AddCommand(interactiveCommand(), runCommand(), taskCommand(), pullCommand(), checkCommand(), clientCommand())
 	if startedFromDesktop(os.Args[1:]) {
 		root.SetArgs([]string{"client", "--desktop"})

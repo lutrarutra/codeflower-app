@@ -21,12 +21,12 @@ app-build-all:
 			-o build/codeflower-$$os-$$arch$$ext ./cmd/codeflower || exit 1; \
 	done
 
-# The release archives of app-build-all, with checksums: build/dist/codeflower-<os>-<arch>.tar.gz
+# The release archives of app-build-all, with checksums: build/dist/codeflower-<version>-<os>-<arch>.tar.gz
 # (.zip for Windows), each holding the binary as codeflower[.exe].
 app-dist: app-build-all
 	rm -rf build/dist build/stage && mkdir -p build/dist
 	for binary in build/codeflower-*-*; do \
-		name=$$(basename $$binary .exe); ext=; case $$binary in *.exe) ext=.exe;; esac; \
+		name=codeflower-$(VERSION)-$$(basename $$binary .exe | sed 's/^codeflower-//'); ext=; case $$binary in *.exe) ext=.exe;; esac; \
 		mkdir -p build/stage/$$name && cp $$binary build/stage/$$name/codeflower$$ext && cp README.md build/stage/$$name/; \
 		if [ -n "$$ext" ]; then (cd build/stage/$$name && zip -q ../../dist/$$name.zip codeflower$$ext README.md); \
 		else tar -C build/stage/$$name -czf build/dist/$$name.tar.gz codeflower README.md; fi; \
@@ -34,7 +34,7 @@ app-dist: app-build-all
 	rm -rf build/stage
 	cd build/dist && shasum -a 256 * > SHA256SUMS
 
-# The macOS app (double-click opens the window), as build/dist/codeflower-macos.dmg; needs macOS.
+# The macOS app (double-click opens the window), as build/dist/codeflower-<version>-macos.dmg; needs macOS.
 app-macos: app-build-all
 	scripts/macos-app.sh build/codeflower-darwin-arm64 build/codeflower-darwin-amd64 $(VERSION) build/dist
 

@@ -42,7 +42,7 @@ fi
 case $(uname -s) in
   Linux) os=linux ;;
   Darwin) os=darwin ;;
-  *) fail "this script supports Linux and macOS; on Windows, download codeflower-windows-amd64.zip from https://github.com/$repo/releases" ;;
+  *) fail "this script supports Linux and macOS; on Windows, download codeflower-VERSION-windows-amd64.zip from https://github.com/$repo/releases" ;;
 esac
 case $(uname -m) in
   x86_64 | amd64) arch=amd64 ;;
@@ -53,13 +53,6 @@ esac
 if [ "$os" = darwin ] && [ "$arch" = amd64 ] && [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = 1 ]; then
   arch=arm64
 fi
-
-if [ "$version" = latest ]; then
-  base="https://github.com/$repo/releases/latest/download"
-else
-  base="https://github.com/$repo/releases/download/$version"
-fi
-archive="codeflower-$os-$arch.tar.gz"
 
 if command -v curl >/dev/null 2>&1; then
   download() { curl -fsSL -o "$2" "$1"; }
@@ -72,8 +65,22 @@ fi
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT INT TERM
 
-echo "Downloading $archive ($version)…"
-download "$base/$archive" "$work/$archive" || fail "could not download $base/$archive"
+# The archives are named after their release, so "latest" is looked up first.
+if [ "$version" = latest ]; then
+  download "https://api.github.com/repos/$repo/releases/latest" "$work/latest.json" ||
+    fail "could not look up the latest release"
+  version=$(sed -n 's/^ *"tag_name": *"\([^"]*\)".*/\1/p' "$work/latest.json")
+  [ -n "$version" ] || fail "could not read the latest release's version"
+fi
+base="https://github.com/$repo/releases/download/$version"
+archive="codeflower-$version-$os-$arch.tar.gz"
+
+echo "Downloading $archive…"
+if ! download "$base/$archive" "$work/$archive"; then
+  # Releases up to v0.10.0 named their archives without the version.
+  archive="codeflower-$os-$arch.tar.gz"
+  download "$base/$archive" "$work/$archive" || fail "could not download $base/$archive"
+fi
 download "$base/SHA256SUMS" "$work/SHA256SUMS" || fail "could not download the checksums"
 
 expected=$(awk -v name="$archive" '$2 == name { print $1 }' "$work/SHA256SUMS")

@@ -6,7 +6,7 @@
 # Usage: scripts/macos-app.sh ARM64_BINARY AMD64_BINARY VERSION OUT_DIR
 set -eu
 
-arm64=$1 amd64=$2 version=${3#v} out=$4
+arm64=$1 amd64=$2 tag=$3 version=${3#v} out=$4
 here=$(cd "$(dirname "$0")/.." && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -55,5 +55,5 @@ codesign --force --deep --sign - "$app"
 mkdir -p "$out" "$work/dmg"
 mv "$app" "$work/dmg/"
 ln -s /Applications "$work/dmg/Applications"
-hdiutil create -quiet -volname "code flower" -srcfolder "$work/dmg" -format UDZO -ov "$out/codeflower-macos.dmg"
-echo "$out/codeflower-macos.dmg"
+hdiutil create -quiet -volname "code flower" -srcfolder "$work/dmg" -format UDZO -ov "$out/codeflower-$tag-macos.dmg"
+echo "$out/codeflower-$tag-macos.dmg"

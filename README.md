@@ -79,9 +79,13 @@ Before downloading or installing, the script displays a safety and usage disclai
 you to type `y` and press Enter. It needs a terminal for this confirmation and cancels otherwise.
 
 The [releases](https://github.com/lutrarutra/codeflower-app/releases) also have each build
-for download: `codeflower-<os>-<arch>.tar.gz` (`.zip` on Windows) with the `codeflower` binary, and
-`codeflower-macos.dmg` with the macOS app. The builds are not signed yet: on macOS, right-click the
+for download: `codeflower-<version>-<os>-<arch>.tar.gz` (`.zip` on Windows) with the `codeflower` binary,
+and `codeflower-<version>-macos.dmg` with the macOS app. The builds are not signed yet: on macOS, right-click the
 app and choose *Open* the first time; on Windows, choose *More info → Run anyway*.
+
+`codeflower --update` replaces the installed binary with the latest release, after checking its
+checksum. A `codeflower client` window or sandbox that is already running keeps the old version
+until you start it again. The macOS app is updated from a new `codeflower-<version>-macos.dmg` instead.
 
 Or build it with Go 1.26 or newer:
 

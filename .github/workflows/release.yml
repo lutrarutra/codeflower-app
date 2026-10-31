@@ -108,7 +108,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: dist-macos
-          path: build/dist/codeflower-macos.dmg
+          path: build/dist/*.dmg
           if-no-files-found: error
 
   release:
@@ -144,10 +144,10 @@ jobs:
 
           | System | Download |
           | --- | --- |
-          | macOS (app) | \`codeflower-macos.dmg\`: open it and drag *code flower* to Applications |
-          | macOS (command line) | \`codeflower-darwin-arm64.tar.gz\` (Apple silicon), \`codeflower-darwin-amd64.tar.gz\` (Intel) |
-          | Linux and clusters | \`codeflower-linux-amd64.tar.gz\`, \`codeflower-linux-arm64.tar.gz\` |
-          | Windows | \`codeflower-windows-amd64.zip\` |
+          | macOS (app) | \`codeflower-$GITHUB_REF_NAME-macos.dmg\`: open it and drag *code flower* to Applications |
+          | macOS (command line) | \`codeflower-$GITHUB_REF_NAME-darwin-arm64.tar.gz\` (Apple silicon), \`codeflower-$GITHUB_REF_NAME-darwin-amd64.tar.gz\` (Intel) |
+          | Linux and clusters | \`codeflower-$GITHUB_REF_NAME-linux-amd64.tar.gz\`, \`codeflower-$GITHUB_REF_NAME-linux-arm64.tar.gz\` |
+          | Windows | \`codeflower-$GITHUB_REF_NAME-windows-amd64.zip\` |
 
           The builds are not signed yet. On macOS, right-click the app and choose *Open* the first time
           (or *System Settings → Privacy & Security → Open Anyway*). On Windows, choose *More info → Run anyway*.
