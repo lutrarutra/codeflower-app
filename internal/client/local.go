@@ -55,7 +55,7 @@ func (s *Server) syncLocal(runs []sandbox.Running) {
 			if connection, ok := run.ReadConnection(); ok {
 				item.mu.Lock()
 				item.connection, item.url = &connection, connection.URL
-				item.Address = net.JoinHostPort(connection.Host, strconv.Itoa(connection.Port))
+				item.address = net.JoinHostPort(connection.Host, strconv.Itoa(connection.Port))
 				item.mu.Unlock()
 				go item.watchActivity(item.watching, s.noticesFor(item))
 			}

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -336,4 +337,73 @@ func TestTheSidebarListsAWorkersChatsWithoutTakingItOver(t *testing.T) {
 	if response, _ := authorized(t, server, "GET", "/api/workers/nope/sessions", ""); response.StatusCode != http.StatusNotFound {
 		t.Fatalf("unknown worker: %d", response.StatusCode)
 	}
+}
+
+func TestAddedWorkersCanBeRenamedAndMoved(t *testing.T) {
+	first, server := testServer(t)
+	address, headers := fakeBridge(t, "old-token")
+	id := connectTo(t, server, address)["id"].(string)
+	update := func(body string) (*http.Response, map[string]any) {
+		return authorized(t, server, "PATCH", "/api/workers/"+id, body)
+	}
+
+	if response, data := update(`{"name":"  Study   42 "}`); response.StatusCode != http.StatusOK || data["name"] != "Study 42" {
+		t.Fatalf("rename: %d %v", response.StatusCode, data)
+	}
+	if response, _ := update(`{"name":"` + strings.Repeat("x", maxName+1) + `"}`); response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("a long name: %d", response.StatusCode)
+	}
+	for body, want := range map[string]string{
+		`{"host":"node 1"}`:             "host is not valid",
+		`{"port":70000}`:                "port must be",
+		`{"address":"no line in here"}`: "paste the codeflower",
+	} {
+		if response, data := update(body); response.StatusCode != http.StatusBadRequest || !strings.Contains(data["error"].(string), want) {
+			t.Errorf("%s: %d %v", body, response.StatusCode, data)
+		}
+	}
+
+	// A page's relay to the old address closes when the worker moves.
+	origin := "http://" + strings.TrimPrefix(server.URL, "http://")
+	conn, reader, response := openRelay(t, server, id, origin, true)
+	if response.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("relay: %d", response.StatusCode)
+	}
+	<-headers
+
+	// The worker restarted on another port with a new token.
+	moved, _ := fakeBridge(t, "new-token")
+	movedHost, movedPort, _ := net.SplitHostPort(strings.TrimPrefix(strings.Split(moved, "?")[0], "codeflower://"))
+	body, _ := json.Marshal(map[string]any{"port": mustAtoi(t, movedPort), "token": "new-token"})
+	response, data := update(string(body))
+	if response.StatusCode != http.StatusOK || data["address"] != net.JoinHostPort(movedHost, movedPort) || data["name"] != "Study 42" {
+		t.Fatalf("move: %d %v", response.StatusCode, data)
+	}
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := reader.ReadByte(); err == nil {
+		t.Fatal("the relay to the old address stayed open")
+	}
+	waitFor(t, "the moved worker to answer", func() bool { return listed(t, server)[0]["status"] == "ready" })
+	stored, _ := os.ReadFile(first.added.path)
+	if !strings.Contains(string(stored), "new-token") || !strings.Contains(string(stored), `"name": "Study 42"`) {
+		t.Fatalf("store %s", stored)
+	}
+
+	// Another added worker cannot take the same address.
+	other := connectTo(t, server, address)["id"].(string)
+	if response, data := authorized(t, server, "PATCH", "/api/workers/"+other, `{"address":"`+moved+`"}`); response.StatusCode != http.StatusConflict {
+		t.Fatalf("same address: %d %v", response.StatusCode, data)
+	}
+	if response, _ := authorized(t, server, "PATCH", "/api/workers/nope", `{"name":"x"}`); response.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown worker: %d", response.StatusCode)
+	}
+}
+
+func mustAtoi(t *testing.T, text string) int {
+	t.Helper()
+	value, err := strconv.Atoi(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return value
 }

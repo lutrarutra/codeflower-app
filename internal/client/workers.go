@@ -45,10 +45,8 @@ const (
 // worker is a sandbox the client started, or one running elsewhere that the
 // user added by its address.
 type worker struct {
-	ID     string `json:"id"`
-	Source string `json:"source"`
-	// Address is the worker's host:port, safe to show.
-	Address string   `json:"address,omitempty"`
+	ID      string   `json:"id"`
+	Source  string   `json:"source"`
 	Engine  string   `json:"engine"`
 	Project string   `json:"project"`
 	State   string   `json:"state"`
@@ -63,6 +61,10 @@ type worker struct {
 	Kind string `json:"kind,omitempty"`
 
 	mu sync.Mutex
+	// address is the worker's host:port, safe to show.
+	address string
+	// name is the one the user gave it in the list (an added one's is remembered).
+	name string
 	// Agent and Label of an added worker are known once its bridge answers.
 	agent string
 	label string
@@ -82,6 +84,8 @@ type worker struct {
 	partial bytes.Buffer
 	cancel  context.CancelFunc
 	done    chan struct{}
+	// moved wakes an added worker's watcher when its address or token changes.
+	moved chan struct{}
 	// run is how a local sandbox registered, and watching its watchers' context.
 	run      *sandbox.Running
 	watching context.Context
@@ -89,6 +93,8 @@ type worker struct {
 
 type workerView struct {
 	*worker
+	Address  string    `json:"address,omitempty"`
+	Name     string    `json:"name,omitempty"`
 	Agent    string    `json:"agent"`
 	Label    string    `json:"label"`
 	Status   string    `json:"status"`
@@ -109,7 +115,7 @@ func (w *worker) view() workerView {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return workerView{
-		worker: w, Agent: w.agent, Label: w.label, Status: w.status, URL: w.url, Error: w.err, ExitCode: w.code,
+		worker: w, Address: w.address, Name: w.name, Agent: w.agent, Label: w.label, Status: w.status, URL: w.url, Error: w.err, ExitCode: w.code,
 		Log: nonNil(slicesClone(w.log)), Activity: w.activity, Relays: relays,
 	}
 }
@@ -215,6 +221,11 @@ func (w *worker) watchActivity(ctx context.Context, polled func(*activity)) {
 			current, err = fetchActivity(ctx, client, url, connection.Token)
 		}
 		w.mu.Lock()
+		if w.connection != connection {
+			// It moved meanwhile: ask the new address instead.
+			w.mu.Unlock()
+			continue
+		}
 		if err != nil || ctx.Err() != nil {
 			// A stopped sandbox reports nothing.
 			current = nil
@@ -237,7 +248,7 @@ func (w *worker) watchActivity(ctx context.Context, polled func(*activity)) {
 					w.agent, w.label = current.Agent, current.AgentLabel
 				}
 			case errors.Is(err, errUnauthorized):
-				w.status, w.err = "unauthorized", "The worker refused its token; paste its current line again."
+				w.status, w.err = "unauthorized", "The worker refused its token; edit it, or add its current line again."
 			default:
 				w.status, w.err = "unreachable", ""
 			}
@@ -250,6 +261,7 @@ func (w *worker) watchActivity(ctx context.Context, polled func(*activity)) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+		case <-w.moved:
 		}
 	}
 }

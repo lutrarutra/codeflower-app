@@ -125,8 +125,9 @@ opens code flower in the browser (`codeflower gui` still works); double-clicking
 same on Windows and macOS. At the top it lists your sandboxes. To use one running elsewhere, for
 example in a batch job, paste the `codeflower://…` line it printed: the client keeps it in the user's
 config directory (`codeflower/workers.json`, readable only by you), shows whether the sandbox
-answers, and connects to it again on the next start. Removing such a sandbox from the list does not
-stop it.
+answers, and connects to it again on the next start. The gear on a sandbox in the sidebar (or a
+right-click) renames it there, and for one added by its line changes its host, port or token, for
+example when the job restarted on another node, or removes it from the list, which does not stop it.
 
 Below, it shows whether this computer can run sandboxes (and how to install an engine if not; the
 client still connects to sandboxes elsewhere), its processor and memory use (per-core bars as in

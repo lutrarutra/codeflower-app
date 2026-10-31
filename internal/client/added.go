@@ -3,12 +3,17 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"codeflower-app/internal/sandbox"
 )
@@ -35,14 +40,14 @@ func (s *Server) connectWorker(w http.ResponseWriter, r *http.Request) {
 	for _, id := range s.order {
 		item := s.workers[id]
 		item.mu.Lock()
-		same := item.Address == address ||
-			(item.connection != nil && net.JoinHostPort(item.connection.Host, strconv.Itoa(item.connection.Port)) == address)
+		same := item.address == address
 		if same && item.Source == sourceAdded {
 			// The worker restarted with a new token, or the line was pasted again.
 			item.connection, item.url = &connection, connection.URL
 			if item.status == "unauthorized" {
 				item.status, item.err = "connecting", ""
 			}
+			item.wake()
 		}
 		item.mu.Unlock()
 		if same {
@@ -56,6 +61,126 @@ func (s *Server) connectWorker(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, item.view())
 }
 
+// maxName is the longest name a sandbox can have in the list, in characters.
+const maxName = 80
+
+// updateWorker renames a sandbox in the list, and moves an added one to
+// another address or token: a new line it printed, or its host, port or token
+// alone (a worker restarted elsewhere, or with a new token). The pages'
+// connections to its old address close, and they connect again.
+func (s *Server) updateWorker(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		Name    *string `json:"name"`
+		Address string  `json:"address"`
+		Host    string  `json:"host"`
+		Port    int     `json:"port"`
+		Token   string  `json:"token"`
+	}
+	if err := readJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	item := s.find(r.PathValue("id"))
+	if item == nil {
+		writeError(w, http.StatusNotFound, errors.New("no such sandbox"))
+		return
+	}
+	var name string
+	if request.Name != nil {
+		name = strings.Join(strings.Fields(*request.Name), " ")
+		if utf8.RuneCountInString(name) > maxName {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("the name is longer than %d characters", maxName))
+			return
+		}
+	}
+	var moved *sandbox.Connection
+	if request.Address != "" || request.Host != "" || request.Port != 0 || request.Token != "" {
+		if item.Source != sourceAdded {
+			writeError(w, http.StatusConflict, errors.New("only a sandbox added by its line can change its address or token"))
+			return
+		}
+		item.mu.Lock()
+		current := *item.connection
+		item.mu.Unlock()
+		connection, err := movedConnection(current, request.Address, request.Host, request.Port, request.Token)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		moved = &connection
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if moved != nil {
+		address := net.JoinHostPort(moved.Host, strconv.Itoa(moved.Port))
+		for _, id := range s.order {
+			other := s.workers[id]
+			if other == item || other.Source != sourceAdded {
+				continue
+			}
+			other.mu.Lock()
+			taken := other.address == address
+			other.mu.Unlock()
+			if taken {
+				writeError(w, http.StatusConflict, errors.New("another sandbox in the list has this address"))
+				return
+			}
+		}
+	}
+	item.mu.Lock()
+	if request.Name != nil {
+		item.name = name
+	}
+	changed := moved != nil && moved.URL != item.url
+	if changed {
+		item.connection, item.url = moved, moved.URL
+		item.address = net.JoinHostPort(moved.Host, strconv.Itoa(moved.Port))
+		item.status, item.err, item.activity = "connecting", "", nil
+	}
+	item.mu.Unlock()
+	if changed {
+		item.relays.closeAll()
+		item.wake()
+	}
+	if item.Source == sourceAdded {
+		s.saveAdded()
+	}
+	writeJSON(w, http.StatusOK, item.view())
+}
+
+// movedConnection is current with what the user changed: a whole new line,
+// or its host, port or token.
+func movedConnection(current sandbox.Connection, line, host string, port int, token string) (sandbox.Connection, error) {
+	if line != "" {
+		return parseAddress(line)
+	}
+	if host = strings.Trim(strings.TrimSpace(host), "[]"); host != "" {
+		if strings.ContainsAny(host, " /?#@\\") {
+			return sandbox.Connection{}, errors.New("the host is not valid: give a name or an IP address, without port or path")
+		}
+		current.Host = host
+	}
+	if port != 0 {
+		if port < 0 || port > 65535 {
+			return sandbox.Connection{}, errors.New("the port must be between 1 and 65535")
+		}
+		current.Port = port
+	}
+	if token = strings.TrimSpace(token); token != "" {
+		current.Token = token
+	}
+	return parseAddress("codeflower://" + net.JoinHostPort(current.Host, strconv.Itoa(current.Port)) + "?token=" + url.QueryEscape(current.Token))
+}
+
+// wake makes an added worker's watcher ask it at once.
+func (w *worker) wake() {
+	select {
+	case w.moved <- struct{}{}:
+	default:
+	}
+}
+
 // addWorker lists an added worker and starts watching it; s.mu is held.
 func (s *Server) addWorker(saved savedWorker, connection sandbox.Connection) *worker {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -64,7 +189,8 @@ func (s *Server) addWorker(saved savedWorker, connection sandbox.Connection) *wo
 	item := &worker{
 		ID:         saved.ID,
 		Source:     sourceAdded,
-		Address:    net.JoinHostPort(connection.Host, strconv.Itoa(connection.Port)),
+		address:    net.JoinHostPort(connection.Host, strconv.Itoa(connection.Port)),
+		name:       saved.Name,
 		Inputs:     []string{},
 		Outputs:    []string{},
 		Code:       []string{},
@@ -77,6 +203,7 @@ func (s *Server) addWorker(saved savedWorker, connection sandbox.Connection) *wo
 		connection: &connection,
 		cancel:     cancel,
 		done:       done,
+		moved:      make(chan struct{}, 1),
 	}
 	s.workers[item.ID] = item
 	s.order = append(s.order, item.ID)
@@ -106,7 +233,7 @@ func (s *Server) saveAdded() {
 			continue
 		}
 		item.mu.Lock()
-		saved = append(saved, savedWorker{ID: item.ID, Address: item.url, Agent: item.agent, Label: item.label, Added: item.Started})
+		saved = append(saved, savedWorker{ID: item.ID, Address: item.url, Name: item.name, Agent: item.agent, Label: item.label, Added: item.Started})
 		item.mu.Unlock()
 	}
 	s.added.save(saved)
@@ -117,6 +244,7 @@ func (s *Server) saveAdded() {
 type savedWorker struct {
 	ID      string    `json:"id"`
 	Address string    `json:"address"`
+	Name    string    `json:"name,omitempty"`
 	Agent   string    `json:"agent,omitempty"`
 	Label   string    `json:"label,omitempty"`
 	Added   time.Time `json:"added"`
