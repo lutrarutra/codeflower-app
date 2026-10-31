@@ -249,16 +249,44 @@ codeflower interactive --agent claude \
   --input /data/study42 --output ~/results/study42
 ```
 
-On start the worker prints the line to paste into VS Code ("code flower: Connect to worker"):
+On start the worker prints a link that opens it in the code flower app on your computer
+(`codeflower client`, which listens on port 7720), then the line to paste into VS Code ("code
+flower: Connect to worker"):
 
 ```
-code flower worker ready (Claude Code). In VS Code, run "code flower: Connect to worker" and paste:
+code flower worker ready (Claude Code). With the code flower app running on your computer, open:
+
+  http://127.0.0.1:7720/#add=codeflower%3A%2F%2F10.20.3.17%3A41234%3Ftoken%3D…
+
+Or in VS Code, run "code flower: Connect to worker" and paste:
 
   codeflower://10.20.3.17:41234?token=…
 ```
 
+The link offers to add the sandbox; it is added only once you confirm. With `--server` the sandbox
+serves the chat page itself instead, on the same port, and prints a link to open in any browser that
+reaches the node, as Jupyter does:
+
+```sh
+port=$(shuf -i8000-9999 -n1)
+codeflower interactive --server --port $port --advertise-host $(hostname -f) \
+  --agent claude --project study42 --input /data/study42 --output ~/results/study42
+```
+
+```
+code flower worker ready (Claude Code). Open in a browser:
+
+  http://node042.cluster.example:8123/?key=…
+```
+
+The page shows only that sandbox; **Stop the sandbox** asks working chats to wrap up and then ends
+the job. VS Code can attach beside it with the codeflower:// line. The page is plain HTTP: the key
+and the chats cross the network unencrypted, as with Jupyter. On a shared network prefer
+`--host 127.0.0.1` and an SSH tunnel (`ssh -L 8123:127.0.0.1:8123 node042`, then open the link with
+`127.0.0.1`).
+
 The address defaults to the node's IPv4 address with Apptainer, and `127.0.0.1` with Docker and
-Podman; `--advertise-host` overrides it. Anyone with this line can control the agent, so keep job logs
+Podman; `--advertise-host` overrides it. Anyone with this line or the links can control the agent, so keep job logs
 private, for example `sbatch --output=$HOME/.codeflower-logs/%j.out` with that directory `chmod 700`.
 The same information is also written to a mode-`0600` file in `<project>/instances/` for scripts.
 

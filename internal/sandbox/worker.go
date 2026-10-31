@@ -79,6 +79,9 @@ type Worker struct {
 	Port          int
 	// InspectPort publishes the bridge's Node inspector (development, Docker).
 	InspectPort int
+	// ServePage makes the worker also serve the chat page on its port
+	// (CODEFLOWER_PAGE), opened by the link it prints.
+	ServePage bool
 	// Isolation, when set, cuts the sandbox off the network except for what
 	// the app's proxy allows.
 	Isolation *Isolation
@@ -257,6 +260,9 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 		values["CODEFLOWER_IMAGE_PROVIDER"] = w.Images.Provider
 		values["CODEFLOWER_IMAGE_MODEL"] = w.Images.Model
 		values["CODEFLOWER_IMAGE_KEY_FILE"] = ContainerState + "/run/" + filepath.Base(keyFile)
+	}
+	if w.ServePage {
+		values["CODEFLOWER_PAGE"] = "1"
 	}
 	if w.InspectPort > 0 {
 		values["CODEFLOWER_BRIDGE_INSPECT"] = fmt.Sprintf("0.0.0.0:%d", BridgeInspectPort)

@@ -24,6 +24,7 @@ import (
 	"runtime"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -38,7 +39,7 @@ var page embed.FS
 
 // Options configure the window.
 type Options struct {
-	// Address to listen on; 127.0.0.1 with any free port by default.
+	// Address to listen on; DefaultAddress by default, else any free port.
 	Address string
 	// ProjectsDirectory holds projects started by name.
 	ProjectsDirectory string
@@ -77,6 +78,14 @@ type Options struct {
 
 const cookieName = "codeflower-app"
 
+// DefaultPort is where the client listens unless told otherwise. Sandboxes
+// print a link to it (http://127.0.0.1:7720/#add=codeflower://…) that adds
+// them; keep it in step with CLIENT_PORT in the bridge.
+const DefaultPort = 7720
+
+// DefaultAddress is the listener address for DefaultPort.
+var DefaultAddress = net.JoinHostPort("127.0.0.1", strconv.Itoa(DefaultPort))
+
 // Server serves the page and owns the sandboxes it started.
 type Server struct {
 	options  Options
@@ -111,13 +120,22 @@ func randomSecret() string {
 // Run serves the window until the user quits or ctx ends, then stops every
 // sandbox it started.
 func Run(ctx context.Context, options Options) error {
-	if options.Address == "" {
-		options.Address = "127.0.0.1:0"
-	}
 	if options.Log == nil {
 		options.Log = io.Discard
 	}
-	listener, err := net.Listen("tcp", options.Address)
+	var listener net.Listener
+	var err error
+	if options.Address == "" {
+		// The usual port, so the links sandboxes print open this client; any
+		// free one when another program has it.
+		listener, err = net.Listen("tcp", DefaultAddress)
+		if err != nil {
+			fmt.Fprintf(options.Log, "Port %d is taken, so the links sandboxes print do not open this client.\n", DefaultPort)
+			listener, err = net.Listen("tcp", "127.0.0.1:0")
+		}
+	} else {
+		listener, err = net.Listen("tcp", options.Address)
+	}
 	if err != nil {
 		return fmt.Errorf("could not open the app window: %w", err)
 	}
@@ -232,7 +250,7 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		if err != nil || subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(s.secret)) != 1 {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusForbidden)
-			fmt.Fprintln(w, "Open the code flower app with the address it printed, or start it again.")
+			fmt.Fprintln(w, "Open the code flower app with the address it printed, or run \"codeflower client\" again, then open this link again.")
 			return
 		}
 		if r.Method != http.MethodGet && r.Header.Get("Content-Type") != "application/json" {

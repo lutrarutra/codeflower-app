@@ -16,6 +16,7 @@ func interactiveCommand() *cobra.Command {
 	var options sandboxOptions
 	var listenHost, advertiseHost string
 	var port, inspectPort int
+	var servePage bool
 
 	command := &cobra.Command{
 		Use:   "interactive",
@@ -31,9 +32,18 @@ With --isolate-network the sandbox has no network of its own: the app
 is its only way out, and lets it reach only its agent's service and the hosts
 in the allowlist file. Edit the file while the sandbox runs to allow more.
 
-It prints a codeflower://… line: in VS Code, run "code flower: Connect to
-worker" and paste it. If the agent is not signed in for this project yet,
-VS Code offers its sign-in after connecting. Press Ctrl+C to stop.
+It prints a link to open in the browser while "codeflower client" runs on
+your computer, which adds the sandbox there; or, in VS Code, run "code
+flower: Connect to worker" and paste the codeflower://… line. If the agent
+is not signed in for this project yet, the page or VS Code offers its sign-in
+after connecting. Press Ctrl+C to stop.
+
+With --server the sandbox also serves its chat page on the same port and
+prints a link to it (http://HOST:PORT/?key=…), like Jupyter's: open it in any
+browser that reaches this machine, e.g. through ssh -L. Anyone with the link
+controls the agent, and plain HTTP carries the key and the chats unencrypted,
+so keep job logs private and prefer --host 127.0.0.1 with a tunnel on shared
+networks.
 
 To start a session with an initial task and continue it in VS Code, see
 "codeflower run". To let the agent work on a task by itself instead, see
@@ -75,6 +85,7 @@ To start a session with an initial task and continue it in VS Code, see
 			worker.AdvertiseHost = advertiseHost
 			worker.Port = port
 			worker.InspectPort = inspectPort
+			worker.ServePage = servePage
 			code, err := worker.Run(ctx, nil)
 			if err != nil {
 				if errors.Is(err, sandbox.ErrNoImage) {
@@ -90,9 +101,11 @@ To start a session with an initial task and continue it in VS Code, see
 	}
 	addSandboxFlags(command, &options)
 	command.Flags().StringVar(&listenHost, "host", "0.0.0.0", "interface the worker listens on")
+	command.Flags().BoolVar(&servePage, "server", false,
+		"also serve the chat page on the worker's port, and print a link to open it in a browser")
 	command.Flags().StringVar(&advertiseHost, "advertise-host", "",
-		"address printed for VS Code (default: this node's IPv4 address; 127.0.0.1 with Docker or Podman)")
-	command.Flags().IntVar(&port, "port", 0, "WebSocket port (default: any free port)")
+		"address printed for VS Code and the page link (default: this node's IPv4 address; 127.0.0.1 with Docker or Podman)")
+	command.Flags().IntVar(&port, "port", 0, "port of the worker (and its page with --server) (default: any free port)")
 	// Development only: anyone who can reach the inspector can run code in the sandbox.
 	command.Flags().IntVar(&inspectPort, "inspect-port", 0,
 		"publish the bridge's Node inspector on 127.0.0.1:PORT (development, Docker only)")

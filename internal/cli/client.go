@@ -162,8 +162,8 @@ call the quit off. Sandboxes running elsewhere keep running.`,
 			return runWithTray(command.Context(), options, controls, notices, openLink, desktop)
 		},
 	}
-	command.Flags().StringVar(&address, "address", "127.0.0.1:0", "listener address (mutually exclusive with --port)")
-	command.Flags().IntVar(&port, "port", 0, "port to serve the client on (default: auto; 0 selects any free port)")
+	command.Flags().StringVar(&address, "address", "", "listener address (mutually exclusive with --port; default 127.0.0.1:7720, or any free port when that is taken)")
+	command.Flags().IntVar(&port, "port", 0, "port to serve the client on (default 7720, or any free port when that is taken; 0 selects any free port)")
 	command.Flags().BoolVar(&noBrowser, "no-browser", false, "print the client's address instead of opening a browser")
 	command.Flags().BoolVar(&connectOnly, "connect-only", false, "only connect to sandboxes running elsewhere; never start one here")
 	command.Flags().BoolVar(&noTray, "no-tray", false, "do not show an icon in the system tray or menu bar")
