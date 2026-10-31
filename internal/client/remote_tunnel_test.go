@@ -101,6 +101,11 @@ func TestRemoteBrowsersCannotConnectAnywhereQuitOrManageUnlessAllowed(t *testing
 		{http.MethodGet, "/api/folders"},
 		{http.MethodPost, "/api/folders"},
 		{http.MethodPost, "/api/workers"},
+		{http.MethodGet, "/api/tunnel"},
+		{http.MethodPost, "/api/tunnel/login"},
+		{http.MethodPost, "/api/tunnel/pair"},
+		{http.MethodPatch, "/api/tunnel"},
+		{http.MethodDelete, "/api/tunnel"},
 	} {
 		if response, _ := remoteRequest(t, page, refused.method, refused.path, "*"); response.StatusCode < 400 {
 			t.Errorf("%s %s answered %d", refused.method, refused.path, response.StatusCode)

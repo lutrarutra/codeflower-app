@@ -131,6 +131,9 @@ func (s *Server) startTunnel(ctx context.Context) func() string {
 	first := make(chan string, 1)
 	waited, announced := false, false
 	go s.runTunnel(ctx, *s.options.Tunnel, func(pageURL string) {
+		s.tunnel.mu.Lock()
+		s.tunnel.connected = pageURL
+		s.tunnel.mu.Unlock()
 		mu.Lock()
 		defer mu.Unlock()
 		select {

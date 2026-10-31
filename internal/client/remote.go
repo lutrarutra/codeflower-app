@@ -83,7 +83,11 @@ func (h *remote) routes() http.Handler {
 		}
 	}
 	local := refuse("This is only possible on the computer itself, not through the tunnel.")
-	for _, pattern := range []string{"POST /api/workers/connect", "POST /api/quit", "DELETE /api/quit"} {
+	for _, pattern := range []string{
+		"POST /api/workers/connect", "POST /api/quit", "DELETE /api/quit",
+		"GET /api/tunnel", "PATCH /api/tunnel", "DELETE /api/tunnel", "POST /api/tunnel/login",
+		"DELETE /api/tunnel/login", "POST /api/tunnel/pair", "POST /api/tunnel/revoke",
+	} {
 		mux.HandleFunc(pattern, local)
 	}
 	return h.guard(mux)

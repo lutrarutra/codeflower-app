@@ -116,6 +116,7 @@ type Server struct {
 	quit     chan struct{}
 	quitOnce sync.Once
 	cpu      cpuSampler
+	tunnel   tunnelControl
 }
 
 func randomSecret() string {
@@ -218,6 +219,13 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/quit", s.quitStatus)
 	mux.HandleFunc("POST /api/quit", s.quitHandler)
 	mux.HandleFunc("DELETE /api/quit", s.cancelQuit)
+	mux.HandleFunc("GET /api/tunnel", s.getTunnel)
+	mux.HandleFunc("PATCH /api/tunnel", s.updateTunnel)
+	mux.HandleFunc("DELETE /api/tunnel", s.signOutTunnel)
+	mux.HandleFunc("POST /api/tunnel/login", s.startTunnelLogin)
+	mux.HandleFunc("DELETE /api/tunnel/login", s.stopTunnelLogin)
+	mux.HandleFunc("POST /api/tunnel/pair", s.pairTunnel)
+	mux.HandleFunc("POST /api/tunnel/revoke", s.revokeTunnelDevice)
 	return s.guard(mux)
 }
 
