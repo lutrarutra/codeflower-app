@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -76,7 +77,7 @@ func TestUpdateReplacesTheBinaryWithTheLatestRelease(t *testing.T) {
 	}
 	content, _ := os.ReadFile(executable)
 	info, _ := os.Stat(executable)
-	if string(content) != "new binary" || info.Mode().Perm() != 0o755 {
+	if string(content) != "new binary" || (runtime.GOOS != "windows" && info.Mode().Perm() != 0o755) {
 		t.Fatalf("got %q with mode %v", content, info.Mode())
 	}
 	if !strings.Contains(out.String(), "Updated codeflower v0.10.0 to v0.11.0") {

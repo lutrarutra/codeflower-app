@@ -290,7 +290,7 @@ func TestWorkerMountsTheGalleryAndGivesTheImageKeyInAFile(t *testing.T) {
 	// The engine notes what the sandbox would get, including the key file while it runs.
 	engine := filepath.Join(directory, "apptainer")
 	script := "#!/bin/sh\nenv | grep '^APPTAINERENV_' | sort > " + out + "\n" +
-		"stat -c %a " + state + "/run/image-key-* >> " + out + "\ncat " + state + "/run/image-key-* >> " + out + "\necho \"$@\" >> " + out + "\n"
+		"ls -l " + state + "/run/image-key-* | cut -c1-10 >> " + out + "\ncat " + state + "/run/image-key-* >> " + out + "\necho \"$@\" >> " + out + "\n"
 	if err := os.WriteFile(engine, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +323,7 @@ func TestWorkerMountsTheGalleryAndGivesTheImageKeyInAFile(t *testing.T) {
 		"APPTAINERENV_CODEFLOWER_IMAGE_PROVIDER=google\n",
 		"APPTAINERENV_CODEFLOWER_IMAGE_MODEL=gemini-test\n",
 		"APPTAINERENV_CODEFLOWER_IMAGE_KEY_FILE=/codeflower-state/run/image-key-",
-		"\n600\nimage-secret\n",
+		"\n-rw-------\nimage-secret\n",
 		gallery.Source + ":/data/icons",
 	} {
 		if !strings.Contains(seen, want) {
