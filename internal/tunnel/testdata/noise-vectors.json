@@ -1,0 +1,42 @@
+{
+  "protocol": "Noise_IK_25519_ChaChaPoly_SHA256",
+  "connectorId": "eu_vectors",
+  "prologue": "codeflower-tunnel/1 eu_vectors",
+  "browserStatic": {
+    "private": "0101010101010101010101010101010101010101010101010101010101010101",
+    "public": "a4e09292b651c278b9772c569f5fa9bb13d906b46ab68c9df9dc2b4409f8a209"
+  },
+  "browserEphemeral": {
+    "private": "0202020202020202020202020202020202020202020202020202020202020202",
+    "public": "ce8d3ad1ccb633ec7b70c17814a5c76ecd029685050d344745ba05870e587d59"
+  },
+  "connectorStatic": {
+    "private": "0303030303030303030303030303030303030303030303030303030303030303",
+    "public": "5dfedd3b6bd47f6fa28ee15d969d5bb0ea53774d488bdaf9df1c6e0124b3ef22"
+  },
+  "connectorEphemeral": {
+    "private": "0404040404040404040404040404040404040404040404040404040404040404",
+    "public": "ac01b2209e86354fb853237b5de0f4fab13c7fcbf433a61c019369617fecf10b"
+  },
+  "hello": "{\"v\":1,\"pair\":\"pairing-secret\",\"device\":\"Test browser\"}",
+  "message1": "ce8d3ad1ccb633ec7b70c17814a5c76ecd029685050d344745ba05870e587d59d5ea48b87c259312e4124f5b8ab09dbabfeeac5b1a722c5a59f272aaf50460063c54e5f904bc5014cb54c0ec11b2536050fdbf3ab6b5d3e34237854049c383f1dc3286c0fd9ee3276b9c0b5f363fec532224da31fa88a7677ed920231fc3ac16c606603f280a766e2beb216aacd72f73fabacf7965aa50",
+  "welcome": "{\"v\":1}",
+  "message2": "ac01b2209e86354fb853237b5de0f4fab13c7fcbf433a61c019369617fecf10bac34dc4f9893d1a3d38b366c9ee87b896b440ca4b2515c",
+  "transport": [
+    {
+      "from": "browser",
+      "plaintext": "017b226b696e64223a2268747470222c226d6574686f64223a22474554222c2270617468223a222f6170692f776f726b657273227d",
+      "ciphertext": "0ff228fa7bdc50c6142017267a6c67364a2cfc4b1ad7def0ae5fcd8c55b401b975397afbf563d799cf38a74179f1f5703752b6fb9f3bc4b23276af1322929fd7428740678d"
+    },
+    {
+      "from": "connector",
+      "plaintext": "035b7b226964223a227731227d5d",
+      "ciphertext": "b7fc8086fc0cee78dd7fa271095e7bc2eb176ee5865f75116ab0a75599b2"
+    },
+    {
+      "from": "browser",
+      "plaintext": "04",
+      "ciphertext": "09be5a016b4728665eefce3dfc02cfe8fb"
+    }
+  ]
+}

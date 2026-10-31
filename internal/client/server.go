@@ -74,6 +74,9 @@ type Options struct {
 	// Notify, if set, is told when a chat in a connected sandbox waits for
 	// the user or ends its turn (desktop notifications).
 	Notify func(Notice)
+	// Tunnel, if set, keeps the client reachable through a code flower tunnel
+	// once `codeflower tunnel login` signed this computer in.
+	Tunnel *TunnelOptions
 }
 
 const cookieName = "codeflower-app"
@@ -157,6 +160,9 @@ func Run(ctx context.Context, options Options) error {
 	watching, stopWatching := context.WithCancel(context.Background())
 	defer stopWatching()
 	go server.watchLocal(watching)
+	if options.Tunnel != nil && options.ConfigDirectory != "" {
+		go server.runTunnel(watching, *options.Tunnel)
+	}
 	httpServer := &http.Server{Handler: server.routes(), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = httpServer.Serve(listener) }()
 

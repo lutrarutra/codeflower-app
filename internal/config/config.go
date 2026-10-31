@@ -70,6 +70,22 @@ type ImageGeneration struct {
 	Key      string
 }
 
+// Tunnel configures remote access through a code flower tunnel
+// (`codeflower tunnel login`).
+type Tunnel struct {
+	// URL is the tunnel; the hosted one when empty.
+	URL string `yaml:"url"`
+	// EUOnly routes the tunnel only through EU datacenters. Unset until the
+	// first `codeflower tunnel login` asks.
+	EUOnly *bool `yaml:"eu_only"`
+	// Hardened limits each paired browser to the workers chosen when pairing,
+	// and runs the connector as a separate, confined process.
+	Hardened bool `yaml:"hardened"`
+	// Manage lets remote browsers browse folders, start sandboxes and forget
+	// them; without it they use and stop existing sandboxes only.
+	Manage bool `yaml:"manage"`
+}
+
 // Client configures codeflower client.
 type Client struct {
 	// ConnectOnly: never start sandboxes here, e.g. on a login node.
@@ -95,6 +111,7 @@ type Config struct {
 	Icons          Icons            `yaml:"icons"`
 	Images         Images           `yaml:"images"`
 	Client         Client           `yaml:"client"`
+	Tunnel         Tunnel           `yaml:"tunnel"`
 
 	// Directory is the config directory; Path is the file, whether or not it exists.
 	Directory string `yaml:"-"`

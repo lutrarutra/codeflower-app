@@ -155,7 +155,7 @@ sandbox with a few clicks, or connects to one running elsewhere. Run
 		}
 		return u.run(command.Context())
 	}
-	root.AddCommand(interactiveCommand(), runCommand(), taskCommand(), pullCommand(), checkCommand(), clientCommand())
+	root.AddCommand(interactiveCommand(), runCommand(), taskCommand(), pullCommand(), checkCommand(), clientCommand(), tunnelCommand())
 	if startedFromDesktop(os.Args[1:]) {
 		root.SetArgs([]string{"client", "--desktop"})
 	}

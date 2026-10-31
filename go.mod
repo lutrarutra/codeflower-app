@@ -4,10 +4,14 @@ go 1.26.0
 
 require (
 	fyne.io/systray v1.12.2
+	github.com/coder/websocket v1.8.15
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.8.2
 	github.com/ebitengine/purego v0.11.1
+	github.com/flynn/noise v1.1.0
 	github.com/godbus/dbus/v5 v5.1.0
+	github.com/landlock-lsm/go-landlock v0.11.0
+	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/moby/term v0.5.2
 	github.com/shirou/gopsutil/v4 v4.26.9
 	github.com/spf13/cobra v1.10.2
@@ -48,6 +52,10 @@ require (
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
 	go.opentelemetry.io/otel/metric v1.47.0 // indirect
 	go.opentelemetry.io/otel/trace v1.47.0 // indirect
+	golang.org/x/crypto v0.58.0 // indirect
+	golang.org/x/term v0.47.0 // indirect
 	golang.org/x/time v0.16.0 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
+	kernel.org/pub/linux/libs/security/libcap/psx v1.2.77 // indirect
+	rsc.io/qr v0.2.0 // indirect
 )

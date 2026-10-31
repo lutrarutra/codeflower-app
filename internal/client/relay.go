@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"codeflower-app/internal/tunnel"
 )
 
 // connectionPath is where the bridge accepts ACP over WebSocket
@@ -33,6 +35,17 @@ func (s *Server) relay(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, errors.New("wrong origin"))
 		return
 	}
+	s.relayToWorker(w, r)
+}
+
+// relayToWorker passes the WebSocket to the worker's bridge, for local pages
+// (after relay's origin check) and for remote browsers (whose connector
+// authenticated them).
+func (s *Server) relayToWorker(w http.ResponseWriter, r *http.Request) {
+	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		writeError(w, http.StatusBadRequest, errors.New("expected a WebSocket"))
+		return
+	}
 	item := s.find(r.PathValue("id"))
 	if item == nil {
 		writeError(w, http.StatusNotFound, errors.New("no such sandbox"))
@@ -52,6 +65,8 @@ func (s *Server) relay(w http.ResponseWriter, r *http.Request) {
 			request.Out.Host = ""
 			request.Out.Header.Del("Cookie")
 			request.Out.Header.Del("Origin")
+			request.Out.Header.Del(tunnel.DeviceHeader)
+			request.Out.Header.Del(tunnel.WorkersHeader)
 			request.Out.Header.Set("Authorization", "Bearer "+connection.Token)
 		},
 		// Straight to the node: a cluster's HTTPS_PROXY cannot reach compute nodes.

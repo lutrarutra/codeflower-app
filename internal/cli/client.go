@@ -118,6 +118,7 @@ call the quit off. Sandboxes running elsewhere keep running.`,
 				ConnectOnly:       connectOnly,
 				UIDirectory:       uiDirectory,
 				WrapUp:            time.Duration(loaded.Client.WrapUpMinutes) * time.Minute,
+				Tunnel:            &client.TunnelOptions{Hardened: loaded.Tunnel.Hardened, Manage: loaded.Tunnel.Manage},
 				Ready: func(address string) {
 					fmt.Fprintf(log, "code flower client is open at:\n\n  %s\n\n", address)
 					if hint := forwardingHint(address); hint != "" {
