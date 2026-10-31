@@ -72,7 +72,7 @@ try {
   Expand-Archive (Join-Path $work $archive) -DestinationPath (Join-Path $work "archive")
   New-Item -ItemType Directory -Force -Path $directory | Out-Null
   $executable = Join-Path $directory "codeflower.exe"
-  # A running program cannot be replaced, only moved aside, as codeflower --update does.
+  # A running program cannot be replaced, only moved aside, as codeflower update does.
   Remove-Item "$executable.old" -Force -ErrorAction SilentlyContinue
   if (Test-Path $executable) { Move-Item $executable "$executable.old" -Force }
   Move-Item (Join-Path $work "archive\codeflower.exe") $executable

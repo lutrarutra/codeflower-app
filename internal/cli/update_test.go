@@ -129,3 +129,26 @@ func TestNewerComparesReleases(t *testing.T) {
 		}
 	}
 }
+
+func TestUpdateCheckOnlyReportsANewerRelease(t *testing.T) {
+	u, executable, out := testUpdater(t, "v0.10.0", validSums)
+	if err := u.check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if content, _ := os.ReadFile(executable); string(content) != "old binary" {
+		t.Fatalf("replaced the binary with %q", content)
+	}
+	if !strings.Contains(out.String(), "codeflower v0.11.0 is out (this is v0.10.0)") {
+		t.Errorf("output %q", out)
+	}
+}
+
+func TestUpdateCheckKeepsQuietAboutTheLatestRelease(t *testing.T) {
+	u, _, out := testUpdater(t, "v0.11.0", validSums)
+	if err := u.check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "is the latest release") {
+		t.Errorf("output %q", out)
+	}
+}

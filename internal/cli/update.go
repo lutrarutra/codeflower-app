@@ -19,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/spf13/cobra"
 )
 
 // releaseRepository publishes the app's builds, as install.sh downloads them.
@@ -31,7 +33,7 @@ type updater struct {
 	// latestURL answers with the latest release as JSON ({"tag_name": "v1.2.3"}).
 	latestURL string
 	// downloadURL is the folder of a release's files, with %s for its tag.
-	downloadURL string
+	downloadURL  string
 	goos, goarch string
 	current      string
 	executable   string
@@ -64,6 +66,46 @@ func (u *updater) archiveName(tag string) string {
 		return "codeflower-" + tag + "-" + u.goos + "-" + u.goarch + ".zip"
 	}
 	return "codeflower-" + tag + "-" + u.goos + "-" + u.goarch + ".tar.gz"
+}
+
+func updateCommand() *cobra.Command {
+	var check bool
+	command := &cobra.Command{
+		Use:   "update",
+		Short: "Download the latest release and replace this program with it",
+		Long: `Download the latest release and replace this program with it, after checking
+the download against the release's SHA256SUMS. A "codeflower client" window or
+sandbox that is already running keeps the old version until you start it again.
+
+With --check, only say whether a newer release is out.`,
+		Args: cobra.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error {
+			u, err := newUpdater(os.Stdout)
+			if err != nil {
+				return err
+			}
+			if check {
+				return u.check(command.Context())
+			}
+			return u.run(command.Context())
+		},
+	}
+	command.Flags().BoolVar(&check, "check", false, "only check for a newer release, without installing it")
+	return command
+}
+
+// check reports whether a newer release is out, without installing it.
+func (u *updater) check(ctx context.Context) error {
+	latest, err := u.latestTag(ctx)
+	if err != nil {
+		return err
+	}
+	if !newer(latest, u.current) {
+		fmt.Fprintf(u.out, "codeflower %s is the latest release.\n", u.current)
+		return nil
+	}
+	fmt.Fprintf(u.out, "codeflower %s is out (this is %s). Run \"codeflower update\" to install it.\n", latest, u.current)
+	return nil
 }
 
 func (u *updater) run(ctx context.Context) error {

@@ -144,7 +144,9 @@ sandbox with a few clicks, or connects to one running elsewhere. Run
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	// --update is what "codeflower update" was up to v0.13.0, kept for scripts and habits.
 	update := root.Flags().Bool("update", false, "download the latest release and replace this program with it")
+	_ = root.Flags().MarkHidden("update")
 	root.RunE = func(command *cobra.Command, _ []string) error {
 		if !*update {
 			return command.Help()
@@ -155,7 +157,7 @@ sandbox with a few clicks, or connects to one running elsewhere. Run
 		}
 		return u.run(command.Context())
 	}
-	root.AddCommand(interactiveCommand(), runCommand(), taskCommand(), pullCommand(), checkCommand(), clientCommand(), tunnelCommand())
+	root.AddCommand(interactiveCommand(), runCommand(), taskCommand(), pullCommand(), checkCommand(), clientCommand(), tunnelCommand(), updateCommand())
 	// Cobra would otherwise exit with "This is a command line tool" when
 	// Explorer starts the program, before the window below can open.
 	cobra.MousetrapHelpText = ""
