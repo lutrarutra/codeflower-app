@@ -115,14 +115,20 @@ func (w *worker) view() workerView {
 }
 
 // activity is what the sandbox's agent does, as its bridge reports at /status:
-// how many chats work or wait for the user, and whether VS Code is connected.
+// how many chats work or wait for the user, and whether a window (VS Code, a
+// page) is connected.
 type activity struct {
-	Agent      string         `json:"agent"`
-	AgentLabel string         `json:"agentLabel"`
-	Connected  bool           `json:"connected"`
-	Working    int            `json:"working"`
-	Waiting    int            `json:"waiting"`
-	Chats      []chatActivity `json:"chats"`
+	Agent      string `json:"agent"`
+	AgentLabel string `json:"agentLabel"`
+	Connected  bool   `json:"connected"`
+	// Clients counts the connected windows, and MultiClient says they attach
+	// side by side instead of taking the sandbox over (both missing from older
+	// bridges).
+	Clients     *int           `json:"clients,omitempty"`
+	MultiClient bool           `json:"multiClient,omitempty"`
+	Working     int            `json:"working"`
+	Waiting     int            `json:"waiting"`
+	Chats       []chatActivity `json:"chats"`
 	// Missing from bridges older than usage tracking.
 	Usage *usage `json:"usage,omitempty"`
 	// WrapUp: the chats were asked to wrap up (missing from older bridges).
@@ -749,7 +755,7 @@ type Settings struct {
 	Project string   `json:"project,omitempty"`
 	Engine  string   `json:"engine,omitempty"`
 	Image   string   `json:"image,omitempty"`
-	// ImageTag is the version of the published image (empty: the latest).
+	// ImageTag is the version of the published image (empty: the app's, DefaultImageTag).
 	ImageTag string `json:"imageTag,omitempty"`
 
 	IsolateNetwork bool `json:"isolateNetwork,omitempty"`
