@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"codeflower-app/internal/config"
 	"codeflower-app/internal/sandbox"
 )
 
@@ -95,6 +96,7 @@ networks.`,
 			worker.Port = port
 			worker.InspectPort = inspectPort
 			worker.ServePage = servePage
+			go keepReachable(config.Directory(options.config))
 			code, err := worker.Run(ctx, nil)
 			if err != nil {
 				if errors.Is(err, sandbox.ErrNoImage) {

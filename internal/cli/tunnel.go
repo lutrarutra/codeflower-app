@@ -3,8 +3,6 @@ package cli
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,9 +31,13 @@ func tunnelCommand() *cobra.Command {
 code flower tunnel (https://tunnels.codeflower.app, or your own: "tunnel: {url: …}"
 in config.yaml).
 
-  codeflower tunnel login    sign this computer in (once)
   codeflower tunnel pair     pair a browser: open the link it prints there
-  codeflower client          keeps the tunnel connected while it runs
+
+Pairing signs this computer in when needed ("codeflower tunnel login") and
+starts code flower client in the background, which keeps the tunnel connected
+and lists every sandbox on this computer: those it starts, and those
+"codeflower run" and "interactive" start in a terminal (they start the client
+themselves while this computer is signed in and remote access is on).
 
 Everything between a paired browser and this computer is end-to-end encrypted;
 the tunnel cannot read it. Signing in to the tunnel alone does not give access:
@@ -76,16 +78,7 @@ func tunnelURL(loaded *config.Config, flag string) string {
 }
 
 // explainProtocol turns the tunnel's version refusals into what to do.
-func explainProtocol(err error) error {
-	var protocol *tunnel.ProtocolError
-	if errors.As(err, &protocol) {
-		if protocol.UpgradeRequired() {
-			return errors.New(`the tunnel needs a newer code flower: run "codeflower --update"`)
-		}
-		return errors.New("the tunnel is older than this code flower: its operator must update it")
-	}
-	return err
-}
+func explainProtocol(err error) error { return tunnel.Explain(err) }
 
 // askEUOnly asks the EU question until it gets a yes or a no.
 func askEUOnly(in io.Reader, out io.Writer) (bool, error) {
@@ -107,121 +100,103 @@ func askEUOnly(in io.Reader, out io.Writer) (bool, error) {
 }
 
 func tunnelLoginCommand(directory func() string) *cobra.Command {
-	var url, name string
-	var noBrowser bool
+	var options signInOptions
 	command := &cobra.Command{
 		Use:   "login",
 		Short: "Sign this computer in to the tunnel",
 		Long: `Sign this computer in to the tunnel: it prints a code to approve in your browser,
 signed in to the tunnel. The first time, it asks whether the tunnel should pass
 only through EU datacenters, and saves the answer in config.yaml (tunnel.eu_only);
-change it there and sign in again to switch.
+change it there and sign in again to switch. "codeflower tunnel pair" signs in
+first when needed.
 
 Signing in again replaces this computer's connector: paired browsers must pair again.`,
 		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
-			ctx := command.Context()
-			dir := directory()
-			loaded, err := config.Load(dir)
-			if err != nil {
+			if err := signIn(command.Context(), directory(), options); err != nil {
 				return err
 			}
-			base := tunnelURL(loaded, url)
-			api, err := tunnel.NewAPI(base, Version)
-			if err != nil {
-				return err
-			}
-			if _, err := api.VersionInfo(ctx); err != nil {
-				return explainProtocol(fmt.Errorf("could not reach the tunnel at %s: %w", base, err))
-			}
-			euOnly := loaded.Tunnel.EUOnly
-			if euOnly == nil {
-				if !term.IsTerminal(os.Stdin.Fd()) {
-					return fmt.Errorf("set tunnel.eu_only to true or false in %s, then sign in again", loaded.Path)
-				}
-				answer, err := askEUOnly(os.Stdin, os.Stdout)
-				if err != nil {
-					return err
-				}
-				if err := config.SetTunnel(dir, url, answer); err != nil {
-					return fmt.Errorf("could not save the answer: %w", err)
-				}
-				euOnly = &answer
-			} else if url != "" {
-				if err := config.SetTunnel(dir, url, *euOnly); err != nil {
-					return err
-				}
-			}
-			region := "any"
-			if *euOnly {
-				region = "eu"
-			}
-			if name == "" {
-				name, _ = os.Hostname()
-			}
-			keys, err := tunnel.GenerateKeypair()
-			if err != nil {
-				return err
-			}
-			publicKey := tunnel.EncodeKey(keys.Public)
-			code, err := api.RequestDeviceCode(ctx, name, region, publicKey)
-			if err != nil {
-				return explainProtocol(err)
-			}
-			fmt.Printf("\nOpen this page, sign in, and approve the code:\n\n  %s\n\n  code: %s\n  name: %s\n  key fingerprint: %s\n\n",
-				code.VerificationURL, code.UserCode, name, tunnel.Fingerprint(publicKey))
-			if !noBrowser {
-				_ = client.OpenBrowser(code.VerificationURL)
-			}
-			fmt.Println("Waiting for the approval…")
-			connectorID, token, err := waitForApproval(ctx, api, code)
-			if err != nil {
-				return err
-			}
-			if old, err := tunnel.LoadState(dir); err == nil && old.Token != "" && old.URL == base {
-				// The previous connector is replaced: remove it from the account.
-				_ = api.Delete(ctx, old.Token)
-			}
-			state := &tunnel.State{
-				URL: base, ConnectorID: connectorID, Token: token, Region: region,
-				PrivateKey: tunnel.EncodeKey(keys.Private), PublicKey: publicKey,
-			}
-			if err := state.Save(dir); err != nil {
-				return err
-			}
-			where := "the nearest datacenter"
-			if *euOnly {
-				where = "EU datacenters only"
-			}
-			fmt.Printf("\nSigned in (%s). While \"codeflower client\" runs, this computer is reachable\nthrough the tunnel. Pair a browser with: codeflower tunnel pair\n", where)
+			fmt.Println("Pair a browser with: codeflower tunnel pair")
 			return nil
 		},
 	}
-	command.Flags().StringVar(&url, "url", "", "the tunnel to use, saved in config.yaml (default "+tunnel.DefaultURL+")")
-	command.Flags().StringVar(&name, "name", "", "this computer's name in your account (default: its host name)")
-	command.Flags().BoolVar(&noBrowser, "no-browser", false, "print the approval page's address instead of opening a browser")
+	command.Flags().StringVar(&options.url, "url", "", "the tunnel to use, saved in config.yaml (default "+tunnel.DefaultURL+")")
+	command.Flags().StringVar(&options.name, "name", "", "this computer's name in your account (default: its host name)")
+	command.Flags().BoolVar(&options.noBrowser, "no-browser", false, "print the approval page's address instead of opening a browser")
 	return command
 }
 
-func waitForApproval(ctx context.Context, api *tunnel.API, code tunnel.DeviceCode) (string, string, error) {
-	interval := time.Duration(max(code.Interval, 1)) * time.Second
-	deadline := time.Now().Add(time.Duration(code.ExpiresIn) * time.Second)
-	for time.Now().Before(deadline) {
-		select {
-		case <-ctx.Done():
-			return "", "", ctx.Err()
-		case <-time.After(interval):
-		}
-		connectorID, token, err := api.ExchangeDeviceCode(ctx, code.DeviceCode)
-		if errors.Is(err, tunnel.ErrPending) {
-			continue
-		}
-		return connectorID, token, explainProtocol(err)
+type signInOptions struct {
+	url, name string
+	noBrowser bool
+}
+
+// signIn signs this computer in to the tunnel, asking the EU question the
+// first time.
+func signIn(ctx context.Context, dir string, options signInOptions) error {
+	loaded, err := config.Load(dir)
+	if err != nil {
+		return err
 	}
-	return "", "", errors.New("the code expired before it was approved; run the command again")
+	base := tunnelURL(loaded, options.url)
+	api, err := tunnel.NewAPI(base, Version)
+	if err != nil {
+		return err
+	}
+	if _, err := api.VersionInfo(ctx); err != nil {
+		return explainProtocol(fmt.Errorf("could not reach the tunnel at %s: %w", base, err))
+	}
+	euOnly := loaded.Tunnel.EUOnly
+	if euOnly == nil {
+		if !term.IsTerminal(os.Stdin.Fd()) {
+			return fmt.Errorf("set tunnel.eu_only to true or false in %s, then sign in again", loaded.Path)
+		}
+		answer, err := askEUOnly(os.Stdin, os.Stdout)
+		if err != nil {
+			return err
+		}
+		if err := config.SetTunnel(dir, options.url, answer); err != nil {
+			return fmt.Errorf("could not save the answer: %w", err)
+		}
+		euOnly = &answer
+	} else if options.url != "" {
+		if err := config.SetTunnel(dir, options.url, *euOnly); err != nil {
+			return err
+		}
+	}
+	region := "any"
+	if *euOnly {
+		region = "eu"
+	}
+	name := options.name
+	if name == "" {
+		name, _ = os.Hostname()
+	}
+	login, err := tunnel.StartLogin(ctx, base, Version, name, region)
+	if err != nil {
+		return err
+	}
+	code := login.Code
+	fmt.Printf("\nOpen this page, sign in, and approve the code:\n\n  %s\n\n  code: %s\n  name: %s\n  key fingerprint: %s\n\n",
+		code.VerificationURL, code.UserCode, name, tunnel.Fingerprint(login.PublicKey))
+	if !options.noBrowser {
+		_ = client.OpenBrowser(code.VerificationURL)
+	}
+	fmt.Println("Waiting for the approval…")
+	if err := login.Wait(ctx, dir); err != nil {
+		return err
+	}
+	where := "the nearest datacenter"
+	if *euOnly {
+		where = "EU datacenters only"
+	}
+	fmt.Printf("\nSigned in (%s).\n", where)
+	return nil
 }
 
 func tunnelPairCommand(directory func() string) *cobra.Command {
+	var options signInOptions
+	var noWait bool
 	command := &cobra.Command{
 		Use:   "pair [sandbox…]",
 		Short: "Pair a browser: prints a link (and a QR code) to open there",
@@ -229,17 +204,55 @@ func tunnelPairCommand(directory func() string) *cobra.Command {
 the QR code). The link works once, for 10 minutes. Compare the key fingerprint
 the page shows with the one printed here.
 
+It does what pairing needs first: signs this computer in to the tunnel, turns
+remote access on, and starts code flower client in the background unless it
+runs. The client keeps the tunnel connected and shows paired browsers every
+sandbox on this computer, also those "codeflower run" and "interactive" start
+(which start the client themselves once this computer is signed in). Open it
+here with "codeflower client"; it quits when you quit it there or sign out.
+
 With "tunnel: {hardened: true}" name the sandboxes (by name or ID, as
 "codeflower tunnel status" lists them) the browser may use; it sees no others.`,
 		RunE: func(command *cobra.Command, args []string) error {
+			ctx := command.Context()
 			dir := directory()
 			loaded, err := config.Load(dir)
 			if err != nil {
 				return err
 			}
+			if !loaded.Tunnel.Hardened && len(args) > 0 {
+				return errors.New(`pairing a browser with chosen sandboxes needs "tunnel: {hardened: true}" in config.yaml`)
+			}
 			state, err := tunnel.LoadState(dir)
+			if errors.Is(err, tunnel.ErrNotSignedIn) {
+				fmt.Println("This computer is not signed in to the tunnel yet: signing in first.")
+				if err := signIn(ctx, dir, options); err != nil {
+					return err
+				}
+				state, err = tunnel.LoadState(dir)
+			}
 			if err != nil {
 				return err
+			}
+			if !state.OnThisHost() {
+				host, _ := os.Hostname()
+				return fmt.Errorf("%s signed in to the tunnel with %s, not this computer (%s); only one computer can connect it.\n"+
+					"Pair there, or move the tunnel here with \"codeflower tunnel login\" (paired browsers must pair again)",
+					state.Host, dir, host)
+			}
+			if state.Off {
+				if err := tunnel.Update(dir, func(current *tunnel.State) error { current.Off = false; return nil }); err != nil {
+					return err
+				}
+				fmt.Println("Remote access was off: it is on again.")
+			}
+			started, err := ensureClient(dir)
+			if err != nil {
+				return fmt.Errorf("could not start code flower client, which answers the pairing: %w", err)
+			}
+			if started {
+				fmt.Println(`Started code flower client in the background: it keeps the tunnel connected.
+Open it here with "codeflower client".`)
 			}
 			var workers []string
 			if loaded.Tunnel.Hardened {
@@ -257,30 +270,59 @@ With "tunnel: {hardened: true}" name the sandboxes (by name or ID, as
 					}
 					workers = append(workers, id)
 				}
-			} else if len(args) > 0 {
-				return errors.New(`pairing a browser with chosen sandboxes needs "tunnel: {hardened: true}" in config.yaml`)
 			}
-			secret := randomSecret()
-			err = tunnel.Update(dir, func(current *tunnel.State) error {
-				current.Pairings = append(current.Pairings, tunnel.Pairing{
-					SecretHash: tunnel.HashSecret(secret), Workers: workers, ExpiresAt: time.Now().Add(tunnel.PairingLifetime),
-				})
-				return nil
-			})
+			paired := map[string]bool{}
+			for _, device := range state.Devices {
+				paired[device.Key] = true
+			}
+			link, state, err := tunnel.Pair(dir, workers)
 			if err != nil {
 				return err
 			}
-			link := tunnel.PairingLink(state, secret)
+			fmt.Println()
 			printQR(os.Stdout, link)
 			fmt.Printf("Open this link in the browser to pair (once, within 10 minutes):\n\n  %s\n\n", link)
 			fmt.Printf("The page shows this computer's key fingerprint: %s\n", tunnel.Fingerprint(state.PublicKey))
-			if _, running := client.Running(dir); !running {
-				fmt.Println(`Start "codeflower client" before opening the link: it answers the pairing.`)
+			if noWait {
+				return nil
 			}
+			fmt.Println("Waiting for the browser to pair (Ctrl+C stops waiting; the link keeps working)…")
+			device, err := waitForPairing(ctx, dir, paired, time.Now().Add(tunnel.PairingLifetime))
+			if err != nil {
+				return err
+			}
+			fmt.Printf("\nPaired %q. It opens code flower at:\n\n  %s\n", device.Label, tunnel.PageURL(state))
 			return nil
 		},
 	}
+	command.Flags().BoolVar(&noWait, "no-wait", false, "print the link and return instead of waiting for the browser to pair")
+	command.Flags().StringVar(&options.url, "url", "", "when signing in: the tunnel to use, saved in config.yaml (default "+tunnel.DefaultURL+")")
+	command.Flags().StringVar(&options.name, "name", "", "when signing in: this computer's name in your account (default: its host name)")
+	command.Flags().BoolVar(&options.noBrowser, "no-browser", false, "when signing in: print the approval page's address instead of opening a browser")
 	return command
+}
+
+// waitForPairing waits for a browser that is not in paired to pair.
+func waitForPairing(ctx context.Context, dir string, paired map[string]bool, deadline time.Time) (tunnel.Device, error) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return tunnel.Device{}, ctx.Err()
+		case <-ticker.C:
+		}
+		state, err := tunnel.LoadState(dir)
+		if err != nil {
+			return tunnel.Device{}, err
+		}
+		for _, device := range state.Devices {
+			if !paired[device.Key] {
+				return device, nil
+			}
+		}
+	}
+	return tunnel.Device{}, errors.New(`no browser paired within 10 minutes; run "codeflower tunnel pair" again`)
 }
 
 // printQR prints a QR code of `text` when `out` is a terminal; phones scan it
@@ -292,12 +334,6 @@ func printQR(out io.Writer, text string) {
 	}
 	qrterminal.GenerateHalfBlock(text, qrterminal.L, out)
 	fmt.Fprintln(out)
-}
-
-func randomSecret() string {
-	bytes := make([]byte, 32)
-	_, _ = rand.Read(bytes)
-	return base64.RawURLEncoding.EncodeToString(bytes)
 }
 
 func describeWorkers(workers []client.RemoteWorker) string {
@@ -363,7 +399,7 @@ func tunnelStatusCommand(directory func() string) *cobra.Command {
 					fmt.Printf("Sandboxes:\n%s\n", describeWorkers(workers))
 				}
 			} else {
-				fmt.Println(`Client:          not running: start "codeflower client" to be reachable`)
+				fmt.Println(`Client:          not running: "codeflower tunnel pair", "codeflower client" or a run starts it`)
 			}
 			api, err := tunnel.NewAPI(state.URL, Version)
 			if err != nil {
@@ -523,14 +559,20 @@ func tunnelSwitchCommand(directory func() string, use, short string, off bool) *
 		Short: short,
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
-			if err := tunnel.Update(directory(), func(state *tunnel.State) error { state.Off = off; return nil }); err != nil {
+			dir := directory()
+			if err := tunnel.Update(dir, func(state *tunnel.State) error { state.Off = off; return nil }); err != nil {
 				return err
 			}
 			if off {
 				fmt.Println(`Remote access is off; open chats were closed. "codeflower tunnel on" turns it on again.`)
-			} else {
-				fmt.Println("Remote access is on while \"codeflower client\" runs.")
+				return nil
 			}
+			if state, err := tunnel.LoadState(dir); err == nil && state.OnThisHost() {
+				if _, err := ensureClient(dir); err != nil {
+					return fmt.Errorf("remote access is on, but %w", err)
+				}
+			}
+			fmt.Println("Remote access is on.")
 			return nil
 		},
 	}

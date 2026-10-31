@@ -39,6 +39,10 @@ type Pairing struct {
 // browsers paired with it. The file is the connector's only configuration
 // at run time: the CLI changes it (pair, revoke, off) and a running connector
 // picks the change up within a second.
+//
+// Host is the computer that signed in. A config directory shared between
+// computers (a cluster's home) must connect from that one only: the tunnel
+// keeps one connection per connector, so two would push each other out.
 type State struct {
 	URL         string    `json:"url"`
 	ConnectorID string    `json:"connectorId"`
@@ -46,6 +50,7 @@ type State struct {
 	PrivateKey  string    `json:"privateKey"`
 	PublicKey   string    `json:"publicKey"`
 	Region      string    `json:"region"`
+	Host        string    `json:"host,omitempty"`
 	Off         bool      `json:"off,omitempty"`
 	Devices     []Device  `json:"devices,omitempty"`
 	Pairings    []Pairing `json:"pairings,omitempty"`
@@ -221,6 +226,13 @@ func RemoveState(configDirectory string) error {
 // PageURL is where paired browsers open this computer's code flower.
 func PageURL(state *State) string {
 	return strings.TrimRight(state.URL, "/") + "/m/" + state.ConnectorID + "/"
+}
+
+// OnThisHost says whether this computer signed in (states from before Host
+// count as this computer's).
+func (s *State) OnThisHost() bool {
+	host, _ := os.Hostname()
+	return s.Host == "" || s.Host == host
 }
 
 // Expected: signed in and on, so the client should come online.

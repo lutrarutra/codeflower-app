@@ -32,6 +32,7 @@ func clientCommand() *cobra.Command {
 	var noTray bool
 	var noNotifications bool
 	var desktop bool
+	var background bool
 	command := &cobra.Command{
 		Use:     "client",
 		Aliases: []string{"gui"},
@@ -80,6 +81,9 @@ call the quit off. Sandboxes running elsewhere keep running.`,
 			if loaded.Client.ConnectOnly {
 				connectOnly = true
 			}
+			if background {
+				noBrowser = true
+			}
 			// A second start (e.g. another double-click) opens the running client.
 			if !addressSet && !portSet {
 				if running, ok := client.Running(directory); ok {
@@ -96,7 +100,7 @@ call the quit off. Sandboxes running elsewhere keep running.`,
 			// Started from the desktop with a tray, there is no terminal to
 			// write to: the log goes to a file in the config directory.
 			var log io.Writer = os.Stderr
-			if desktop && showTray {
+			if (desktop && showTray) || background {
 				if file, err := openClientLog(directory); err == nil {
 					defer file.Close()
 					log = file
@@ -144,6 +148,9 @@ call the quit off. Sandboxes running elsewhere keep running.`,
 				},
 				Started: func(control *client.Control) {
 					go client.HandleSignals(control, signals, log)
+					if background {
+						go quitWhenSignedOut(control, directory)
+					}
 					controls <- control
 				},
 			}
@@ -183,6 +190,11 @@ call the quit off. Sandboxes running elsewhere keep running.`,
 	// Set when the binary was double-clicked rather than run in a terminal.
 	command.Flags().BoolVar(&desktop, "desktop", false, "")
 	_ = command.Flags().MarkHidden("desktop")
+	// Set when "codeflower tunnel pair", "run" or "interactive" start the
+	// client for the tunnel: no window, the log in client.log, and it quits
+	// once this computer is signed out of the tunnel.
+	command.Flags().BoolVar(&background, "background", false, "")
+	_ = command.Flags().MarkHidden("background")
 	command.Flags().StringVar(&uiDirectory, "ui", "", "serve the page from this folder instead of the built-in one (development)")
 	_ = command.Flags().MarkHidden("ui")
 	command.Flags().StringVar(&configDirectory, "config", "",
@@ -333,5 +345,7 @@ func openClientLog(directory string) (*os.File, error) {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return nil, err
 	}
-	return os.OpenFile(filepath.Join(directory, "client.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	return os.OpenFile(clientLogPath(directory), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 }
+
+func clientLogPath(directory string) string { return filepath.Join(directory, "client.log") }
