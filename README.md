@@ -75,8 +75,20 @@ curl -fsSL https://raw.githubusercontent.com/lutrarutra/codeflower-app/main/inst
 
 It installs the latest release into `~/.local/bin` after checking its checksum;
 `CODEFLOWER_INSTALL_DIR` chooses another folder and `CODEFLOWER_VERSION=vX.Y.Z` another release.
+On a Linux desktop it also adds *code flower* to the applications menu, which opens the window
+(`codeflower client`).
 Before downloading or installing, the script displays a safety and usage disclaimer and requires
 you to type `y` and press Enter. It needs a terminal for this confirmation and cancels otherwise.
+
+On Windows, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/lutrarutra/codeflower-app/main/install.ps1 | iex
+```
+
+It installs the latest release into `%LOCALAPPDATA%\Programs\codeflower`, adds that folder to your
+PATH and *code flower* to the Start menu, with the same checksum check, disclaimer and variables.
+To uninstall, delete that folder and the Start menu entry.
 
 The [releases](https://github.com/lutrarutra/codeflower-app/releases) also have each build
 for download: `codeflower-<version>-<os>-<arch>.tar.gz` (`.zip` on Windows) with the `codeflower` binary,

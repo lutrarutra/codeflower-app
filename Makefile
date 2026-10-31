@@ -1,4 +1,4 @@
-.PHONY: app-build app-build-linux app-build-all app-dist app-macos app-test app-install agents page
+.PHONY: app-build app-build-linux app-build-all app-dist app-macos app-test app-install app-winres agents page
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 APP_LDFLAGS := -X codeflower-app/internal/cli.Version=$(VERSION)
@@ -12,9 +12,19 @@ app-build-linux:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$(APP_LDFLAGS)" \
 		-o build/codeflower-linux-amd64 ./cmd/codeflower
 
+# The Windows binary's icon, version and manifest, as a resource that go build
+# links into it: cmd/codeflower/rsrc_windows_amd64.syso (not committed).
+# Windows wants a plain dotted version; describe output (v0.1.0-3-gabc) is cut down.
+WINRES_VERSION := $(shell printf '%s' '$(VERSION)' | sed -nE 's/^v?([0-9]+(\.[0-9]+){0,2}).*/\1/p')
+app-winres:
+	go run github.com/tc-hib/go-winres@v0.3.3 simply --arch amd64 --out cmd/codeflower/rsrc \
+		--icon assets/icon.png --manifest cli --product-name "code flower" \
+		--file-description "code flower" --original-filename codeflower.exe \
+		--product-version $(or $(WINRES_VERSION),0.0.0) --file-version $(or $(WINRES_VERSION),0.0.0)
+
 # Binaries for every desktop system, e.g. to hand to users who start
 # sandboxes with "codeflower client": build/codeflower-<os>-<arch>[.exe].
-app-build-all:
+app-build-all: app-winres
 	for target in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 windows/amd64; do \
 		os=$${target%/*}; arch=$${target#*/}; ext=; [ $$os = windows ] && ext=.exe; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -ldflags "$(APP_LDFLAGS)" \
@@ -22,14 +32,16 @@ app-build-all:
 	done
 
 # The release archives of app-build-all, with checksums: build/dist/codeflower-<version>-<os>-<arch>.tar.gz
-# (.zip for Windows), each holding the binary as codeflower[.exe].
+# (.zip for Windows), each holding the binary as codeflower[.exe]; the .tar.gz also hold the icon
+# for install.sh's menu entry on Linux.
 app-dist: app-build-all
 	rm -rf build/dist build/stage && mkdir -p build/dist
 	for binary in build/codeflower-*-*; do \
 		name=codeflower-$(VERSION)-$$(basename $$binary .exe | sed 's/^codeflower-//'); ext=; case $$binary in *.exe) ext=.exe;; esac; \
 		mkdir -p build/stage/$$name && cp $$binary build/stage/$$name/codeflower$$ext && cp README.md build/stage/$$name/; \
 		if [ -n "$$ext" ]; then (cd build/stage/$$name && zip -q ../../dist/$$name.zip codeflower$$ext README.md); \
-		else tar -C build/stage/$$name -czf build/dist/$$name.tar.gz codeflower README.md; fi; \
+		else cp assets/icon.png build/stage/$$name/codeflower.png; \
+			tar -C build/stage/$$name -czf build/dist/$$name.tar.gz codeflower codeflower.png README.md; fi; \
 	done
 	rm -rf build/stage
 	cd build/dist && shasum -a 256 * > SHA256SUMS

@@ -42,7 +42,7 @@ fi
 case $(uname -s) in
   Linux) os=linux ;;
   Darwin) os=darwin ;;
-  *) fail "this script supports Linux and macOS; on Windows, download codeflower-VERSION-windows-amd64.zip from https://github.com/$repo/releases" ;;
+  *) fail "this script supports Linux and macOS; on Windows, run in PowerShell: irm https://raw.githubusercontent.com/$repo/main/install.ps1 | iex" ;;
 esac
 case $(uname -m) in
   x86_64 | amd64) arch=amd64 ;;
@@ -99,6 +99,26 @@ mv -f "$work/codeflower" "$directory/codeflower"
 chmod 755 "$directory/codeflower"
 
 echo "Installed $("$directory/codeflower" --version) in $directory"
+
+# On a Linux desktop, the window (codeflower client) also gets an entry in the
+# applications menu. Releases up to v0.11.0 have no icon in their archive.
+if [ "$os" = linux ] && [ -n "${XDG_CURRENT_DESKTOP:-}${WAYLAND_DISPLAY:-}${DISPLAY:-}" ] &&
+  tar -xzf "$work/$archive" -C "$work" codeflower.png 2>/dev/null; then
+  data=${XDG_DATA_HOME:-$HOME/.local/share}
+  mkdir -p "$data/applications" "$data/icons/hicolor/128x128/apps"
+  mv -f "$work/codeflower.png" "$data/icons/hicolor/128x128/apps/codeflower.png"
+  cat > "$data/applications/codeflower.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=code flower
+Comment=Start code flower sandboxes and connect to them
+Exec="$directory/codeflower" client --desktop
+Icon=codeflower
+Terminal=false
+Categories=Development;
+DESKTOP
+  echo "Added code flower to the applications menu"
+fi
 case ":$PATH:" in
   *":$directory:"*) ;;
   *)
