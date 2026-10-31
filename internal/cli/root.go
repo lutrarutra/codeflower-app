@@ -156,6 +156,9 @@ sandbox with a few clicks, or connects to one running elsewhere. Run
 		return u.run(command.Context())
 	}
 	root.AddCommand(interactiveCommand(), runCommand(), taskCommand(), pullCommand(), checkCommand(), clientCommand(), tunnelCommand())
+	// Cobra would otherwise exit with "This is a command line tool" when
+	// Explorer starts the program, before the window below can open.
+	cobra.MousetrapHelpText = ""
 	if startedFromDesktop(os.Args[1:]) {
 		root.SetArgs([]string{"client", "--desktop"})
 	}
