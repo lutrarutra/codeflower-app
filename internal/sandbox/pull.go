@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -18,11 +19,13 @@ import (
 	"github.com/docker/docker/client"
 )
 
-// The published sandbox image. The app follows its newest release;
-// --image-tag picks another release or a commit's build.
+// The published sandbox image. The app runs the release it was tested with,
+// DefaultImageTag, which the ship skill raises with each sandbox release;
+// --image-tag picks another release (or latest) or a commit's build.
 const (
 	ImageRepository = "ghcr.io/lutrarutra/codeflower-sandbox"
-	DefaultImageTag = "latest"
+	DefaultImageTag = "0.9.0"
+	LatestImageTag  = "latest"
 )
 
 var (
@@ -31,9 +34,9 @@ var (
 	commitHash = regexp.MustCompile(`^(sha-)?[0-9a-f]{7,40}$`)
 )
 
-// PublishedImage names a build of the published image by its tag: "latest"
-// (or empty), a release (0.2.1, v0.2.1, or 0.2 for its newest patch), or a
-// commit (sha-abc1234, or the commit's hash).
+// PublishedImage names a build of the published image by its tag: empty for
+// DefaultImageTag, "latest", a release (0.2.1, v0.2.1, or 0.2 for its newest
+// patch), or a commit (sha-abc1234, or the commit's hash).
 func PublishedImage(tag string) (string, error) {
 	tag = strings.TrimSpace(tag)
 	switch {
@@ -81,14 +84,79 @@ func ImageDirectory() string {
 	return filepath.Join(home, "codeflower", "images")
 }
 
-// DefaultSIF is where the default image is kept for Apptainer.
-func DefaultSIF() string {
-	return publishedSIF(DefaultImageTag)
+// SIFName is how a downloaded image file is named: the release and commit it
+// was built from.
+const SIFName = "codeflower-sandbox_vX.Y.Z-sha-abc1234.sif"
+
+var releasedFile = regexp.MustCompile(`^codeflower-sandbox_v([0-9]+)\.([0-9]+)\.([0-9]+)-sha-([0-9a-f]{7})\.sif$`)
+
+// publishedSIF is where a build of the published image is kept for Apptainer:
+// the newest downloaded release the tag names, or else the file named after
+// the tag, as older apps saved it.
+func publishedSIF(tag string) string {
+	if path := releasedSIF(tag); path != "" {
+		return path
+	}
+	return taggedSIF(tag)
 }
 
-// publishedSIF is where a build of the published image is kept for Apptainer.
-func publishedSIF(tag string) string {
+func taggedSIF(tag string) string {
 	return filepath.Join(ImageDirectory(), "codeflower-sandbox_"+tag+".sif")
+}
+
+// releasedSIF finds the newest downloaded release that tag names: latest, a
+// release (0.2.1, or 0.2 for its newest patch) or a commit (sha-abc1234).
+func releasedSIF(tag string) string {
+	entries, err := os.ReadDir(ImageDirectory())
+	if err != nil {
+		return ""
+	}
+	var newest string
+	var newestVersion []int
+	for _, entry := range entries {
+		match := releasedFile.FindStringSubmatch(entry.Name())
+		if match == nil {
+			continue
+		}
+		version := strings.Join(match[1:4], ".")
+		if tag != LatestImageTag && tag != version && !strings.HasPrefix(version, tag+".") && tag != "sha-"+match[4] {
+			continue
+		}
+		numbers := make([]int, 3)
+		for i := range numbers {
+			numbers[i], _ = strconv.Atoi(match[i+1])
+		}
+		if newest == "" || slices.Compare(numbers, newestVersion) > 0 {
+			newest, newestVersion = filepath.Join(ImageDirectory(), entry.Name()), numbers
+		}
+	}
+	return newest
+}
+
+// releaseFile names an image file after the release and commit labels the
+// release workflow puts on the image; false for an image without them.
+func releaseFile(ctx context.Context, executable, file string) (string, bool) {
+	output, err := exec.CommandContext(ctx, executable, "inspect", "--json", "--labels", file).Output()
+	if err != nil {
+		return "", false
+	}
+	var inspected struct {
+		Data struct {
+			Attributes struct {
+				Labels map[string]string `json:"labels"`
+			} `json:"attributes"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(output, &inspected) != nil {
+		return "", false
+	}
+	labels := inspected.Data.Attributes.Labels
+	version, revision := labels["org.opencontainers.image.version"], labels["org.opencontainers.image.revision"]
+	if len(revision) < 7 {
+		return "", false
+	}
+	name := "codeflower-sandbox_" + version + "-sha-" + revision[:7] + ".sif"
+	return name, releasedFile.MatchString(name)
 }
 
 // EnsureImage pulls a build of the published image (empty: the default)
@@ -137,7 +205,7 @@ func pullImage(ctx context.Context, engine EngineStatus, image string, refresh b
 		}
 		return nil
 	case EngineApptainer:
-		return pullApptainer(ctx, engine.Executable, name, publishedSIF(tag), refresh, out)
+		return pullApptainer(ctx, engine.Executable, name, tag, refresh, out)
 	}
 	return fmt.Errorf("unknown engine %q", engine.Name)
 }
@@ -240,30 +308,41 @@ func reportPull(stream io.Reader, out io.Writer, now func() time.Time) error {
 	}
 }
 
-// pullApptainer converts the image into a SIF file. Several jobs may start at
-// once on a cluster: they wait for one download, and nobody sees a partial file.
-func pullApptainer(ctx context.Context, executable, name, target string, refresh bool, out io.Writer) error {
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+// pullApptainer converts the image into a SIF file named after its release.
+// Several jobs may start at once on a cluster: they wait for one download, and
+// nobody sees a partial file.
+func pullApptainer(ctx context.Context, executable, name, tag string, refresh bool, out io.Writer) error {
+	directory := ImageDirectory()
+	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return err
 	}
-	unlock, err := lockFile(target + ".lock")
+	tagged := taggedSIF(tag)
+	unlock, err := lockFile(tagged + ".lock")
 	if err != nil {
 		return err
 	}
 	defer unlock()
 	// Another app may have finished the download while this one waited.
-	if _, err := os.Stat(target); err == nil && !refresh {
+	if _, err := os.Stat(publishedSIF(tag)); err == nil && !refresh {
 		return nil
 	}
-	temporary := filepath.Join(filepath.Dir(target), "."+filepath.Base(target)+"."+strconv.Itoa(os.Getpid())+".tmp")
+	temporary := filepath.Join(directory, "."+filepath.Base(tagged)+"."+strconv.Itoa(os.Getpid())+".tmp")
 	defer os.Remove(temporary)
 	command := exec.CommandContext(ctx, executable, "pull", "--force", temporary, "docker://"+name)
 	command.Stdout, command.Stderr = out, out
 	if err := command.Run(); err != nil {
 		return fmt.Errorf("%s could not download %s: %w", filepath.Base(executable), name, err)
 	}
+	target := tagged
+	if file, ok := releaseFile(ctx, executable, temporary); ok {
+		target = filepath.Join(directory, file)
+	}
 	if err := os.Rename(temporary, target); err != nil {
 		return err
+	}
+	if target != tagged {
+		// An older app's download of the same tag.
+		os.Remove(tagged)
 	}
 	fmt.Fprintf(out, "  Saved %s\n", target)
 	return nil

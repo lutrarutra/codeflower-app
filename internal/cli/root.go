@@ -54,7 +54,7 @@ func addCommonFlags(command *cobra.Command, options *commonOptions) {
 
 func addImageTagFlag(command *cobra.Command, tag *string) {
 	command.Flags().StringVar(tag, "image-tag", os.Getenv("CODEFLOWER_IMAGE_TAG"),
-		"build of the published image to use instead of the latest: a release (0.2.1, or 0.2 for its newest patch) or a commit (sha-abc1234) (or set $CODEFLOWER_IMAGE_TAG)")
+		"build of the published image to use instead of "+sandbox.DefaultImageTag+", the release this app is made for: latest, another release (0.2.1, or 0.2 for its newest patch) or a commit (sha-abc1234) (or set $CODEFLOWER_IMAGE_TAG)")
 }
 
 // imageName combines --image and --image-tag into the image to use; empty

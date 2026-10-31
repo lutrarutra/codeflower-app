@@ -27,7 +27,7 @@ const (
 var EngineNames = []string{EngineDocker, EnginePodman, EngineApptainer}
 
 // DefaultImage is the published sandbox image the app downloads; for
-// Apptainer it is converted into DefaultSIF.
+// Apptainer it is converted into a file named SIFName.
 const DefaultImage = ImageRepository + ":" + DefaultImageTag
 
 // EngineStatus says whether an engine can run sandboxes on this machine.
@@ -525,7 +525,7 @@ func ImageHelp(engine, image string) []Step {
 	case engine == EngineApptainer:
 		return []Step{
 			{Text: "Download it once, on a node with internet access (on a cluster, the login node; compute nodes often have none):", Command: pull},
-			{Text: "It is saved as " + publishedSIF(tag) + " (set CODEFLOWER_IMAGE_DIR to keep it elsewhere). Or convert it yourself and pass --image FILE.sif:", Command: "apptainer pull codeflower-sandbox.sif docker://" + name},
+			{Text: "It is saved in " + ImageDirectory() + " as " + SIFName + " (set CODEFLOWER_IMAGE_DIR to keep it elsewhere). Or convert it yourself and pass --image FILE.sif:", Command: "apptainer pull codeflower-sandbox.sif docker://" + name},
 		}
 	}
 	return []Step{{Text: "Download it (starting a sandbox also does this):", Command: pull}}

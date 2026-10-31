@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -13,15 +14,15 @@ import (
 	"time"
 )
 
-func TestDefaultImageIsTheLatestRelease(t *testing.T) {
-	if DefaultImage != "ghcr.io/lutrarutra/codeflower-sandbox:latest" {
+func TestDefaultImageIsAPinnedRelease(t *testing.T) {
+	if !regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(DefaultImageTag) || DefaultImage != ImageRepository+":"+DefaultImageTag {
 		t.Fatalf("DefaultImage = %q", DefaultImage)
 	}
 }
 
 func TestPublishedImageTags(t *testing.T) {
 	for tag, want := range map[string]string{
-		"":             "latest",
+		"":             DefaultImageTag,
 		" latest ":     "latest",
 		"0.2.1":        "0.2.1",
 		"v0.2.1":       "0.2.1",
@@ -57,6 +58,23 @@ func TestPublishedImagesAreDownloadedPerTag(t *testing.T) {
 	if got, _ := ResolveImage(image, EngineApptainer); got != filepath.Join(directory, "codeflower-sandbox_0.2.sif") {
 		t.Fatalf("Apptainer: %q", got)
 	}
+	for _, name := range []string{"codeflower-sandbox_v0.2.9-sha-1111111.sif", "codeflower-sandbox_v0.2.10-sha-2222222.sif", "codeflower-sandbox_v0.3.0-sha-3333333.sif"} {
+		if err := os.WriteFile(filepath.Join(directory, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for tag, want := range map[string]string{
+		"0.2":         "codeflower-sandbox_v0.2.10-sha-2222222.sif",
+		"0.2.9":       "codeflower-sandbox_v0.2.9-sha-1111111.sif",
+		"sha-1111111": "codeflower-sandbox_v0.2.9-sha-1111111.sif",
+		"latest":      "codeflower-sandbox_v0.3.0-sha-3333333.sif",
+		"0.4":         "codeflower-sandbox_0.4.sif",
+	} {
+		image, _ := PublishedImage(tag)
+		if got, _ := ResolveImage(image, EngineApptainer); got != filepath.Join(directory, want) {
+			t.Errorf("Apptainer %s: %q, want %s", tag, got, want)
+		}
+	}
 	if err := pullImage(context.Background(), EngineStatus{Name: EngineDocker}, "codeflower-sandbox", false, io.Discard); err == nil {
 		t.Fatal("an image that is not the published one was downloaded")
 	}
@@ -66,7 +84,7 @@ func TestApptainerDefaultsToTheDownloadedFile(t *testing.T) {
 	directory := t.TempDir()
 	t.Setenv("CODEFLOWER_IMAGE_DIR", directory)
 	image, err := ResolveImage("", EngineApptainer)
-	if err != nil || image != filepath.Join(directory, "codeflower-sandbox_latest.sif") {
+	if err != nil || image != filepath.Join(directory, "codeflower-sandbox_"+DefaultImageTag+".sif") {
 		t.Fatalf("ResolveImage = %q, %v", image, err)
 	}
 	engine := EngineStatus{Name: EngineApptainer}
@@ -85,8 +103,9 @@ func TestApptainerDefaultsToTheDownloadedFile(t *testing.T) {
 }
 
 // fakeApptainer writes a script that "pulls" by writing its arguments to the
-// target file after a short delay, and counts its runs.
-func fakeApptainer(t *testing.T) (string, string) {
+// target file after a short delay, and counts its runs; it labels the image
+// with labels, a JSON object.
+func fakeApptainer(t *testing.T, labels string) (string, string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("Apptainer does not run on Windows")
@@ -94,7 +113,8 @@ func fakeApptainer(t *testing.T) (string, string) {
 	directory := t.TempDir()
 	runs := filepath.Join(directory, "runs")
 	script := filepath.Join(directory, "apptainer")
-	body := "#!/bin/sh\necho run >> " + runs + "\nsleep 0.2\necho \"$@\" > \"$3\"\n"
+	body := "#!/bin/sh\nif [ \"$1\" = inspect ]; then echo '{\"data\":{\"attributes\":{\"labels\":" + labels + "}}}'; exit; fi\n" +
+		"echo run >> " + runs + "\nsleep 0.2\necho \"$@\" > \"$3\"\n"
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -102,22 +122,34 @@ func fakeApptainer(t *testing.T) (string, string) {
 }
 
 func TestApptainerPullReplacesTheFileAtOnce(t *testing.T) {
-	script, runs := fakeApptainer(t)
-	target := filepath.Join(t.TempDir(), "images", "sandbox.sif")
+	script, runs := fakeApptainer(t, `{"org.opencontainers.image.version":"v1.2.3","org.opencontainers.image.revision":"abc1234def"}`)
+	directory := filepath.Join(t.TempDir(), "images")
+	t.Setenv("CODEFLOWER_IMAGE_DIR", directory)
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	older := filepath.Join(directory, "codeflower-sandbox_1.2.sif")
+	if err := os.WriteFile(older, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(directory, "codeflower-sandbox_v1.2.3-sha-abc1234.sif")
 	var out strings.Builder
-	if err := pullApptainer(context.Background(), script, "ghcr.io/x/y:1.2", target, true, &out); err != nil {
+	if err := pullApptainer(context.Background(), script, "ghcr.io/x/y:1.2", "1.2", true, &out); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(target)
 	if err != nil || !strings.Contains(string(data), "pull --force") || !strings.Contains(string(data), "docker://ghcr.io/x/y:1.2") {
 		t.Fatalf("target = %q, %v", data, err)
 	}
-	leftovers, _ := filepath.Glob(filepath.Join(filepath.Dir(target), ".*.tmp"))
+	if _, err := os.Stat(older); err == nil {
+		t.Fatal("the file named after the tag was kept")
+	}
+	leftovers, _ := filepath.Glob(filepath.Join(directory, ".*.tmp"))
 	if len(leftovers) != 0 {
 		t.Fatalf("temporary files left: %v", leftovers)
 	}
 	// A refresh downloads again.
-	if err := pullApptainer(context.Background(), script, "ghcr.io/x/y:1.2", target, true, &out); err != nil {
+	if err := pullApptainer(context.Background(), script, "ghcr.io/x/y:1.2", "1.2", true, &out); err != nil {
 		t.Fatal(err)
 	}
 	if count, _ := os.ReadFile(runs); strings.Count(string(count), "run") != 2 {
@@ -125,16 +157,28 @@ func TestApptainerPullReplacesTheFileAtOnce(t *testing.T) {
 	}
 }
 
+func TestApptainerPullWithoutLabelsIsNamedAfterTheTag(t *testing.T) {
+	script, _ := fakeApptainer(t, `{}`)
+	directory := t.TempDir()
+	t.Setenv("CODEFLOWER_IMAGE_DIR", directory)
+	if err := pullApptainer(context.Background(), script, "ghcr.io/x/y:1.2", "1.2", false, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(directory, "codeflower-sandbox_1.2.sif")); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestConcurrentApptainerPullsDownloadOnce(t *testing.T) {
-	script, runs := fakeApptainer(t)
-	target := filepath.Join(t.TempDir(), "sandbox.sif")
+	script, runs := fakeApptainer(t, `{"org.opencontainers.image.version":"v1.2.3","org.opencontainers.image.revision":"abc1234def"}`)
+	t.Setenv("CODEFLOWER_IMAGE_DIR", t.TempDir())
 	var group sync.WaitGroup
 	errs := make(chan error, 3)
 	for range 3 {
 		group.Add(1)
 		go func() {
 			defer group.Done()
-			errs <- pullApptainer(context.Background(), script, "ghcr.io/x/y:1.2", target, false, new(strings.Builder))
+			errs <- pullApptainer(context.Background(), script, "ghcr.io/x/y:1.2", "1.2", false, new(strings.Builder))
 		}()
 	}
 	group.Wait()

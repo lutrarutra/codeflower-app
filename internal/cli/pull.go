@@ -16,12 +16,13 @@ func pullCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "pull",
 		Short: "Download or update the sandbox image",
-		Long: `Download the sandbox image ` + sandbox.DefaultImage + `, or update it to the
-newest release; --image-tag downloads another release or a commit's build.
+		Long: `Download the sandbox image ` + sandbox.DefaultImage + `, the release this app
+is made for; --image-tag downloads another release (latest for the newest, or
+0.9 for the newest patch of 0.9) or a commit's build, or updates one.
 "codeflower interactive", "codeflower run" and "codeflower task" download it on first use; on a
 cluster, run this once on the login node, as compute nodes often have no
-internet access. Apptainer keeps it as ` + sandbox.DefaultSIF() + `
-(named after the tag; set CODEFLOWER_IMAGE_DIR to keep it elsewhere).`,
+internet access. Apptainer keeps it in ` + sandbox.ImageDirectory() + ` as
+` + sandbox.SIFName + ` (set CODEFLOWER_IMAGE_DIR to keep it elsewhere).`,
 		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			image, err := imageName("", imageTag)

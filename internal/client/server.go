@@ -54,8 +54,8 @@ type Options struct {
 	Log io.Writer
 	// Image, or the build of the published image ImageTag names, is used
 	// when the page names neither ($CODEFLOWER_IMAGE, $CODEFLOWER_IMAGE_TAG);
-	// when all are empty the latest published image is downloaded on first
-	// start.
+	// when all are empty the app's release of the published image
+	// (DefaultImageTag) is downloaded on first start.
 	Image    string
 	ImageTag string
 	// ConnectOnly turns off starting sandboxes here, e.g. on a login node;
@@ -302,13 +302,16 @@ type systemInfo struct {
 	Projects string                 `json:"projects"`
 	Engines  []sandbox.EngineStatus `json:"engines"`
 	// Engine is the one "auto" chooses; empty when none can run sandboxes.
-	Engine   string               `json:"engine"`
-	Problem  string               `json:"problem,omitempty"`
-	Fix      []sandbox.Step       `json:"fix,omitempty"`
-	Guide    sandbox.InstallGuide `json:"guide"`
-	Image    *imageStatus         `json:"image,omitempty"`
-	Agents   []agentInfo          `json:"agents"`
-	Settings Settings             `json:"settings"`
+	Engine  string               `json:"engine"`
+	Problem string               `json:"problem,omitempty"`
+	Fix     []sandbox.Step       `json:"fix,omitempty"`
+	Guide   sandbox.InstallGuide `json:"guide"`
+	Image   *imageStatus         `json:"image,omitempty"`
+	// ImageTag is the published image's release this app runs unless the
+	// page names another.
+	ImageTag string      `json:"imageTag"`
+	Agents   []agentInfo `json:"agents"`
+	Settings Settings    `json:"settings"`
 	// ConfigSkills are the skills folders mounted from the config in every sandbox.
 	ConfigSkills    []string `json:"configSkills"`
 	ConfigDirectory string   `json:"configDirectory,omitempty"`
@@ -352,6 +355,7 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 		Projects:        s.options.ProjectsDirectory,
 		Engines:         statuses,
 		Guide:           sandbox.Guide(),
+		ImageTag:        sandbox.DefaultImageTag,
 		Settings:        settings,
 		ConfigDirectory: s.options.ConfigDirectory,
 	}
@@ -411,7 +415,7 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 
 // image is the image the page asks for, by name or as a build of the
 // published image; when it names neither, the app's options apply.
-// Empty is the latest published image.
+// Empty is the app's release of the published image (DefaultImageTag).
 func (s *Server) image(name, tag string) (string, error) {
 	name, tag = strings.TrimSpace(name), strings.TrimSpace(tag)
 	if name == "" && tag == "" {

@@ -231,15 +231,15 @@ codeflower run --agent claude --input ~/data/study42 --output ~/results/study42 
 task (the argument, `-` to read it from standard input, or `--prompt FILE` to read it from a Markdown
 file) as the first prompt in a newly created session, then keeps the worker running
 so VS Code can attach while the agent works and continue the chat afterwards. The task is an ordinary
-interactive turn: the extension handles questions and permissions. Sign in with `interactive` first
-if this project has not been signed in yet. `run` replaces its former use as an alias of
+interactive turn: the extension handles questions and permissions. If this project has not been
+signed in yet, the task waits: connect from VS Code, sign in, and it starts. `run` replaces its former use as an alias of
 `interactive`; use `interactive` for a worker without an initial prompt.
 
 On a cluster, download the image once on the login node (compute nodes often have no internet), then
 start the worker in a job:
 
 ```sh
-codeflower pull --engine apptainer      # ~/codeflower/images/codeflower-sandbox_<version>.sif
+codeflower pull --engine apptainer      # ~/codeflower/images/codeflower-sandbox_v<version>-sha-<commit>.sif
 codeflower interactive --agent claude \
   --project study42 \
   --input /data/study42 --output ~/results/study42
@@ -375,16 +375,17 @@ codeflower task --continue ~/codeflower/projects/study42/tasks/1a2b3c "Also comp
 ## The sandbox image
 
 The sandbox is published by [codeflower-sandbox](https://github.com/lutrarutra/codeflower-sandbox) as
-`ghcr.io/lutrarutra/codeflower-sandbox`. The app uses its `latest` tag, so sandbox releases reach it
-without a new app.
+`ghcr.io/lutrarutra/codeflower-sandbox`. Each app release runs the sandbox release it was tested with
+(`codeflower --help` shows it under `--image-tag`), so a new app brings its sandbox with it.
 
 - `--image-tag TAG` (or `CODEFLOWER_IMAGE_TAG`, or "Sandbox version" in the window) uses another build:
-  a release (`0.2.1`, `v0.2.1`, or `0.2` for the newest patch of 0.2) or a commit (`sha-abc1234`, or the
-  commit's hash).
-- `codeflower interactive`, `codeflower run`, `codeflower task` and the window download the image when it is missing.
-  `codeflower pull [--image-tag TAG]` downloads it, or updates it to the newest build of that tag; a
-  downloaded `latest` stays as it is until then.
-- With Apptainer it is kept as `~/codeflower/images/codeflower-sandbox_<tag>.sif`, or in
+  `latest` for the newest release, another release (`0.2.1`, `v0.2.1`, or `0.2` for the newest patch of
+  0.2) or a commit (`sha-abc1234`, or the commit's hash).
+- `codeflower interactive`, `codeflower run`, `codeflower task` and the window download the image when they
+  start a sandbox and it is missing; `codeflower client` alone, connecting to sandboxes elsewhere, downloads
+  nothing. `codeflower pull [--image-tag TAG]` downloads it, or updates a moving tag (`latest`, `0.2`) to
+  its newest build, which a downloaded copy otherwise stays at.
+- With Apptainer it is kept as `~/codeflower/images/codeflower-sandbox_v<version>-sha-<commit>.sif`, or in
   `CODEFLOWER_IMAGE_DIR`. Jobs that start at the same time wait for one download.
 - `--image` (or `CODEFLOWER_IMAGE`) uses another image, which is never downloaded automatically: for
   example `codeflower-sandbox` built locally with `make sandbox-build`, or a `.sif` file.
