@@ -7,7 +7,7 @@ import (
 
 // Each transport message starts with one byte that says what it carries.
 // A stream carries one HTTP exchange or one WebSocket; see the tunnel's
-// PROTOCOL.md, "Envelope".
+// docs/PROTOCOL.md, "Envelope".
 const (
 	// KindOpen, browser → connector, first: an OpenRequest.
 	KindOpen byte = 1

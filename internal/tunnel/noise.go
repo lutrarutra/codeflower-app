@@ -1,7 +1,7 @@
 // Package tunnel is the connector: it keeps code flower client reachable
 // through a code flower tunnel (codeflower-tunnel), end-to-end encrypted, so
 // a paired browser anywhere can use the client's page. The tunnel only pairs
-// sockets; see its PROTOCOL.md.
+// sockets; see its docs/PROTOCOL.md.
 package tunnel
 
 import (

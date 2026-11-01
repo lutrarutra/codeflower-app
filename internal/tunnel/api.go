@@ -52,7 +52,7 @@ func (v VersionInfo) DeprecatedFor(protocol int) (string, bool) {
 	return "", false
 }
 
-// API is the tunnel's HTTP interface for connectors (PROTOCOL.md).
+// API is the tunnel's HTTP interface for connectors (docs/PROTOCOL.md).
 type API struct {
 	Base    *url.URL
 	Version string
