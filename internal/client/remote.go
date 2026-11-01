@@ -142,12 +142,21 @@ func (h *remote) guard(next http.Handler) http.Handler {
 
 func (h *remote) scoped(handler http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !scopeOf(r).allows(r.PathValue("id")) {
+		id := r.PathValue("id")
+		if !scopeOf(r).allows(id) || h.server.noTunnel(id) {
 			writeError(w, http.StatusForbidden, errors.New("this device may not use this sandbox"))
 			return
 		}
 		handler(w, r)
 	})
+}
+
+// noTunnel says whether the worker was run with --no-tunnel.
+func (s *Server) noTunnel(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item := s.workers[id]
+	return item != nil && item.NoTunnel
 }
 
 var tokenInText = regexp.MustCompile(`token=[^&\s"']+`)
@@ -167,7 +176,7 @@ func (h *remote) listWorkers(w http.ResponseWriter, r *http.Request) {
 	shown := make([]map[string]any, 0, len(views))
 	for _, view := range views {
 		id, _ := view["id"].(string)
-		if !scope.allows(id) {
+		if noTunnel, _ := view["noTunnel"].(bool); noTunnel || !scope.allows(id) {
 			continue
 		}
 		if address, ok := view["url"].(string); ok {
@@ -221,9 +230,12 @@ type RemoteWorker struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
 	Agent string `json:"agent"`
+	// NoTunnel: run with --no-tunnel, so never shared with a paired browser.
+	NoTunnel bool `json:"noTunnel,omitempty"`
 }
 
-// RunningWorkers asks the client running for this config directory for its workers.
+// RunningWorkers asks the client running for this config directory for the
+// workers it may share through the tunnel.
 func RunningWorkers(configDirectory string) ([]RemoteWorker, error) {
 	address, ok := Running(configDirectory)
 	if !ok {
@@ -246,5 +258,8 @@ func RunningWorkers(configDirectory string) ([]RemoteWorker, error) {
 	var buffer bytes.Buffer
 	_, _ = buffer.ReadFrom(response.Body)
 	var workers []RemoteWorker
-	return workers, json.Unmarshal(buffer.Bytes(), &workers)
+	if err := json.Unmarshal(buffer.Bytes(), &workers); err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(workers, func(worker RemoteWorker) bool { return worker.NoTunnel }), nil
 }

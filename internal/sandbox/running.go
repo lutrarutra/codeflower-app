@@ -25,6 +25,9 @@ type Running struct {
 	// PID is the codeflower process that runs the sandbox and stops it on SIGTERM.
 	PID     int       `json:"pid"`
 	Started time.Time `json:"started"`
+	// NoTunnel keeps the sandbox from browsers paired through the tunnel
+	// (`--no-tunnel`); the computer's own page still lists it.
+	NoTunnel bool `json:"noTunnel,omitempty"`
 }
 
 // RunningDirectory holds one file per running sandbox, in the system's config

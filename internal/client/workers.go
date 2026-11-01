@@ -59,6 +59,9 @@ type worker struct {
 	Started   time.Time `json:"started"`
 	// Kind of a local sandbox's run: worker, run or task (which has no chat).
 	Kind string `json:"kind,omitempty"`
+	// NoTunnel: a local sandbox run with --no-tunnel, which paired browsers
+	// neither see nor use.
+	NoTunnel bool `json:"noTunnel,omitempty"`
 
 	mu sync.Mutex
 	// address is the worker's host:port, safe to show.

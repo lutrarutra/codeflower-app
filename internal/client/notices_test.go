@@ -103,7 +103,7 @@ func TestNoNoticesWhenTurnedOff(t *testing.T) {
 	if server.noticesFor(&worker{}) != nil {
 		t.Fatal("polls are watched without Notify")
 	}
-	if !strings.HasPrefix(vscodeLink("x"), "vscode://codeflower.codeflower/connect?address=") {
-		t.Fatal(vscodeLink("x"))
+	if !strings.HasPrefix(VSCodeLink("x"), "vscode://codeflower.codeflower/connect?address=") {
+		t.Fatal(VSCodeLink("x"))
 	}
 }

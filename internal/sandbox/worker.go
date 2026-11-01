@@ -105,6 +105,8 @@ type Worker struct {
 	InitialPrompt string
 	// TaskInteractive enables terminal sign-in before the task when stdin is a terminal.
 	TaskInteractive bool
+	// NoTunnel keeps the sandbox from browsers paired through the tunnel.
+	NoTunnel bool
 	// Resources the user gave replace those of the batch job the app runs in.
 	Resources Resources
 	Stdin     io.Reader
@@ -302,7 +304,7 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	}
 	defer register(Running{
 		ID: instanceID, ConnectionFile: connectionFile, Project: filepath.Base(w.State), State: w.State,
-		Agent: w.Agent, Engine: w.Engine.Name, Kind: kind, PID: os.Getpid(), Started: time.Now(),
+		Agent: w.Agent, Engine: w.Engine.Name, Kind: kind, PID: os.Getpid(), Started: time.Now(), NoTunnel: w.NoTunnel,
 	})()
 
 	// Stopping the run with a cause reports that cause instead of the exit.

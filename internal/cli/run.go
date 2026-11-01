@@ -18,6 +18,7 @@ func runCommand() *cobra.Command {
 	var listenHost, advertiseHost string
 	var port, inspectPort int
 	var servePage bool
+	var noTunnel bool
 	var promptFile string
 
 	command := &cobra.Command{
@@ -96,8 +97,12 @@ networks.`,
 			worker.Port = port
 			worker.InspectPort = inspectPort
 			worker.ServePage = servePage
-			go keepReachable(config.Directory(options.config))
-			code, err := worker.Run(ctx, nil)
+			worker.NoTunnel = noTunnel
+			var ready func(sandbox.Connection)
+			if !noTunnel {
+				ready = tunnelLinks(config.Directory(options.config), os.Stderr)
+			}
+			code, err := worker.Run(ctx, ready)
 			if err != nil {
 				if errors.Is(err, sandbox.ErrNoImage) {
 					return fmt.Errorf("%w\nSee `codeflower check` for what this machine has", err)
@@ -117,6 +122,8 @@ networks.`,
 		"also serve the chat page on the worker's port, and print a link to open it in a browser")
 	command.Flags().StringVar(&advertiseHost, "advertise-host", "",
 		"address printed for VS Code and the page link (default: this node's IPv4 address; 127.0.0.1 with Docker or Podman)")
+	command.Flags().BoolVar(&noTunnel, "no-tunnel", false,
+		"keep this sandbox from browsers paired through the tunnel (it does not start the client for the tunnel either)")
 	command.Flags().IntVar(&port, "port", 0, "port of the worker (and its page with --server) (default: any free port)")
 	// Development only: anyone who can reach the inspector can run code in the sandbox.
 	command.Flags().IntVar(&inspectPort, "inspect-port", 0,

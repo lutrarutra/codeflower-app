@@ -74,12 +74,15 @@ func (s *Server) syncLocal(runs []sandbox.Running) {
 }
 
 // localID keeps a run's id apart from the ids of started and added workers.
-func localID(run sandbox.Running) string {
-	id := run.ID
-	if len(id) > 8 {
-		id = id[:8]
+func localID(run sandbox.Running) string { return LocalID(run.ID) }
+
+// LocalID is the id the client lists a sandbox started on this computer by,
+// from its instance id.
+func LocalID(instanceID string) string {
+	if len(instanceID) > 8 {
+		instanceID = instanceID[:8]
 	}
-	return "local-" + id
+	return "local-" + instanceID
 }
 
 // addLocal lists a run found on this computer; s.mu is held.
@@ -95,6 +98,7 @@ func (s *Server) addLocal(id string, run sandbox.Running) *worker {
 		ID:       id,
 		Source:   sourceLocal,
 		Kind:     run.Kind,
+		NoTunnel: run.NoTunnel,
 		Engine:   run.Engine,
 		Project:  run.Project,
 		State:    run.State,

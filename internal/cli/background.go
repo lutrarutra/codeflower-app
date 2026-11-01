@@ -3,11 +3,13 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"time"
 
 	"codeflower-app/internal/client"
+	"codeflower-app/internal/sandbox"
 	"codeflower-app/internal/tunnel"
 )
 
@@ -52,21 +54,41 @@ func ensureClient(directory string) (bool, error) {
 	}
 }
 
-// keepReachable starts the client in the background when this computer is
+// tunnelLinks starts the client in the background when this computer is
 // signed in to the tunnel with remote access on, so paired browsers reach the
-// sandbox that `run` or `interactive` starts. It only reports failures.
-func keepReachable(directory string) {
+// sandbox that `run` or `interactive` starts. It returns what to call once the
+// sandbox is ready, which prints where to open it: through the tunnel (with a
+// QR code for phones), on this computer, and in VS Code. It returns nil when
+// the tunnel is not used.
+func tunnelLinks(directory string, out io.Writer) func(sandbox.Connection) {
 	state, err := tunnel.LoadState(directory)
 	if err != nil || state.Off || !state.OnThisHost() {
-		return
+		return nil
 	}
-	started, err := ensureClient(directory)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Paired browsers cannot reach this sandbox: %v\n", err)
-		return
-	}
-	if started {
-		fmt.Fprintf(os.Stderr, "  tunnel   paired browsers reach this sandbox at %s\n", tunnel.PageURL(state))
+	started := make(chan error, 1)
+	go func() {
+		_, err := ensureClient(directory)
+		started <- err
+	}()
+	return func(connection sandbox.Connection) {
+		if err := <-started; err != nil {
+			fmt.Fprintf(out, "Paired browsers cannot reach this sandbox: %v\n", err)
+			return
+		}
+		// After the bridge's own lines, which reach the terminal through the engine.
+		time.Sleep(time.Second)
+		route := "#/chat/" + client.LocalID(connection.ID)
+		remote := tunnel.PageURL(state) + route
+		fmt.Fprintln(out)
+		printQR(out, remote)
+		fmt.Fprintf(out, "Through the tunnel, in paired browsers (scan the code with a phone):\n\n  %s\n\n", remote)
+		if len(state.Devices) == 0 {
+			fmt.Fprintf(out, "No browser is paired yet: run \"codeflower tunnel pair\".\n\n")
+		}
+		if local, running := client.Running(directory); running {
+			fmt.Fprintf(out, "On this computer:\n\n  %s\n\n", local+route)
+		}
+		fmt.Fprintf(out, "In VS Code:\n\n  %s\n\n", client.VSCodeLink(connection.URL))
 	}
 }
 

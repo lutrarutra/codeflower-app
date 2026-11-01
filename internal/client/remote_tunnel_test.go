@@ -6,9 +6,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
+	"codeflower-app/internal/sandbox"
 	"codeflower-app/internal/tunnel"
 )
 
@@ -150,4 +152,33 @@ func TestRemoteChatsReachOnlyAllowedWorkersWithoutAnOrigin(t *testing.T) {
 	if status := open(two); status != http.StatusForbidden {
 		t.Fatalf("other worker: %d", status)
 	}
+}
+
+func TestSandboxesRunWithNoTunnelStayOffTheTunnel(t *testing.T) {
+	server, local := testServer(t)
+	shared := connectTo(t, local, mustBridge(t, "token-one"))["id"].(string)
+	// `codeflower interactive --no-tunnel` in a terminal.
+	server.syncLocal([]sandbox.Running{{ID: "0123456789ab", Kind: "worker", PID: os.Getpid() + 100000, Agent: "claude", NoTunnel: true}})
+	hidden := LocalID("0123456789ab")
+	if len(listed(t, local)) != 2 {
+		t.Fatal("the computer's own page lists both sandboxes")
+	}
+	page := httptest.NewServer((&remote{server: server}).routes())
+	t.Cleanup(page.Close)
+
+	_, body := remoteRequest(t, page, http.MethodGet, "/api/workers", "*")
+	var workers []map[string]any
+	if json.Unmarshal(body, &workers) != nil || len(workers) != 1 || workers[0]["id"] != shared {
+		t.Fatalf("got %s", body)
+	}
+	for _, request := range [][2]string{{http.MethodGet, "/api/workers/" + hidden + "/sessions"}, {http.MethodPost, "/api/workers/" + hidden + "/stop"}} {
+		if response, body := remoteRequest(t, page, request[0], request[1], "*"); response.StatusCode != http.StatusForbidden {
+			t.Errorf("%s %s: %d %s", request[0], request[1], response.StatusCode, body)
+		}
+	}
+}
+
+func mustBridge(t *testing.T, token string) string {
+	address, _ := fakeBridge(t, token)
+	return address
 }

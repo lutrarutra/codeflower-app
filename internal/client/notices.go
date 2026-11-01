@@ -129,13 +129,13 @@ func notice(title, address string, lines []string) Notice {
 	}
 	result := Notice{Title: title, Body: strings.Join(body, "\n")}
 	if address != "" {
-		result.URL = vscodeLink(address)
+		result.URL = VSCodeLink(address)
 	}
 	return result
 }
 
-// vscodeLink opens the worker in VS Code, as the page's Open in VS Code does.
-func vscodeLink(address string) string {
+// VSCodeLink opens the worker in VS Code, as the page's Open in VS Code does.
+func VSCodeLink(address string) string {
 	return "vscode://codeflower.codeflower/connect?" + url.Values{"address": {address}}.Encode()
 }
 
