@@ -78,6 +78,10 @@ type Worker struct {
 	ListenHost    string
 	AdvertiseHost string
 	Port          int
+	// Token is the secret VS Code connects with; NewToken() when empty. The
+	// client sets it up front, so it can keep it out of the log from the
+	// first line.
+	Token string
 	// InspectPort publishes the bridge's Node inspector (development, Docker).
 	InspectPort int
 	// ServePage makes the worker also serve the chat page on its port
@@ -256,10 +260,14 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 		port = gate.Port()
 	}
 
+	token := w.Token
+	if token == "" {
+		token = NewToken()
+	}
 	values := WorkerEnvironment(WorkerSettings{
 		Agent:         w.Agent,
 		InstanceID:    instanceID,
-		Token:         NewToken(),
+		Token:         token,
 		ListenHost:    listen,
 		AdvertiseHost: advertise,
 		Port:          port,

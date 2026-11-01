@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -28,8 +29,20 @@ func fsSub(files fs.FS, dir string) (fs.FS, error) {
 
 const maxLogLines = 400
 
-// The connection line has its own copy button; the log does not repeat the token.
-var tokenPattern = regexp.MustCompile(`token=[A-Za-z0-9_-]+`)
+// The connection line has its own copy button; the log does not repeat the
+// token. Lines carry it plainly (token=…, the page link's key=…) and URL-encoded
+// (token%3D… in the bridge's link to this client).
+var tokenPattern = regexp.MustCompile(`(?i)(token|key)(=|%3D)[^&\s"'<>]+`)
+
+// redact removes a worker's token from a line of text: by value when known,
+// and by the pattern above for anything that looks like one.
+func redact(line, token string) string {
+	if token != "" {
+		line = strings.ReplaceAll(line, token, "…")
+		line = strings.ReplaceAll(line, url.QueryEscape(token), "…")
+	}
+	return tokenPattern.ReplaceAllString(line, "$1$2…")
+}
 
 // Where a worker in the list comes from.
 const (
@@ -78,11 +91,13 @@ type worker struct {
 	url    string
 	// connection holds the token; it never leaves the client.
 	connection *sandbox.Connection
-	relays     relays
-	err        string
-	code       int
-	log        []string
-	activity   *activity
+	// token is the one a started sandbox was given, kept out of its log.
+	token    string
+	relays   relays
+	err      string
+	code     int
+	log      []string
+	activity *activity
 	// partial holds output up to its next newline.
 	partial bytes.Buffer
 	// fetchPlugins runs the plugin fetch run for a sandbox the client started;
@@ -382,7 +397,7 @@ func (w *worker) Write(data []byte) (int, error) {
 }
 
 func (w *worker) appendLine(line string) {
-	w.log = append(w.log, tokenPattern.ReplaceAllString(line, "token=…"))
+	w.log = append(w.log, redact(line, w.token))
 	if len(w.log) > maxLogLines {
 		w.log = w.log[len(w.log)-maxLogLines:]
 	}
@@ -557,6 +572,7 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	run := sandbox.Worker{
+		Token: sandbox.NewToken(),
 		Agent: request.Agent, Engine: engine, Image: image, State: state, Binds: binds,
 		Isolation: isolation, APIKey: apiKey, Images: images, MCPServers: loaded.MCPServers(),
 		Plugins: loaded.AgentPlugins(request.Agent),
@@ -577,6 +593,7 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		status:  "starting",
 		cancel:  cancel,
 		done:    make(chan struct{}),
+		token:   run.Token,
 	}
 	run.Stdout, run.Stderr = item, item
 	if sandbox.HasPlugins(request.Agent) {

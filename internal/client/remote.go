@@ -11,7 +11,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -160,8 +159,6 @@ func (s *Server) noTunnel(id string) bool {
 	return item != nil && item.NoTunnel
 }
 
-var tokenInText = regexp.MustCompile(`token=[^&\s"']+`)
-
 // listWorkers lists only the workers the device may use, with the bridges'
 // tokens blanked out of their addresses: remote browsers never need them (the
 // page only checks that a worker has an address).
@@ -181,12 +178,12 @@ func (h *remote) listWorkers(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if address, ok := view["url"].(string); ok {
-			view["url"] = tokenInText.ReplaceAllString(address, "token=…")
+			view["url"] = redact(address, "")
 		}
 		if lines, ok := view["log"].([]any); ok {
 			for index, line := range lines {
 				if text, ok := line.(string); ok {
-					lines[index] = tokenInText.ReplaceAllString(text, "token=…")
+					lines[index] = redact(text, "")
 				}
 			}
 		}

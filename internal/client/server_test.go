@@ -193,6 +193,27 @@ func TestWorkerLogsHideTheToken(t *testing.T) {
 	}
 }
 
+// The bridge also prints its token URL-encoded (the link to this client) and
+// as the page's key.
+func TestWorkerLogsHideTheTokenInLinks(t *testing.T) {
+	token := "Qm9vb_x-Y29kZWZsb3dlcg"
+	item := &worker{token: token}
+	_, _ = item.Write([]byte("  http://127.0.0.1:7720/#add=codeflower%3A%2F%2F10.0.0.5%3A41234%3Ftoken%3D" + token + "\n" +
+		"  http://10.0.0.5:41234/?key=" + token + "\n" +
+		"the token is " + token + "\n"))
+	for _, line := range item.view().Log {
+		if strings.Contains(line, token) || strings.Contains(line, "Qm9vb") {
+			t.Fatalf("token in the log: %q", line)
+		}
+	}
+	// Without the token known, the pattern still catches both forms.
+	for _, line := range []string{"#add=codeflower%3A%2F%2Fh%3A1%3Ftoken%3DSECRET", "/?key=SECRET&x=1"} {
+		if strings.Contains(redact(line, ""), "SECRET") {
+			t.Fatalf("not redacted: %q", redact(line, ""))
+		}
+	}
+}
+
 func TestShowsWhatTheSandboxAgentDoesWithoutItsToken(t *testing.T) {
 	bridge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/status" || r.Header.Get("Authorization") != "Bearer bridge-token" {
