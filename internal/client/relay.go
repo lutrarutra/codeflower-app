@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -58,7 +57,15 @@ func (s *Server) relayToWorker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, errors.New("the sandbox is not running"))
 		return
 	}
-	target := &url.URL{Scheme: "http", Host: net.JoinHostPort(connection.Host, strconv.Itoa(connection.Port)), Path: connectionPath}
+	target, err := url.Parse(connection.BridgeURL(connectionPath))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	transport := connection.Transport()
+	transport.DialContext = item.relays.dial
+	// A chat's socket lives long: no deadline but the ones it brings itself.
+	transport.DisableKeepAlives = true
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(request *httputil.ProxyRequest) {
 			request.Out.URL = target
@@ -69,12 +76,9 @@ func (s *Server) relayToWorker(w http.ResponseWriter, r *http.Request) {
 			request.Out.Header.Del(tunnel.WorkersHeader)
 			request.Out.Header.Set("Authorization", "Bearer "+connection.Token)
 		},
-		// Straight to the node: a cluster's HTTPS_PROXY cannot reach compute nodes.
-		Transport: &http.Transport{
-			Proxy:             nil,
-			DialContext:       item.relays.dial,
-			DisableKeepAlives: true,
-		},
+		// Straight to the node (a cluster's HTTPS_PROXY cannot reach compute
+		// nodes), checking the bridge's certificate.
+		Transport:     transport,
 		FlushInterval: -1,
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
 			writeError(w, http.StatusBadGateway, errors.New("could not reach the sandbox"))

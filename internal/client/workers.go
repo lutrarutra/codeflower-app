@@ -7,14 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -224,7 +222,6 @@ const activityInterval = 3 * time.Second
 // The token stays here; the page only gets the counts and titles. polled, if
 // set, gets each poll's activity (nil when the bridge did not answer).
 func (w *worker) watchActivity(ctx context.Context, polled func(*activity)) {
-	client := &http.Client{Timeout: 2 * time.Second}
 	ticker := time.NewTicker(activityInterval)
 	defer ticker.Stop()
 	defer func() {
@@ -239,8 +236,7 @@ func (w *worker) watchActivity(ctx context.Context, polled func(*activity)) {
 		var current *activity
 		err := errors.New("no connection")
 		if connection != nil {
-			url := "http://" + net.JoinHostPort(connection.Host, strconv.Itoa(connection.Port)) + "/status"
-			current, err = fetchActivity(ctx, client, url, connection.Token)
+			current, err = fetchActivity(ctx, connection.Client(2*time.Second), connection.BridgeURL("/status"), connection.Token)
 		}
 		w.mu.Lock()
 		if w.connection != connection {
@@ -334,15 +330,14 @@ func (s *Server) workerSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	url := "http://" + net.JoinHostPort(connection.Host, strconv.Itoa(connection.Port)) + "/sessions"
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, connection.BridgeURL("/sessions"), nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	request.Header.Set("Authorization", "Bearer "+connection.Token)
 	// Straight to the bridge, as the relay goes, not through a cluster's proxy.
-	response, err := (&http.Client{Transport: &http.Transport{Proxy: nil}}).Do(request)
+	response, err := connection.Client(0).Do(request)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, errors.New("the sandbox did not answer"))
 		return

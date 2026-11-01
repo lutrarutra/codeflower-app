@@ -3,6 +3,7 @@ package client
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"io"
 	"net"
@@ -42,8 +43,15 @@ func TestAddressesParseLikeTheExtension(t *testing.T) {
 // each line; "bye" ends with a WebSocket close frame of code 4001.
 func fakeBridge(t *testing.T, token string) (address string, headers chan http.Header) {
 	t.Helper()
+	return fakeBridgeWith(t, token, nil)
+}
+
+// fakeBridgeWith serves TLS with certificate, as bridges do, when it is set;
+// its address then carries the fingerprint.
+func fakeBridgeWith(t *testing.T, token string, certificate *sandbox.Certificate) (address string, headers chan http.Header) {
+	t.Helper()
 	headers = make(chan http.Header, 4)
-	bridge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	bridge := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+token {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
@@ -79,8 +87,19 @@ func fakeBridge(t *testing.T, token string) (address string, headers chan http.H
 			}
 		}
 	}))
+	if certificate == nil {
+		bridge.Start()
+		t.Cleanup(bridge.Close)
+		return "codeflower://" + strings.TrimPrefix(bridge.URL, "http://") + "?token=" + token, headers
+	}
+	pair, err := tls.X509KeyPair(certificate.CertPEM, certificate.KeyPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge.TLS = &tls.Config{Certificates: []tls.Certificate{pair}}
+	bridge.StartTLS()
 	t.Cleanup(bridge.Close)
-	return "codeflower://" + strings.TrimPrefix(bridge.URL, "http://") + "?token=" + token, headers
+	return "codeflower://" + strings.TrimPrefix(bridge.URL, "https://") + "?token=" + token + "&fp=" + certificate.Fingerprint, headers
 }
 
 // openRelay opens a page's WebSocket to the client, as a browser would: with
@@ -199,6 +218,56 @@ func TestPagesReachAnAddedWorkerThroughTheRelay(t *testing.T) {
 	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	if _, err := reader.ReadByte(); err == nil {
 		t.Fatal("the relay stayed open after the worker was forgotten")
+	}
+}
+
+func TestTheRelayReachesABridgeOverTLSOnlyWithItsCertificate(t *testing.T) {
+	_, server := testServer(t)
+	certificate, err := sandbox.NewCertificate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	address, headers := fakeBridgeWith(t, "bridge-token", &certificate)
+	id := connectTo(t, server, address)["id"].(string)
+	waitFor(t, "the worker to answer over TLS", func() bool { return listed(t, server)[0]["status"] == "ready" })
+	origin := "http://" + strings.TrimPrefix(server.URL, "http://")
+	conn, reader, response := openRelay(t, server, id, origin, true)
+	if response.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("relay: %d", response.StatusCode)
+	}
+	if seen := <-headers; seen.Get("Authorization") != "Bearer bridge-token" {
+		t.Fatalf("the bridge got %v", seen)
+	}
+	conn.Write([]byte("hello\n"))
+	if line, _ := reader.ReadString('\n'); line != "echo:hello\n" {
+		t.Fatalf("echo %q", line)
+	}
+
+	// The same bridge under another fingerprint (someone standing in for it):
+	// never ready, and the relay does not reach it.
+	other, _ := sandbox.NewCertificate()
+	impostor := strings.Replace(address, certificate.Fingerprint, other.Fingerprint, 1)
+	body, _ := json.Marshal(map[string]string{"address": impostor})
+	response, data := authorized(t, server, "POST", "/api/workers/connect", string(body))
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("connect: %d %v", response.StatusCode, data)
+	}
+	wrong := data["id"].(string)
+	waitFor(t, "the impostor to count as unreachable", func() bool {
+		for _, worker := range listed(t, server) {
+			if worker["id"] == wrong {
+				return worker["status"] == "unreachable"
+			}
+		}
+		return false
+	})
+	if _, _, response := openRelay(t, server, wrong, origin, true); response.StatusCode != http.StatusBadGateway {
+		t.Fatalf("relay to the impostor: %d", response.StatusCode)
+	}
+	select {
+	case seen := <-headers:
+		t.Fatalf("the token reached the impostor: %v", seen)
+	default:
 	}
 }
 

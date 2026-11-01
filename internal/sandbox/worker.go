@@ -145,6 +145,9 @@ type Connection struct {
 	InitialPrompt bool   `json:"initialPrompt,omitempty"`
 	// Token also authorizes the bridge's /status.
 	Token string `json:"token"`
+	// Fingerprint is the bridge's TLS certificate's (see tls.go); empty when
+	// it serves plain HTTP (with the page, or an older image).
+	Fingerprint string `json:"fingerprint,omitempty"`
 }
 
 // ResolveImage checks that an Apptainer image file the user named exists;
@@ -306,7 +309,15 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 		values["CODEFLOWER_IMAGE_KEY_FILE"] = ContainerState + "/run/" + filepath.Base(keyFile)
 	}
 	if w.ServePage {
+		// The page is plain HTTP, for a TLS reverse proxy in front.
 		values["CODEFLOWER_PAGE"] = "1"
+	} else if listens {
+		certificate, err := NewCertificate()
+		if err != nil {
+			return 1, fmt.Errorf("could not make the worker's TLS certificate: %w", err)
+		}
+		values[TLSCertVariable] = string(certificate.CertPEM)
+		values[TLSKeyVariable] = string(certificate.KeyPEM)
 	}
 	if w.InspectPort > 0 {
 		values["CODEFLOWER_BRIDGE_INSPECT"] = fmt.Sprintf("0.0.0.0:%d", BridgeInspectPort)

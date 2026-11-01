@@ -8,12 +8,12 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"net"
 	"net/http"
 	"os"
-	"strconv"
 	"syscall"
 	"time"
+
+	"codeflower-app/internal/sandbox"
 )
 
 // DefaultWrapUp is how long a quitting client waits for the chats in its
@@ -189,10 +189,9 @@ func (s *Server) setQuitState(state *quitting, id, value string) {
 // its bridge says they are done, and quits when all are, at the deadline, or
 // not at all when ctx ends (stop now, keep running).
 func (s *Server) wrapUp(ctx context.Context, state *quitting, items []*worker) {
-	client := &http.Client{Timeout: 5 * time.Second}
 	minutes := int(math.Ceil(time.Until(state.Deadline).Minutes()))
 	for _, item := range items {
-		if err := askWrapUp(ctx, client, item, minutes); err != nil {
+		if err := askWrapUp(ctx, item, minutes); err != nil {
 			fmt.Fprintf(s.options.Log, "Sandbox %s cannot wrap up (%v); it stops with the others\n", item.ID, err)
 			s.setQuitState(state, item.ID, quitUnsupported)
 		}
@@ -216,7 +215,7 @@ func (s *Server) wrapUp(ctx context.Context, state *quitting, items []*worker) {
 				continue
 			default:
 			}
-			if wrappedUp(ctx, client, item) {
+			if wrappedUp(ctx, item) {
 				fmt.Fprintf(s.options.Log, "Sandbox %s wrapped up; stopping it\n", item.ID)
 				s.setQuitState(state, item.ID, quitDone)
 				item.stop()
@@ -249,21 +248,21 @@ var wrapUpPoll = time.Second
 
 var errCannotWrapUp = errors.New("its image is older than wrap-ups on request")
 
-func bridgeURL(item *worker, path string) (string, string, bool) {
+// bridgeTimeout bounds each request to a bridge while quitting.
+const bridgeTimeout = 5 * time.Second
+
+func connectionOf(item *worker) *sandbox.Connection {
 	item.mu.Lock()
-	connection := item.connection
-	item.mu.Unlock()
-	if connection == nil {
-		return "", "", false
-	}
-	return "http://" + net.JoinHostPort(connection.Host, strconv.Itoa(connection.Port)) + path, connection.Token, true
+	defer item.mu.Unlock()
+	return item.connection
 }
 
-func askWrapUp(ctx context.Context, client *http.Client, item *worker, minutes int) error {
-	url, token, ok := bridgeURL(item, "/wrap-up")
-	if !ok {
+func askWrapUp(ctx context.Context, item *worker, minutes int) error {
+	connection := connectionOf(item)
+	if connection == nil {
 		return errors.New("it is not connected")
 	}
+	url, token, client := connection.BridgeURL("/wrap-up"), connection.Token, connection.Client(bridgeTimeout)
 	body, _ := json.Marshal(map[string]any{"reason": "quit", "minutes": max(1, minutes)})
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -288,12 +287,12 @@ func askWrapUp(ctx context.Context, client *http.Client, item *worker, minutes i
 }
 
 // wrappedUp says whether the bridge reports its wrap-up done.
-func wrappedUp(ctx context.Context, client *http.Client, item *worker) bool {
-	url, token, ok := bridgeURL(item, "/status")
-	if !ok {
+func wrappedUp(ctx context.Context, item *worker) bool {
+	connection := connectionOf(item)
+	if connection == nil {
 		return false
 	}
-	current, err := fetchActivity(ctx, client, url, token)
+	current, err := fetchActivity(ctx, connection.Client(bridgeTimeout), connection.BridgeURL("/status"), connection.Token)
 	return err == nil && current.WrapUp != nil && current.WrapUp.State == "done"
 }
 

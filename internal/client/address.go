@@ -36,11 +36,16 @@ func parseAddress(text string) (sandbox.Connection, error) {
 	if err != nil || port <= 0 || port > 65535 {
 		return sandbox.Connection{}, errors.New("the worker address has no port")
 	}
+	// The bridge's certificate's fingerprint: with it, the client speaks TLS
+	// to the bridge and accepts only that certificate.
+	fingerprint := parsed.Query().Get("fp")
+	if fingerprint != "" && !sandbox.ValidFingerprint(fingerprint) {
+		return sandbox.Connection{}, errors.New("the worker address's fingerprint (fp=) is damaged; copy the whole line")
+	}
 	host := parsed.Hostname()
-	return sandbox.Connection{
-		URL:   "codeflower://" + net.JoinHostPort(host, strconv.Itoa(port)) + "?token=" + url.QueryEscape(token),
-		Host:  host,
-		Port:  port,
-		Token: token,
-	}, nil
+	line := "codeflower://" + net.JoinHostPort(host, strconv.Itoa(port)) + "?token=" + url.QueryEscape(token)
+	if fingerprint != "" {
+		line += "&fp=" + fingerprint
+	}
+	return sandbox.Connection{URL: line, Host: host, Port: port, Token: token, Fingerprint: fingerprint}, nil
 }

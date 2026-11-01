@@ -170,7 +170,13 @@ func movedConnection(current sandbox.Connection, line, host string, port int, to
 	if token = strings.TrimSpace(token); token != "" {
 		current.Token = token
 	}
-	return parseAddress("codeflower://" + net.JoinHostPort(current.Host, strconv.Itoa(current.Port)) + "?token=" + url.QueryEscape(current.Token))
+	// The fingerprint stays: an edit never turns encryption off. A new
+	// worker's certificate differs, so a new worker needs its whole new line.
+	line = "codeflower://" + net.JoinHostPort(current.Host, strconv.Itoa(current.Port)) + "?token=" + url.QueryEscape(current.Token)
+	if current.Fingerprint != "" {
+		line += "&fp=" + current.Fingerprint
+	}
+	return parseAddress(line)
 }
 
 // wake makes an added worker's watcher ask it at once.
