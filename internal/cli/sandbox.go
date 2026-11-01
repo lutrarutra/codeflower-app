@@ -89,7 +89,7 @@ func addSandboxFlags(command *cobra.Command, options *sandboxOptions) {
 	addCommonFlags(command, &options.commonOptions)
 	options.changed = func(name string) bool { return command.Flags().Changed(name) }
 	command.Flags().StringVar(&options.agent, "agent", os.Getenv("CODEFLOWER_AGENT"),
-		"agent the sandbox runs: claude, codex, or dsh (or set $CODEFLOWER_AGENT; asked if left out)")
+		"agent the sandbox runs: claude, codex, dsh, or opencode (or set $CODEFLOWER_AGENT; asked if left out)")
 	command.Flags().StringArrayVarP(&options.folders.Inputs, "input", "i", nil,
 		"folder with your data, mounted read-only at /data/input/NAME (repeatable)")
 	command.Flags().StringArrayVarP(&options.folders.Outputs, "output", "o", nil,

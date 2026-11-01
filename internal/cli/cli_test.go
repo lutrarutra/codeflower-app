@@ -15,7 +15,7 @@ func TestInteractiveRequiresAKnownAgent(t *testing.T) {
 	command := interactiveCommand()
 	command.SetArgs([]string{"--state", t.TempDir(), "--engine", "docker", "--agent", "gemini"})
 	err := command.Execute()
-	if err == nil || err.Error() != "--agent must be one of: claude, codex, dsh" {
+	if err == nil || err.Error() != "--agent must be one of: claude, codex, dsh, opencode" {
 		t.Fatalf("got %v", err)
 	}
 }

@@ -1,0 +1,39 @@
+{
+  "id": "opencode",
+  "name": "OpenCode",
+  "description": "Any provider: OpenAI, Anthropic, OpenRouter, OpenCode Zen and more. Sign in with a ChatGPT subscription or an API key, or use a model on the cluster.",
+  "color": "violet",
+  "order": 40,
+  "launch": ".bin/opencode",
+  "home": {
+    "variable": "OPENCODE_CONFIG_DIR",
+    "path": "harness/opencode"
+  },
+  "env": {
+    "OPENCODE_DISABLE_AUTOUPDATE": "1",
+    "OPENCODE_DISABLE_MODELS_FETCH": "1",
+    "OPENCODE_DISABLE_LSP_DOWNLOAD": "1",
+    "OPENCODE_DISABLE_FREE_MODELS": "1"
+  },
+  "credentialVariables": [
+    "OPENCODE_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "OPENROUTER_API_KEY"
+  ],
+  "providerHosts": [
+    "opencode.ai",
+    "api.openai.com",
+    "auth.openai.com",
+    "chatgpt.com",
+    "api.anthropic.com",
+    "openrouter.ai"
+  ],
+  "files": {
+    "opencode.jsonc": "// Written once by codeflower; edit freely.\n// Providers of your own, e.g. vLLM on the cluster: https://opencode.ai/docs/providers\n{\n  \"share\": \"disabled\"\n}\n"
+  },
+  "goal": {
+    "maxLength": 4000
+  },
+  "costEstimate": true
+}

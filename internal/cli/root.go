@@ -130,8 +130,8 @@ func startedFromDesktop(args []string) bool {
 func Execute() int {
 	root := &cobra.Command{
 		Use:   "codeflower",
-		Short: "Start code flower sandboxes for Claude Code, Codex, or DeepSeek Harness",
-		Long: `Start code flower sandboxes for Claude Code, Codex, or DeepSeek Harness.
+		Short: "Start code flower sandboxes for Claude Code, Codex, DeepSeek Harness, or OpenCode",
+		Long: `Start code flower sandboxes for Claude Code, Codex, DeepSeek Harness, or OpenCode.
 
 Run "codeflower interactive" for a sandbox to work with from VS Code,
 "codeflower run TASK" to start an initial task in a session you can continue
