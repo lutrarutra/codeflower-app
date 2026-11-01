@@ -3,10 +3,12 @@ package client
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -55,6 +57,44 @@ func Running(configDirectory string) (string, bool) {
 		return "", false
 	}
 	return running.URL, true
+}
+
+// QuitWait is how long Quit waits for the client to be gone.
+const QuitWait = 10 * time.Second
+
+// Quit quits the client running for this config directory, if one does,
+// stopping the sandboxes it started without asking their chats to wrap up,
+// and waits until it is gone.
+func Quit(configDirectory string) error {
+	running, ok := Running(configDirectory)
+	if !ok {
+		return nil
+	}
+	address, err := url.Parse(running)
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequest(http.MethodPost, (&url.URL{Scheme: address.Scheme, Host: address.Host, Path: "/api/quit"}).String(),
+		strings.NewReader(`{"wrapUp":false}`))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Authorization", "Bearer "+address.Query().Get("key"))
+	request.Header.Set("Content-Type", "application/json")
+	response, err := (&http.Client{Timeout: 5 * time.Second}).Do(request)
+	if err != nil {
+		return err
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("the client answered %s", response.Status)
+	}
+	for deadline := time.Now().Add(QuitWait); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
+		if _, ok := Running(configDirectory); !ok {
+			return nil
+		}
+	}
+	return fmt.Errorf("the client did not quit within %s", QuitWait)
 }
 
 // recordInstance writes the running client's address; the returned function

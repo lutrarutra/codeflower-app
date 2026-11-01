@@ -9,8 +9,10 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/signal"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/mdp/qrterminal/v3"
@@ -196,7 +198,7 @@ func signIn(ctx context.Context, dir string, options signInOptions) error {
 
 func tunnelPairCommand(directory func() string) *cobra.Command {
 	var options signInOptions
-	var noWait bool
+	var noWait, keepRunning bool
 	command := &cobra.Command{
 		Use:   "pair [sandbox…]",
 		Short: "Pair a browser: prints a link (and a QR code) to open there",
@@ -206,10 +208,13 @@ the page shows with the one printed here.
 
 It does what pairing needs first: signs this computer in to the tunnel, turns
 remote access on, and starts code flower client in the background unless it
-runs. The client keeps the tunnel connected and shows paired browsers every
-sandbox on this computer, also those "codeflower run" and "interactive" start
-(which start the client themselves once this computer is signed in). Open it
-here with "codeflower client"; it quits when you quit it there or sign out.
+runs, since the client answers the pairing. A client it started quits once the
+browser paired: "codeflower run" and "interactive" start one themselves while
+their sandbox runs, and on a cluster that shares the config directory between
+nodes, a client left running would hold the tunnel (only one computer connects
+it at a time). --keep-running keeps it, so paired browsers reach this computer
+until you quit it ("codeflower client" opens it here) or sign out; so does
+--no-wait, as the link needs it.
 
 With "tunnel: {hardened: true}" name the sandboxes (by name or ID, as
 "codeflower tunnel status" lists them) the browser may use; it sees no others.`,
@@ -248,7 +253,20 @@ With "tunnel: {hardened: true}" name the sandboxes (by name or ID, as
 			if err != nil {
 				return fmt.Errorf("could not start code flower client, which answers the pairing: %w", err)
 			}
-			if started {
+			stopClient := started && !keepRunning && !noWait
+			switch {
+			case stopClient:
+				fmt.Println("Started code flower client in the background to answer the pairing; it quits once the browser paired.")
+				// Ctrl+C stops waiting and quits the client too.
+				notified, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+				defer stop()
+				ctx = notified
+				defer func() {
+					if stopClient {
+						quitPairingClient(dir)
+					}
+				}()
+			case started:
 				fmt.Println(`Started code flower client in the background: it keeps the tunnel connected.
 Open it here with "codeflower client".`)
 			}
@@ -284,20 +302,54 @@ Open it here with "codeflower client".`)
 			if noWait {
 				return nil
 			}
-			fmt.Println("Waiting for the browser to pair (Ctrl+C stops waiting; the link keeps working)…")
+			if stopClient {
+				fmt.Println("Waiting for the browser to pair (Ctrl+C stops waiting, and the link with it)…")
+			} else {
+				fmt.Println("Waiting for the browser to pair (Ctrl+C stops waiting; the link keeps working)…")
+			}
 			device, err := waitForPairing(ctx, dir, paired, time.Now().Add(tunnel.PairingLifetime))
+			if errors.Is(err, context.Canceled) && stopClient {
+				return errors.New("stopped waiting; the link no longer works")
+			}
 			if err != nil {
 				return err
 			}
 			fmt.Printf("\nPaired %q. It opens code flower at:\n\n  %s\n", device.Label, tunnel.PageURL(state))
+			if stopClient {
+				// Lets the browser finish pairing over the connection it has.
+				time.Sleep(pairingGrace)
+				stopClient = false
+				if !quitPairingClient(dir) {
+					return nil
+				}
+				fmt.Println(`
+Stopped the code flower client that pairing started. The page shows this
+computer's sandboxes while "codeflower run" or "interactive" runs one here (they
+start the client themselves), or while "codeflower client" runs.`)
+			}
 			return nil
 		},
 	}
-	command.Flags().BoolVar(&noWait, "no-wait", false, "print the link and return instead of waiting for the browser to pair")
+	command.Flags().BoolVar(&noWait, "no-wait", false, "print the link and return instead of waiting for the browser to pair (keeps the client running)")
+	command.Flags().BoolVar(&keepRunning, "keep-running", false, "keep the client that pairing starts running afterwards, so paired browsers reach this computer")
 	command.Flags().StringVar(&options.url, "url", "", "when signing in: the tunnel to use, saved in config.yaml (default "+tunnel.DefaultURL+")")
 	command.Flags().StringVar(&options.name, "name", "", "when signing in: this computer's name in your account (default: its host name)")
 	command.Flags().BoolVar(&options.noBrowser, "no-browser", false, "when signing in: print the approval page's address instead of opening a browser")
 	return command
+}
+
+// pairingGrace: how long a client that pairing started keeps running after
+// the browser paired, so that it gets the pairing's answer.
+const pairingGrace = 3 * time.Second
+
+// quitPairingClient quits the client that pairing started, saying so when it
+// cannot.
+func quitPairingClient(directory string) bool {
+	if err := client.Quit(directory); err != nil {
+		fmt.Fprintf(os.Stderr, "Could not quit the code flower client that pairing started: %v\n", err)
+		return false
+	}
+	return true
 }
 
 // waitForPairing waits for a browser that is not in paired to pair.

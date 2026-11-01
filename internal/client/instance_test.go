@@ -37,3 +37,23 @@ func TestASecondStartFindsTheRunningClient(t *testing.T) {
 		t.Fatal("a stopped client counts as running")
 	}
 }
+
+func TestQuitQuitsTheRunningClientAndWaitsUntilItIsGone(t *testing.T) {
+	directory := t.TempDir()
+	if err := Quit(directory); err != nil {
+		t.Fatalf("with no client running: %v", err)
+	}
+	server, httpServer := testServer(t)
+	recordInstance(directory, httpServer.URL+"/?key=secret-key")
+	go func() {
+		// What the client does once it was asked to quit.
+		<-server.quit
+		httpServer.Close()
+	}()
+	if err := Quit(directory); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := Running(directory); ok {
+		t.Fatal("still running")
+	}
+}
