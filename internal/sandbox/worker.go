@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"codeflower-app/internal/agents"
@@ -167,6 +168,11 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 		w.Stderr = os.Stderr
 	}
 	if err := checkTargets(w.Binds); err != nil {
+		return 1, err
+	}
+	// Mounted for the engine only: VS Code lists the user's folders.
+	claude, err := w.claudeBinds(ctx)
+	if err != nil {
 		return 1, err
 	}
 	if w.Isolation != nil && w.InspectPort > 0 {
@@ -330,6 +336,7 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 		})
 	}
 
+	w.Binds = append(slices.Clip(w.Binds), claude...)
 	code, err := w.runEngine(running, instanceID, values, port, netDirectory, resources)
 	// Only causes the worker set itself are errors: the caller's interrupt or
 	// deadline (whose cause names the signal) is a normal way to stop.

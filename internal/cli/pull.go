@@ -22,7 +22,11 @@ is made for; --image-tag downloads another release (latest for the newest, or
 "codeflower interactive", "codeflower run" and "codeflower task" download it on first use; on a
 cluster, run this once on the login node, as compute nodes often have no
 internet access. Apptainer keeps it in ` + sandbox.ImageDirectory() + ` as
-` + sandbox.SIFName + ` (set CODEFLOWER_IMAGE_DIR to keep it elsewhere).`,
+` + sandbox.SIFName + ` (set CODEFLOWER_IMAGE_DIR to keep it elsewhere).
+
+Claude Code is not in the image, whose license does not allow passing it on:
+this also downloads the version the image needs from npm into
+` + sandbox.AgentsDirectory() + ` (set CODEFLOWER_AGENTS_DIR to keep it elsewhere).`,
 		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			image, err := imageName("", imageTag)
@@ -41,6 +45,15 @@ internet access. Apptainer keeps it in ` + sandbox.ImageDirectory() + ` as
 			}
 			resolved, _ := sandbox.ResolveImage(image, engine.Name)
 			fmt.Fprintf(os.Stderr, "The sandbox image %s is ready.\n", resolved)
+			version, err := sandbox.ImageClaudeVersion(ctx, engine, resolved)
+			if err != nil || version == "" {
+				return err
+			}
+			directory, err := sandbox.EnsureClaude(ctx, version, os.Stderr)
+			if err != nil {
+				return fmt.Errorf("could not download Claude Code %s: %w", version, err)
+			}
+			fmt.Fprintf(os.Stderr, "Claude Code %s is ready in %s.\n", version, directory)
 			return nil
 		},
 	}

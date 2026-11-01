@@ -136,9 +136,24 @@ func releasedSIF(tag string) string {
 // releaseFile names an image file after the release and commit labels the
 // release workflow puts on the image; false for an image without them.
 func releaseFile(ctx context.Context, executable, file string) (string, bool) {
-	output, err := exec.CommandContext(ctx, executable, "inspect", "--json", "--labels", file).Output()
+	labels, err := apptainerLabels(ctx, executable, file)
 	if err != nil {
 		return "", false
+	}
+	version, revision := labels["org.opencontainers.image.version"], labels["org.opencontainers.image.revision"]
+	if len(revision) < 7 {
+		return "", false
+	}
+	name := "codeflower-sandbox_" + version + "-sha-" + revision[:7] + ".sif"
+	return name, releasedFile.MatchString(name)
+}
+
+// apptainerLabels are the labels of an Apptainer image file, those of the
+// image it was converted from included.
+func apptainerLabels(ctx context.Context, executable, file string) (map[string]string, error) {
+	output, err := exec.CommandContext(ctx, executable, "inspect", "--json", "--labels", file).Output()
+	if err != nil {
+		return nil, err
 	}
 	var inspected struct {
 		Data struct {
@@ -147,16 +162,10 @@ func releaseFile(ctx context.Context, executable, file string) (string, bool) {
 			} `json:"attributes"`
 		} `json:"data"`
 	}
-	if json.Unmarshal(output, &inspected) != nil {
-		return "", false
+	if err := json.Unmarshal(output, &inspected); err != nil {
+		return nil, err
 	}
-	labels := inspected.Data.Attributes.Labels
-	version, revision := labels["org.opencontainers.image.version"], labels["org.opencontainers.image.revision"]
-	if len(revision) < 7 {
-		return "", false
-	}
-	name := "codeflower-sandbox_" + version + "-sha-" + revision[:7] + ".sif"
-	return name, releasedFile.MatchString(name)
+	return inspected.Data.Attributes.Labels, nil
 }
 
 // EnsureImage pulls a build of the published image (empty: the default)

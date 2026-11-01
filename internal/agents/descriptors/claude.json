@@ -9,7 +9,9 @@
     "variable": "CLAUDE_CONFIG_DIR",
     "path": "harness/claude"
   },
-  "env": {},
+  "env": {
+    "CLAUDE_CODE_EXECUTABLE": "/opt/codeflower/agents/claude/claude"
+  },
   "credentialVariables": [
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",

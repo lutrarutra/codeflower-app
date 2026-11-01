@@ -287,9 +287,10 @@ func TestWorkerMountsTheGalleryAndGivesTheImageKeyInAFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := filepath.Join(directory, "out")
-	// The engine notes what the sandbox would get, including the key file while it runs.
+	// The engine notes what the sandbox would get, including the key file while it runs;
+	// its image has no labels (no Claude Code to bind in).
 	engine := filepath.Join(directory, "apptainer")
-	script := "#!/bin/sh\nenv | grep '^APPTAINERENV_' | sort > " + out + "\n" +
+	script := "#!/bin/sh\n[ \"$1\" = inspect ] && { echo '{}'; exit 0; }\nenv | grep '^APPTAINERENV_' | sort > " + out + "\n" +
 		"ls -l " + state + "/run/image-key-* | cut -c1-10 >> " + out + "\ncat " + state + "/run/image-key-* >> " + out + "\necho \"$@\" >> " + out + "\n"
 	if err := os.WriteFile(engine, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
