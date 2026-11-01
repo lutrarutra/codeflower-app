@@ -32,6 +32,10 @@ func ContainerEnvironment() map[string]string {
 		"CODEFLOWER_PREPEND_PATH": strings.Join(
 			[]string{env + "/venv/bin", env + "/npm/bin", env + "/cargo/bin"}, ":"),
 	}
+	// The host's clock, not UTC (the image has tzdata).
+	if zone := HostTimeZone(); zone != "" {
+		values["TZ"] = zone
+	}
 	// Each agent's home (CLAUDE_CONFIG_DIR, CODEX_HOME, DSH_HOME, …), from its descriptor.
 	for _, descriptor := range agents.All() {
 		values[descriptor.Home.Variable] = state + "/" + descriptor.Home.Path
