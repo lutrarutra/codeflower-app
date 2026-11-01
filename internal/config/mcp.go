@@ -11,15 +11,20 @@ import (
 // use: a command that runs in the sandbox (stdio), or a server at a URL.
 type MCPServer struct {
 	// Name is its key under mcp_servers.
-	Name    string            `yaml:"-"`
-	Command string            `yaml:"command"`
-	Args    []string          `yaml:"args"`
-	Env     map[string]string `yaml:"env"`
-	URL     string            `yaml:"url"`
+	Name string `yaml:"-"`
+	// Command: the program that runs the server in the sandbox (stdio).
+	Command string `yaml:"command"`
+	// Args: the command's arguments.
+	Args []string `yaml:"args"`
+	// Env: environment variables for the command.
+	Env map[string]string `yaml:"env"`
+	// URL: the address of a server that runs elsewhere, instead of a command.
+	URL string `yaml:"url"`
 	// Transport of a server at a URL: http (streamable HTTP, the default) or
 	// sse, which Codex and dsh do not support.
-	Transport string            `yaml:"transport"`
-	Headers   map[string]string `yaml:"headers"`
+	Transport string `yaml:"transport"`
+	// Headers: HTTP headers sent to a server at a URL, e.g. Authorization.
+	Headers map[string]string `yaml:"headers"`
 }
 
 // The names every agent accepts as they are (dsh rewrites others).

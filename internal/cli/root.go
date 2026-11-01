@@ -126,8 +126,9 @@ func startedFromDesktop(args []string) bool {
 	return err == nil && info.Mode()&os.ModeCharDevice == 0 && !interactive()
 }
 
-// Execute runs the command line and returns the process exit code.
-func Execute() int {
+// NewRootCommand builds the command tree; cmd/gendocs writes the docs' CLI
+// reference from it.
+func NewRootCommand() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "codeflower",
 		Short: "Start code flower sandboxes for Claude Code, Codex, DeepSeek Harness, or OpenCode",
@@ -158,6 +159,12 @@ sandbox with a few clicks, or connects to one running elsewhere. Run
 		return u.run(command.Context())
 	}
 	root.AddCommand(interactiveCommand(), runCommand(), taskCommand(), pullCommand(), checkCommand(), clientCommand(), tunnelCommand(), updateCommand())
+	return root
+}
+
+// Execute runs the command line and returns the process exit code.
+func Execute() int {
+	root := NewRootCommand()
 	// Cobra would otherwise exit with "This is a command line tool" when
 	// Explorer starts the program, before the window below can open.
 	cobra.MousetrapHelpText = ""

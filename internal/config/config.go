@@ -37,13 +37,23 @@ var ImageProviders = map[string]string{
 
 // Agent holds the defaults for one agent.
 type Agent struct {
-	Model   string            `yaml:"model"`
-	Effort  string            `yaml:"effort"`
+	// Model: the model `codeflower task` asks the agent for, as the agent
+	// names it; the task stops when the agent has no such model.
+	Model string `yaml:"model"`
+	// Effort: the reasoning effort `codeflower task` asks for (the agent's
+	// thought level, e.g. low, medium or high).
+	Effort string `yaml:"effort"`
+	// Options: other settings of the agent for `codeflower task`, by the ids
+	// the agent gives them (as with `--option ID=VALUE`).
 	Options map[string]string `yaml:"options"`
-	// The API key, from one of: the host environment variable named by
-	// APIKeyEnv, the file APIKeyFile, or APIKey itself.
-	APIKey     string `yaml:"api_key"`
-	APIKeyEnv  string `yaml:"api_key_env"`
+	// APIKey: the agent's API key, written here. Set at most one of api_key,
+	// api_key_env and api_key_file; config.yaml must then not be readable by
+	// other users. A subscription login in the project is kept.
+	APIKey string `yaml:"api_key"`
+	// APIKeyEnv: the environment variable on this computer that holds the
+	// agent's API key.
+	APIKeyEnv string `yaml:"api_key_env"`
+	// APIKeyFile: a file on this computer that holds the agent's API key.
 	APIKeyFile string `yaml:"api_key_file"`
 }
 
@@ -55,11 +65,16 @@ type Icons struct {
 
 // Images configures the image model codeflower-sketch generates icons with.
 type Images struct {
+	// Provider: openai or google. An isolated sandbox may reach its API.
 	Provider string `yaml:"provider"`
 	// Model replaces the provider's default model.
-	Model      string `yaml:"model"`
-	APIKey     string `yaml:"api_key"`
-	APIKeyEnv  string `yaml:"api_key_env"`
+	Model string `yaml:"model"`
+	// APIKey: the provider's API key, written here (at most one of api_key,
+	// api_key_env and api_key_file).
+	APIKey string `yaml:"api_key"`
+	// APIKeyEnv: the environment variable on this computer that holds the key.
+	APIKeyEnv string `yaml:"api_key_env"`
+	// APIKeyFile: a file on this computer that holds the key.
 	APIKeyFile string `yaml:"api_key_file"`
 }
 
@@ -103,15 +118,25 @@ type Client struct {
 
 // Config is the content of config.yaml; every field is optional.
 type Config struct {
-	Engine         string           `yaml:"engine"`
-	Image          string           `yaml:"image"`
-	IsolateNetwork *bool            `yaml:"isolate_network"`
-	Skills         []string         `yaml:"skills"`
-	Agents         map[string]Agent `yaml:"agents"`
-	Icons          Icons            `yaml:"icons"`
-	Images         Images           `yaml:"images"`
-	Client         Client           `yaml:"client"`
-	Tunnel         Tunnel           `yaml:"tunnel"`
+	// Engine: auto, docker, podman or apptainer, for the sandboxes the
+	// command line starts when neither --engine nor $CODEFLOWER_ENGINE is set.
+	Engine string `yaml:"engine"`
+	// Image: the sandbox image (a Docker/Podman image name or an Apptainer
+	// .sif file) for the sandboxes the command line starts when neither
+	// --image nor $CODEFLOWER_IMAGE is set.
+	Image string `yaml:"image"`
+	// IsolateNetwork: start the command line's sandboxes as with
+	// --isolate-network.
+	IsolateNetwork *bool `yaml:"isolate_network"`
+	// Skills: more folders of skills, mounted read-only in every sandbox
+	// besides <config dir>/skills; relative paths are in the config directory.
+	Skills []string `yaml:"skills"`
+	// Agents: settings of each agent, by its id.
+	Agents map[string]Agent `yaml:"agents"`
+	Icons  Icons            `yaml:"icons"`
+	Images Images           `yaml:"images"`
+	Client Client           `yaml:"client"`
+	Tunnel Tunnel           `yaml:"tunnel"`
 	// MCP are the MCP servers given to the agent of every sandbox, by name.
 	MCP map[string]MCPServer `yaml:"mcp_servers"`
 
