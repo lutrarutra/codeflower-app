@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -64,7 +65,20 @@ func NewAPI(base, version string) (*API, error) {
 	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" {
 		return nil, fmt.Errorf("not a tunnel URL: %q", base)
 	}
+	// The connector's token and device code travel in every request: only
+	// over TLS, except to a tunnel on this computer (development).
+	if parsed.Scheme == "http" && !loopbackHost(parsed.Hostname()) {
+		return nil, fmt.Errorf("the tunnel must use https: %q", base)
+	}
 	return &API{Base: parsed, Version: version, HTTP: &http.Client{Timeout: 30 * time.Second}}, nil
+}
+
+func loopbackHost(name string) bool {
+	if name == "localhost" {
+		return true
+	}
+	address, err := netip.ParseAddr(name)
+	return err == nil && address.IsLoopback()
 }
 
 // Header is what every request and socket sends.
