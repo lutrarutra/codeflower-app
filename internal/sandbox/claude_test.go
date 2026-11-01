@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -101,8 +102,9 @@ func TestEnsureClaudeDownloadsOnceAndBindsIt(t *testing.T) {
 	if data, err := os.ReadFile(filepath.Join(directory, "sdk", "sdk.mjs")); err != nil || string(data) != "export {}" {
 		t.Fatalf("sdk.mjs = %q, %v", data, err)
 	}
+	// Windows keeps no executable bit; Docker Desktop binds the file executable.
 	info, err := os.Stat(filepath.Join(directory, "claude"))
-	if err != nil || info.Mode().Perm()&0o111 == 0 {
+	if err != nil || runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
 		t.Fatalf("claude is not an executable: %v %v", info, err)
 	}
 	if _, err := os.Stat(filepath.Join(directory, "cli")); !os.IsNotExist(err) {
