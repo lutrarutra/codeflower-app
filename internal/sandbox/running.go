@@ -28,6 +28,10 @@ type Running struct {
 	// NoTunnel keeps the sandbox from browsers paired through the tunnel
 	// (`--no-tunnel`); the computer's own page still lists it.
 	NoTunnel bool `json:"noTunnel,omitempty"`
+	// Host is the computer it runs on: a home folder shared between
+	// computers (a cluster's) holds the runs of every one, and PID means
+	// something only on Host.
+	Host string `json:"host,omitempty"`
 }
 
 // RunningDirectory holds one file per running sandbox, in the system's config
@@ -47,6 +51,7 @@ func register(running Running) func() {
 	if dir == "" || os.MkdirAll(dir, 0o700) != nil {
 		return func() {}
 	}
+	running.Host, _ = os.Hostname()
 	data, err := json.MarshalIndent(running, "", "  ")
 	if err != nil {
 		return func() {}
@@ -67,14 +72,16 @@ func register(running Running) func() {
 	return func() { os.Remove(path) }
 }
 
-// ListRunning reads the registered runs. A run whose process is gone left
-// its file behind (killed, or the computer slept through a crash); those
-// files are removed.
+// ListRunning reads the runs registered on this computer. A run whose
+// process is gone left its file behind (killed, or the computer slept through
+// a crash); those files are removed. Runs on other computers that share the
+// folder are left alone.
 func ListRunning() []Running {
 	dir := RunningDirectory()
 	if dir == "" {
 		return nil
 	}
+	host, _ := os.Hostname()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
@@ -92,6 +99,9 @@ func ListRunning() []Running {
 		}
 		var running Running
 		if json.Unmarshal(data, &running) != nil || running.ID == "" {
+			continue
+		}
+		if running.Host != "" && running.Host != host {
 			continue
 		}
 		if !processAlive(running.PID) {

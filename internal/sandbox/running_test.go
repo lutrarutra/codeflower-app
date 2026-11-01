@@ -54,3 +54,22 @@ func TestARunsConnectionIsReadOnceTheBridgeWroteIt(t *testing.T) {
 		t.Fatal("a task has no connection")
 	}
 }
+
+func TestRunsOnAnotherComputerSharingTheFolderAreLeftAlone(t *testing.T) {
+	dir := t.TempDir()
+	RunningDirectory = func() string { return dir }
+	t.Cleanup(func() { RunningDirectory = func() string { return "" } })
+
+	// Registered by a batch job on another node of the cluster, whose PID
+	// means nothing here.
+	path := filepath.Join(dir, "elsewhere.json")
+	if err := os.WriteFile(path, []byte(`{"id":"elsewhere","pid":999999999,"host":"node-b.cluster"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if runs := ListRunning(); len(runs) != 0 {
+		t.Fatalf("listed %+v", runs)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("its registration was removed: %v", err)
+	}
+}
