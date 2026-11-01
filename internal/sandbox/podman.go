@@ -45,6 +45,11 @@ type PodmanRun struct {
 	Stderr io.Writer
 }
 
+// podmanOwnEnv are variables the podman process reads itself (rootless
+// Podman finds its storage and configuration under HOME). They are paths,
+// not secrets, so they go by value and podman keeps the host's.
+var podmanOwnEnv = map[string]bool{"HOME": true, "TMPDIR": true, "PATH": true}
+
 // PodmanArgs builds the `podman run` arguments. The environment is passed by
 // name only (--env NAME), so the token never appears in `ps`.
 func PodmanArgs(executable string, run PodmanRun) ([]string, error) {
@@ -93,7 +98,11 @@ func PodmanArgs(executable string, run PodmanRun) ([]string, error) {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		args = append(args, "--env", name)
+		if podmanOwnEnv[name] {
+			args = append(args, "--env", name+"="+run.Env[name])
+		} else {
+			args = append(args, "--env", name)
+		}
 	}
 	return append(args, run.Image), nil
 }
@@ -114,7 +123,9 @@ func RunPodman(ctx context.Context, executable string, run PodmanRun) (int, erro
 	command.Env = os.Environ()
 	command.Stdin = run.Stdin
 	for name, value := range run.Env {
-		command.Env = append(command.Env, name+"="+value)
+		if !podmanOwnEnv[name] {
+			command.Env = append(command.Env, name+"="+value)
+		}
 	}
 	command.Stdout, command.Stderr = run.Stdout, run.Stderr
 	return runUntilDone(ctx, command, func() {

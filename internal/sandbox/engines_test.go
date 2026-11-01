@@ -114,7 +114,7 @@ func TestPodmanArgsKeepTheTokenOutOfTheCommandLine(t *testing.T) {
 		Image: "codeflower-sandbox",
 		State: dir,
 		Binds: []Bind{{Source: dir, Target: "/data/input/study", ReadOnly: true}},
-		Env:   map[string]string{"CODEFLOWER_TOKEN": "secret-value"},
+		Env:   map[string]string{"CODEFLOWER_TOKEN": "secret-value", "HOME": ContainerState + "/home"},
 		Port:  7000,
 	})
 	if err != nil {
@@ -122,7 +122,7 @@ func TestPodmanArgsKeepTheTokenOutOfTheCommandLine(t *testing.T) {
 	}
 	line := strings.Join(args, " ")
 	for _, want := range []string{
-		"run --rm --init", "--env CODEFLOWER_TOKEN", "--publish 127.0.0.1:7000:7000",
+		"run --rm --init", "--env CODEFLOWER_TOKEN", "--env HOME=" + ContainerState + "/home", "--publish 127.0.0.1:7000:7000",
 		"type=bind,source=" + dir + ",target=/data/input/study,readonly", "type=bind,source=" + dir + ",target=" + ContainerState,
 	} {
 		if !strings.Contains(line, want) {
