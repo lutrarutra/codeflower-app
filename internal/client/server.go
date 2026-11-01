@@ -331,8 +331,14 @@ type imageStatus struct {
 	Help     []sandbox.Step `json:"help,omitempty"`
 }
 
+// pageAPI is the version of the API pages use (docs/architecture.md,
+// "Repositories"). It is raised when a page from an older app could no longer
+// use it: a page through the tunnel talks to the apps on every paired computer.
+const pageAPI = 1
+
 type systemInfo struct {
 	Version  string                 `json:"version"`
+	PageAPI  int                    `json:"pageApi"`
 	System   string                 `json:"system"`
 	Home     string                 `json:"home"`
 	Projects string                 `json:"projects"`
@@ -374,7 +380,7 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 	if s.options.ConnectOnly {
 		// Engines are never looked for: nothing starts here.
 		writeJSON(w, http.StatusOK, systemInfo{
-			Version: s.options.Version, Engines: []sandbox.EngineStatus{}, Agents: []agentInfo{}, Settings: settings,
+			Version: s.options.Version, PageAPI: pageAPI, Engines: []sandbox.EngineStatus{}, Agents: []agentInfo{}, Settings: settings,
 			ConfigSkills: []string{}, Isolation: map[string]string{},
 			Capabilities: capabilities{
 				Connect: true, ConnectOnly: true,
@@ -387,6 +393,7 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 	home, _ := os.UserHomeDir()
 	info := systemInfo{
 		Version:         s.options.Version,
+		PageAPI:         pageAPI,
 		Home:            home,
 		Projects:        s.options.ProjectsDirectory,
 		Engines:         statuses,

@@ -88,9 +88,11 @@ func TestRemoteBrowsersCannotConnectAnywhereQuitOrManageUnlessAllowed(t *testing
 	page, _, _ := tunnelPage(t, false)
 	_, body := remoteRequest(t, page, http.MethodGet, "/api/system", "*")
 	var system struct {
+		PageAPI      int            `json:"pageApi"`
 		Capabilities map[string]any `json:"capabilities"`
 	}
-	if json.Unmarshal(body, &system) != nil || system.Capabilities["start"] != false || system.Capabilities["connect"] != false || system.Capabilities["connectOnly"] != true {
+	// Pages from other computers read the version to tell whether they can use this one.
+	if json.Unmarshal(body, &system) != nil || system.PageAPI != pageAPI || system.Capabilities["start"] != false || system.Capabilities["connect"] != false || system.Capabilities["connectOnly"] != true {
 		t.Fatalf("remote capabilities: %s", body)
 	}
 	if response, body := remoteRequest(t, page, http.MethodPost, "/api/workers", "*"); response.StatusCode != http.StatusForbidden || !strings.Contains(string(body), "manage: true") {

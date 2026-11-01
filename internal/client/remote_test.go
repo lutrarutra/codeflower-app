@@ -292,7 +292,7 @@ func TestWithoutAnEngineTheClientStillConnects(t *testing.T) {
 	response, data := authorized(t, web, "GET", "/api/system", "")
 	capabilities := data["capabilities"].(map[string]any)
 	if response.StatusCode != 200 || capabilities["start"] != false || capabilities["connect"] != true ||
-		capabilities["startDisabledReason"] == "" || data["guide"] == nil {
+		capabilities["startDisabledReason"] == "" || data["guide"] == nil || data["pageApi"] != float64(pageAPI) {
 		t.Fatalf("system %d %v", response.StatusCode, data)
 	}
 	response, data = authorized(t, web, "POST", "/api/workers", `{"agent":"claude"}`)
@@ -312,7 +312,7 @@ func TestConnectOnlyNeverLooksForEngines(t *testing.T) {
 	}
 	response, data := authorized(t, web, "GET", "/api/system", "")
 	capabilities := data["capabilities"].(map[string]any)
-	if response.StatusCode != 200 || capabilities["connectOnly"] != true || capabilities["start"] != false {
+	if response.StatusCode != 200 || capabilities["connectOnly"] != true || capabilities["start"] != false || data["pageApi"] != float64(pageAPI) {
 		t.Fatalf("system %d %v", response.StatusCode, data)
 	}
 	if response, data := authorized(t, web, "POST", "/api/workers", `{"agent":"claude"}`); response.StatusCode != 403 {
