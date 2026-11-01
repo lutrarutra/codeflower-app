@@ -234,11 +234,9 @@ With "tunnel: {hardened: true}" name the sandboxes (by name or ID, as
 			if err != nil {
 				return err
 			}
-			if !state.OnThisHost() {
-				host, _ := os.Hostname()
-				return fmt.Errorf("%s signed in to the tunnel with %s, not this computer (%s); only one computer can connect it.\n"+
-					"Pair there, or move the tunnel here with \"codeflower tunnel login\" (paired browsers must pair again)",
-					state.Host, dir, host)
+			if !state.MayConnect(time.Now()) {
+				return fmt.Errorf("%w (it shares %s with this computer, and one computer connects the tunnel at a time).\n"+
+					"Pair there, or quit that client and pair here", &tunnel.ErrHeld{Host: state.Host}, dir)
 			}
 			if state.Off {
 				if err := tunnel.Update(dir, func(current *tunnel.State) error { current.Off = false; return nil }); err != nil {
@@ -567,7 +565,7 @@ func tunnelSwitchCommand(directory func() string, use, short string, off bool) *
 				fmt.Println(`Remote access is off; open chats were closed. "codeflower tunnel on" turns it on again.`)
 				return nil
 			}
-			if state, err := tunnel.LoadState(dir); err == nil && state.OnThisHost() {
+			if state, err := tunnel.LoadState(dir); err == nil && state.MayConnect(time.Now()) {
 				if _, err := ensureClient(dir); err != nil {
 					return fmt.Errorf("remote access is on, but %w", err)
 				}

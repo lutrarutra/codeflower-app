@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -194,6 +195,15 @@ type rig struct {
 
 func startRig(t *testing.T) *rig {
 	t.Helper()
+	r, _ := startConnector(t, nil)
+	waitUntil(t, "the connector is online", r.tunnel.online)
+	return r
+}
+
+// startConnector runs a connector against a fake tunnel, with the state
+// `prepare` changed, until the returned function or the test ends.
+func startConnector(t *testing.T, prepare func(*State)) (*rig, func()) {
+	t.Helper()
 	tunnel := newFakeTunnel(t)
 	// Unix socket paths are short: not under t.TempDir()'s long names.
 	directory, err := mkShortTemp()
@@ -204,6 +214,9 @@ func startRig(t *testing.T) *rig {
 	keys, _ := GenerateKeypair()
 	state := &State{URL: tunnel.URL, ConnectorID: "eu_test", Token: "token", Region: "eu",
 		PrivateKey: EncodeKey(keys.Private), PublicKey: EncodeKey(keys.Public)}
+	if prepare != nil {
+		prepare(state)
+	}
 	if err := state.Save(directory); err != nil {
 		t.Fatal(err)
 	}
@@ -217,9 +230,7 @@ func startRig(t *testing.T) *rig {
 		DialApp: func(ctx context.Context) (net.Conn, error) { return (&net.Dialer{}).DialContext(ctx, "unix", socket) },
 		Notify:  func(notice Notice) { notices <- notice },
 	})
-	r := &rig{tunnel: tunnel, directory: directory, state: state, notices: notices}
-	waitUntil(t, "the connector is online", tunnel.online)
-	return r
+	return &rig{tunnel: tunnel, directory: directory, state: state, notices: notices}, cancel
 }
 
 func waitUntil(t *testing.T, what string, check func() bool) {
@@ -512,5 +523,48 @@ func TestATunnelThatNeedsANewerAppIsReportedOnceAndNotRetriedInALoop(t *testing.
 	case notice := <-notices:
 		t.Fatalf("a second notice: %+v", notice)
 	case <-time.After(1500 * time.Millisecond):
+	}
+}
+
+func TestAConnectorWaitsWhileAnotherComputerHoldsTheTunnelAndTakesItOverOnRelease(t *testing.T) {
+	r, stop := startConnector(t, func(state *State) { state.Host, state.HeldAt = "node-b.cluster", time.Now() })
+	time.Sleep(1500 * time.Millisecond)
+	if r.tunnel.online() {
+		t.Fatal("connected while node-b holds the tunnel")
+	}
+	// node-b's client quit.
+	if err := Update(r.directory, func(state *State) error { state.HeldAt = time.Time{}; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "the connector takes the tunnel over", r.tunnel.online)
+	host, _ := os.Hostname()
+	if state, _ := LoadState(r.directory); state.Host != host || state.HeldAt.IsZero() {
+		t.Fatalf("the hold is %q at %v", state.Host, state.HeldAt)
+	}
+	stop()
+	waitUntil(t, "the hold is released", func() bool {
+		state, _ := LoadState(r.directory)
+		return state.HeldAt.IsZero() && state.MayConnect(time.Now())
+	})
+}
+
+func TestAHoldThatWasNotRenewedLapses(t *testing.T) {
+	now := time.Now()
+	for _, c := range []struct {
+		state State
+		want  bool
+	}{
+		{State{}, true},
+		{State{Host: "node-b.cluster", HeldAt: now.Add(-time.Minute)}, false},
+		{State{Host: "node-b.cluster", HeldAt: now.Add(-HoldLimit - time.Second)}, true},
+		{State{Host: "node-b.cluster"}, true},
+	} {
+		if got := c.state.MayConnect(now); got != c.want {
+			t.Errorf("%+v: got %v", c.state, got)
+		}
+	}
+	host, _ := os.Hostname()
+	if !(&State{Host: host, HeldAt: now}).MayConnect(now) {
+		t.Error("this computer's own hold refused it")
 	}
 }

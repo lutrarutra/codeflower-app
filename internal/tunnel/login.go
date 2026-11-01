@@ -68,7 +68,7 @@ func (l *Login) Wait(ctx context.Context, configDirectory string) error {
 	}
 	host, _ := os.Hostname()
 	state := &State{
-		URL: l.base, ConnectorID: connectorID, Token: token, Region: l.Region, Host: host,
+		URL: l.base, ConnectorID: connectorID, Token: token, Region: l.Region, Host: host, HeldAt: time.Now(),
 		PrivateKey: EncodeKey(l.keys.Private), PublicKey: l.PublicKey,
 	}
 	return state.Save(configDirectory)

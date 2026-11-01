@@ -40,9 +40,13 @@ type Pairing struct {
 // at run time: the CLI changes it (pair, revoke, off) and a running connector
 // picks the change up within a second.
 //
-// Host is the computer that signed in. A config directory shared between
-// computers (a cluster's home) must connect from that one only: the tunnel
-// keeps one connection per connector, so two would push each other out.
+// Host is the computer that holds the connector, and HeldAt when its
+// connector last said so. A config directory shared between computers (a
+// cluster's home) connects from one at a time: the tunnel keeps one
+// connection per connector, so two would push each other out. Another
+// computer takes the connector over once the hold is released or lapses (a
+// batch job that ended on one node and starts on another), so browsers stay
+// paired and nobody signs in again.
 type State struct {
 	URL         string    `json:"url"`
 	ConnectorID string    `json:"connectorId"`
@@ -51,6 +55,7 @@ type State struct {
 	PublicKey   string    `json:"publicKey"`
 	Region      string    `json:"region"`
 	Host        string    `json:"host,omitempty"`
+	HeldAt      time.Time `json:"heldAt,omitzero"`
 	Off         bool      `json:"off,omitempty"`
 	Devices     []Device  `json:"devices,omitempty"`
 	Pairings    []Pairing `json:"pairings,omitempty"`
@@ -228,11 +233,56 @@ func PageURL(state *State) string {
 	return strings.TrimRight(state.URL, "/") + "/m/" + state.ConnectorID + "/"
 }
 
-// OnThisHost says whether this computer signed in (states from before Host
-// count as this computer's).
-func (s *State) OnThisHost() bool {
+// A running connector renews its hold every HoldRenew; one not renewed for
+// HoldLimit lapsed (its computer stopped without releasing it, as a killed
+// batch job does).
+const (
+	HoldRenew = 30 * time.Second
+	HoldLimit = 90 * time.Second
+)
+
+// ErrHeld: another computer's connector holds the connector.
+type ErrHeld struct{ Host string }
+
+func (e *ErrHeld) Error() string {
+	return fmt.Sprintf("%s holds the tunnel connection; it is released when its code flower client quits", e.Host)
+}
+
+// MayConnect says whether this computer may connect the connector: it holds
+// it, or nobody does, or the holder's hold lapsed.
+func (s *State) MayConnect(now time.Time) bool {
 	host, _ := os.Hostname()
-	return s.Host == "" || s.Host == host
+	return s.Host == "" || s.Host == host || now.Sub(s.HeldAt) > HoldLimit
+}
+
+// Hold takes or renews this computer's hold on the connector, unless another
+// computer holds it.
+func Hold(configDirectory string) error {
+	host, _ := os.Hostname()
+	return Update(configDirectory, func(state *State) error {
+		now := time.Now()
+		if !state.MayConnect(now) {
+			return &ErrHeld{Host: state.Host}
+		}
+		state.Host, state.HeldAt = host, now
+		return nil
+	})
+}
+
+// Release lets another computer take the connector at once, if this one
+// holds it.
+func Release(configDirectory string) error {
+	host, _ := os.Hostname()
+	err := Update(configDirectory, func(state *State) error {
+		if state.Host == host {
+			state.HeldAt = time.Time{}
+		}
+		return nil
+	})
+	if errors.Is(err, ErrNotSignedIn) {
+		return nil
+	}
+	return err
 }
 
 // Expected: signed in and on, so the client should come online.

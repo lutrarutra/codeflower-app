@@ -59,11 +59,19 @@ func ensureClient(directory string) (bool, error) {
 // sandbox that `run` or `interactive` starts. It returns what to call once the
 // sandbox is ready, which prints where to open it: through the tunnel (with a
 // QR code for phones), on this computer, and in VS Code. It returns nil when
-// the tunnel is not used.
+// the tunnel is not used. With the config directory shared between computers
+// (a cluster's home), it takes the tunnel over from a computer whose hold was
+// released or lapsed, and says so when another still holds it.
 func tunnelLinks(directory string, out io.Writer) func(sandbox.Connection) {
 	state, err := tunnel.LoadState(directory)
-	if err != nil || state.Off || !state.OnThisHost() {
+	if err != nil || state.Off {
 		return nil
+	}
+	if !state.MayConnect(time.Now()) {
+		return func(sandbox.Connection) {
+			time.Sleep(time.Second)
+			fmt.Fprintf(out, "\nPaired browsers cannot reach this sandbox: %v.\n\n", &tunnel.ErrHeld{Host: state.Host})
+		}
 	}
 	started := make(chan error, 1)
 	go func() {

@@ -32,6 +32,7 @@ import (
 	"codeflower-app/internal/agents"
 	"codeflower-app/internal/config"
 	"codeflower-app/internal/sandbox"
+	"codeflower-app/internal/tunnel"
 )
 
 //go:embed page
@@ -166,7 +167,9 @@ func Run(ctx context.Context, options Options) error {
 	watching, stopWatching := context.WithCancel(context.Background())
 	defer stopWatching()
 	go server.watchLocal(watching)
-	tunnelURL := server.startTunnel(watching)
+	tunneling, stopTunnel := context.WithCancel(watching)
+	defer stopTunnel()
+	tunnelURL := server.startTunnel(tunneling)
 	httpServer := &http.Server{Handler: server.routes(), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = httpServer.Serve(listener) }()
 
@@ -191,6 +194,12 @@ func Run(ctx context.Context, options Options) error {
 	}
 	// A client started from now on is a new one.
 	forget()
+	if options.Tunnel != nil && options.ConfigDirectory != "" {
+		// Before stopping sandboxes, which may take a while: another computer
+		// may take the tunnel over at once (a batch job's next node).
+		stopTunnel()
+		_ = tunnel.Release(options.ConfigDirectory)
+	}
 	server.stopAll()
 	shutdown, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

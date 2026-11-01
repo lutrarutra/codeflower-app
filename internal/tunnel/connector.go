@@ -75,9 +75,10 @@ type connector struct {
 	warned map[string]time.Time
 }
 
-// Run keeps the connector online until ctx ends: connected while signed in
-// and not turned off, reconnecting with backoff, and stopping (with a notice)
-// when the tunnel needs a newer code flower or revoked this connector.
+// Run keeps the connector online until ctx ends: connected while signed in,
+// not turned off and not held by another computer (see State), reconnecting
+// with backoff, and stopping (with a notice) when the tunnel needs a newer
+// code flower or revoked this connector. It releases its hold when ctx ends.
 func Run(ctx context.Context, options Options) error {
 	if options.Log == nil {
 		options.Log = io.Discard
@@ -98,6 +99,12 @@ func Run(ctx context.Context, options Options) error {
 		},
 	}
 	backoff := time.Second
+	held := false
+	defer func() {
+		if held {
+			_ = Release(options.ConfigDirectory)
+		}
+	}()
 	for ctx.Err() == nil {
 		state, err := LoadState(options.ConfigDirectory)
 		if err != nil || state.Off {
@@ -107,6 +114,22 @@ func Run(ctx context.Context, options Options) error {
 			c.waitForChange(ctx, state)
 			continue
 		}
+		var other *ErrHeld
+		if err := Hold(options.ConfigDirectory); errors.As(err, &other) {
+			fmt.Fprintf(options.Log, "tunnel: %v; waiting until it is\n", err)
+			c.waitForHold(ctx)
+			continue
+		} else if err != nil {
+			fmt.Fprintf(options.Log, "tunnel: %v; retrying in %s\n", err, backoff)
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(backoff):
+			}
+			backoff = min(backoff*2, time.Minute)
+			continue
+		}
+		held = true
 		started := time.Now()
 		err = c.session(ctx, state)
 		if ctx.Err() != nil {
@@ -115,7 +138,7 @@ func Run(ctx context.Context, options Options) error {
 		var protocol *ProtocolError
 		var status *StatusError
 		switch {
-		case errors.Is(err, errStateChanged):
+		case errors.Is(err, errStateChanged), errors.As(err, &other):
 			backoff = time.Second
 			continue
 		case errors.As(err, &protocol):
@@ -172,6 +195,24 @@ func (c *connector) waitForChange(ctx context.Context, seen *State) {
 		case <-ticker.C:
 			current, err := LoadState(c.options.ConfigDirectory)
 			if (seen == nil) != (err != nil) || (seen != nil && current != nil && identityChanged(seen, current)) {
+				return
+			}
+		}
+	}
+}
+
+// waitForHold waits until this computer may take the connector, the state
+// file is gone or turned off, or ctx ends.
+func (c *connector) waitForHold(ctx context.Context) {
+	ticker := time.NewTicker(watchInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			current, err := LoadState(c.options.ConfigDirectory)
+			if err != nil || current.Off || current.MayConnect(time.Now()) {
 				return
 			}
 		}
@@ -333,6 +374,7 @@ func (c *connector) sandboxes(ctx context.Context) (int, error) {
 func (c *connector) watch(ctx context.Context, cancel context.CancelCauseFunc, started *State) {
 	ticker := time.NewTicker(watchInterval)
 	defer ticker.Stop()
+	renewed := time.Now()
 	for {
 		select {
 		case <-ctx.Done():
@@ -344,6 +386,17 @@ func (c *connector) watch(ctx context.Context, cancel context.CancelCauseFunc, s
 			c.closeStreams(func(*stream) bool { return true }, "The tunnel settings changed")
 			cancel(errStateChanged)
 			return
+		}
+		if time.Since(renewed) >= HoldRenew {
+			renewed = time.Now()
+			var other *ErrHeld
+			if err := Hold(c.options.ConfigDirectory); errors.As(err, &other) {
+				c.closeStreams(func(*stream) bool { return true }, "Another computer connected the tunnel")
+				cancel(err)
+				return
+			} else if err != nil {
+				fmt.Fprintf(c.options.Log, "tunnel: could not renew the hold: %v\n", err)
+			}
 		}
 		c.mu.Lock()
 		c.state = current
