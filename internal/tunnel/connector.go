@@ -59,6 +59,9 @@ const (
 	accessNoticeEvery = time.Hour
 )
 
+// statusInterval: how often the sandboxes reported to the tunnel are counted.
+var statusInterval = 5 * time.Second
+
 type connector struct {
 	options Options
 	app     *http.Client
@@ -246,6 +249,7 @@ func (c *connector) session(ctx context.Context, state *State) error {
 		}
 	}()
 	go c.watch(ctx, cancel, state)
+	go c.reportStatus(ctx, control)
 
 	for {
 		kind, data, err := control.Read(ctx)
@@ -267,6 +271,61 @@ func (c *connector) session(ctx context.Context, state *State) error {
 			go c.serveStream(ctx, api, state, message.Stream, browserAddress(message.IP))
 		}
 	}
+}
+
+// reportStatus tells the tunnel how many sandboxes paired browsers may reach,
+// when connected and whenever that changes, so its account page can show them
+// (see "status" in the tunnel's PROTOCOL.md).
+func (c *connector) reportStatus(ctx context.Context, control *websocket.Conn) {
+	ticker := time.NewTicker(statusInterval)
+	defer ticker.Stop()
+	reported := -1
+	for {
+		if count, err := c.sandboxes(ctx); err == nil && count != reported {
+			frame, _ := json.Marshal(map[string]any{"type": "status", "sandboxes": count})
+			if control.Write(ctx, websocket.MessageText, frame) == nil {
+				reported = count
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// sandboxes counts the running sandboxes the client lists for a device that
+// may use all of them (it leaves out those run with --no-tunnel).
+func (c *connector) sandboxes(ctx context.Context) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, statusInterval)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://codeflower/api/workers", nil)
+	if err != nil {
+		return 0, err
+	}
+	request.Header = trusted(Device{Label: "tunnel status"})
+	response, err := c.app.Do(request)
+	if err != nil {
+		return 0, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("the client answered %s", response.Status)
+	}
+	var workers []struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, maxBody)).Decode(&workers); err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, worker := range workers {
+		if worker.Status == "ready" || worker.Status == "task" {
+			count++
+		}
+	}
+	return count, nil
 }
 
 // watch follows the state file: identity changes and turning off end the

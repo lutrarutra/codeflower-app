@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,6 +30,8 @@ type fakeTunnel struct {
 	next     int
 	// ip: the browser address the open message reports, if set.
 	ip string
+	// statuses: the status frames the connector sent.
+	statuses []string
 }
 
 func newFakeTunnel(t *testing.T) *fakeTunnel {
@@ -52,8 +55,14 @@ func newFakeTunnel(t *testing.T) *fakeTunnel {
 		tunnel.control = conn
 		tunnel.mu.Unlock()
 		for {
-			if _, _, err := conn.Read(context.Background()); err != nil {
+			_, data, err := conn.Read(context.Background())
+			if err != nil {
 				return
+			}
+			if strings.Contains(string(data), `"status"`) {
+				tunnel.mu.Lock()
+				tunnel.statuses = append(tunnel.statuses, string(data))
+				tunnel.mu.Unlock()
 			}
 		}
 	})
@@ -115,14 +124,27 @@ func pipe(ctx context.Context, a, b *websocket.Conn) {
 	}
 }
 
+func (f *fakeTunnel) lastStatus() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.statuses) == 0 {
+		return ""
+	}
+	return f.statuses[len(f.statuses)-1]
+}
+
 func (f *fakeTunnel) online() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.control != nil
 }
 
-// fakeApp is the client's remote page: /echo answers with what it saw, and
-// /api/workers/w1/acp echoes WebSocket messages.
+// fakeWorkers is what the fake app's /api/workers lists.
+var fakeWorkers atomic.Value
+
+// fakeApp is the client's remote page: /echo answers with what it saw,
+// /api/workers lists fakeWorkers, and /api/workers/w1/acp echoes WebSocket
+// messages.
 func fakeApp(t *testing.T, socket string) {
 	t.Helper()
 	listener, err := net.Listen("unix", socket)
@@ -136,6 +158,13 @@ func fakeApp(t *testing.T, socket string) {
 		json.NewEncoder(w).Encode(map[string]string{
 			"method": r.Method, "body": string(body), "device": r.Header.Get(DeviceHeader), "workers": r.Header.Get(WorkersHeader),
 		})
+	})
+	mux.HandleFunc("GET /api/workers", func(w http.ResponseWriter, r *http.Request) {
+		workers, _ := fakeWorkers.Load().(string)
+		if workers == "" || r.Header.Get(WorkersHeader) != "*" {
+			workers = "[]"
+		}
+		io.WriteString(w, workers)
 	})
 	mux.HandleFunc("/api/workers/w1/acp", func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)
@@ -274,6 +303,22 @@ func (r *rig) pairingSecret(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return secret
+}
+
+func TestTheTunnelIsToldHowManySandboxesRunWhenThatChanges(t *testing.T) {
+	interval := statusInterval
+	statusInterval = 20 * time.Millisecond
+	t.Cleanup(func() { statusInterval = interval; fakeWorkers.Store("") })
+	fakeWorkers.Store(`[{"status":"ready"},{"status":"task"},{"status":"stopped"},{"status":"starting"}]`)
+	r := startRig(t)
+	waitUntil(t, "two sandboxes are reported", func() bool { return r.tunnel.lastStatus() == `{"sandboxes":2,"type":"status"}` })
+	fakeWorkers.Store(`[]`)
+	waitUntil(t, "none are reported", func() bool { return r.tunnel.lastStatus() == `{"sandboxes":0,"type":"status"}` })
+	r.tunnel.mu.Lock()
+	defer r.tunnel.mu.Unlock()
+	if len(r.tunnel.statuses) != 2 {
+		t.Fatalf("the status is sent only when it changes, got %v", r.tunnel.statuses)
+	}
 }
 
 func TestUnpairedBrowsersAreRefusedAndAPairingLinkWorksOnce(t *testing.T) {
