@@ -268,6 +268,10 @@ func newAllowlist(path string, provider []string, log func(string)) *allowlist {
 // refresh rereads the file when its size or modification time changed. A
 // missing file allows only the provider's hosts.
 func (a *allowlist) refresh() {
+	if a.path == "" {
+		// No file: only the provider's hosts (the plugin fetch run).
+		return
+	}
 	info, err := os.Stat(a.path)
 	if err != nil {
 		if a.content != nil || a.modified.IsZero() {

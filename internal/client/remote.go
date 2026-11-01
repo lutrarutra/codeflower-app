@@ -71,6 +71,7 @@ func (h *remote) routes() http.Handler {
 	mux.Handle("GET /api/workers/{id}/sessions", h.scoped(s.workerSessions))
 	mux.Handle("GET /api/workers/{id}/acp", h.scoped(s.relayToWorker))
 	mux.Handle("POST /api/workers/{id}/stop", h.scoped(s.stopWorker))
+	mux.Handle("POST /api/workers/{id}/plugins/fetch", h.scoped(s.fetchWorkerPlugins))
 	if h.manage {
 		mux.HandleFunc("GET /api/folders", s.folders)
 		mux.HandleFunc("POST /api/folders", s.createFolder)

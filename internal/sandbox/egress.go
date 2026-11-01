@@ -445,6 +445,11 @@ func (p *egressProxy) connect(ctx context.Context, rawHost string, port int, tun
 	address := net.JoinHostPort(host, strconv.Itoa(port))
 	allowed, byUser := p.allowlist.allows(host, port)
 	if !allowed {
+		if p.allowlist.path == "" {
+			// The plugin fetch run: only the installer's hosts, no file.
+			p.log(fmt.Sprintf("network: refused %s (only the plugin installer's hosts are reachable)", address))
+			return nil, refusal{http.StatusForbidden, fmt.Sprintf("codeflower: %s is not needed to fetch plugins", address)}
+		}
 		p.log(fmt.Sprintf("network: refused %s (not on the allowlist %s)", address, p.allowlist.path))
 		return nil, refusal{http.StatusForbidden,
 			fmt.Sprintf("codeflower: %s is not on the allowlist (%s)", address, p.allowlist.path)}

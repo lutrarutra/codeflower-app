@@ -26,5 +26,26 @@
   "goal": {
     "maxLength": 4000
   },
-  "costEstimate": true
+  "costEstimate": true,
+  "plugins": {
+    "kinds": [
+      "marketplace",
+      "github",
+      "git",
+      "path"
+    ],
+    "catalogs": [
+      {
+        "name": "claude-plugins-official",
+        "source": "github:anthropics/claude-plugins-official"
+      }
+    ],
+    "hosts": [
+      "github.com",
+      "codeload.github.com",
+      "raw.githubusercontent.com",
+      "objects.githubusercontent.com",
+      "api.github.com"
+    ]
+  }
 }

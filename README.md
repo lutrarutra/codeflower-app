@@ -277,6 +277,10 @@ mcp_servers:               # MCP servers every agent may use, by name
     command: files-mcp     # runs inside the sandbox; found in its PATH
     args: [--root, /workspace]
     env: { TOKEN: "…" }
+plugins:                   # each agent's own plugins, in every project (Claude Code for now)
+  claude:
+    - source: marketplace:commit-commands@claude-plugins-official
+    - source: github:my-org/my-plugin#v1.2.0
 client:
   connect_only: false      # --connect-only
   tray: true               # false: --no-tray
@@ -312,6 +316,12 @@ tunnel:
   add those to the allowlist file. A file whose servers have `env` or
   `headers` must not be readable by others (`chmod 600`), as these usually hold tokens; the agent
   can read them inside the sandbox.
+- **Plugins.** Each agent's own plugins, by agent: a `marketplace:NAME@CATALOG`, `github:OWNER/REPO[#REF]`,
+  `git:URL[#REF]` or `path:/…` source for Claude Code, with `enabled: false` to list one switched off. A
+  project adds its own and switches these off in the chat's *Plugins…* or with `codeflower plugins`. They
+  are fetched with the agent's own installer before a sandbox starts, also for `--isolate-network`, whose
+  fetch reaches only the hosts the installer needs; `codeflower plugins fetch` does it ahead, e.g. on a
+  login node. Details in [plugins.md](https://github.com/lutrarutra/codeflower-workspace/blob/main/docs/plugins.md).
 - **Model settings** (`model`, `effort`, `options`) apply to `codeflower task`; in a chat you choose
   them there.
 - The client also keeps its last choices (`codeflower/app.json`) and added sandboxes

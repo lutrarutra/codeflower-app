@@ -245,7 +245,9 @@ type preparedSandbox struct {
 	images *config.ImageGeneration
 	// mcpServers are the config's MCP servers.
 	mcpServers []config.MCPServer
-	resources  sandbox.Resources
+	// plugins are the config's plugins for the agent.
+	plugins   []config.PluginEntry
+	resources sandbox.Resources
 }
 
 // prepare mounts the folders, makes sure the image is there and prepares the
@@ -339,8 +341,16 @@ func (options sandboxOptions) prepareWith(ctx context.Context, engine sandbox.En
 		}
 		fmt.Fprintf(os.Stderr, "  mcp      %s, from the config\n", strings.Join(names, ", "))
 	}
+	plugins := options.userConfig.AgentPlugins(options.agent)
+	if len(plugins) > 0 {
+		sources := make([]string, len(plugins))
+		for index, entry := range plugins {
+			sources[index] = entry.Source
+		}
+		fmt.Fprintf(os.Stderr, "  plugins  %s, from the config\n", strings.Join(sources, ", "))
+	}
 	return preparedSandbox{engine: engine, image: image, state: state, binds: binds, isolation: isolation, apiKey: apiKey,
-		images: images, mcpServers: mcpServers, resources: options.resources}, nil
+		images: images, mcpServers: mcpServers, plugins: plugins, resources: options.resources}, nil
 }
 
 // withIcons adds the icon gallery's mount, unless it is off or already there
@@ -373,6 +383,7 @@ func (p preparedSandbox) worker(agent string) sandbox.Worker {
 		APIKey:     p.apiKey,
 		Images:     p.images,
 		MCPServers: p.mcpServers,
+		Plugins:    p.plugins,
 		Resources:  p.resources,
 	}
 }

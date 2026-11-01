@@ -38,6 +38,23 @@ type Descriptor struct {
 	// Files are written into the agent's home once, so the user's edits are
 	// kept: text as given, anything else as indented JSON.
 	Files map[string]json.RawMessage `json:"files"`
+	// Plugins says which plugin sources the agent's adapter takes, its
+	// catalogs, and the hosts a fetch of them needs (docs/plugins.md). No
+	// kinds: the agent has no plugins.
+	Plugins Plugins `json:"plugins"`
+}
+
+// Plugins is a descriptor's plugins block.
+type Plugins struct {
+	Kinds    []string  `json:"kinds"`
+	Catalogs []Catalog `json:"catalogs"`
+	Hosts    []string  `json:"hosts"`
+}
+
+// Catalog is a list of plugins the agent knows, such as a Claude Code marketplace.
+type Catalog struct {
+	Name   string `json:"name"`
+	Source string `json:"source"`
 }
 
 var all = load()

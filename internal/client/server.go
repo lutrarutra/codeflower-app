@@ -214,6 +214,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/workers/{id}/acp", s.relay)
 	mux.HandleFunc("GET /api/workers/{id}/sessions", s.workerSessions)
 	mux.HandleFunc("POST /api/workers/{id}/stop", s.stopWorker)
+	mux.HandleFunc("POST /api/workers/{id}/plugins/fetch", s.fetchWorkerPlugins)
 	mux.HandleFunc("PATCH /api/workers/{id}", s.updateWorker)
 	mux.HandleFunc("DELETE /api/workers/{id}", s.forgetWorker)
 	mux.HandleFunc("GET /api/quit", s.quitStatus)

@@ -85,8 +85,12 @@ type worker struct {
 	activity   *activity
 	// partial holds output up to its next newline.
 	partial bytes.Buffer
-	cancel  context.CancelFunc
-	done    chan struct{}
+	// fetchPlugins runs the plugin fetch run for a sandbox the client started;
+	// fetching is set while one runs.
+	fetchPlugins func(context.Context) ([]sandbox.PluginFetchResult, error)
+	fetching     bool
+	cancel       context.CancelFunc
+	done         chan struct{}
 	// moved wakes an added worker's watcher when its address or token changes.
 	moved chan struct{}
 	// run is how a local sandbox registered, and watching its watchers' context.
@@ -552,6 +556,11 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
+	run := sandbox.Worker{
+		Agent: request.Agent, Engine: engine, Image: image, State: state, Binds: binds,
+		Isolation: isolation, APIKey: apiKey, Images: images, MCPServers: loaded.MCPServers(),
+		Plugins: loaded.AgentPlugins(request.Agent),
+	}
 	item := &worker{
 		ID:      sandbox.NewInstanceID()[:8],
 		Source:  sourceStarted,
@@ -568,6 +577,16 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		status:  "starting",
 		cancel:  cancel,
 		done:    make(chan struct{}),
+	}
+	run.Stdout, run.Stderr = item, item
+	if sandbox.HasPlugins(request.Agent) {
+		// The page's Fetch now, for a sandbox without the network: the same
+		// image and project, briefly with it.
+		item.fetchPlugins = func(ctx context.Context) ([]sandbox.PluginFetchResult, error) {
+			fetch := run
+			fetch.Stdout = nil
+			return fetch.FetchPlugins(ctx)
+		}
 	}
 	item.appendLine(fmt.Sprintf("Starting %s with %s (%s)…", item.label, engine.Label, image))
 	if isolation != nil {
@@ -587,12 +606,13 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		code, err := 1, error(nil)
 		if sandbox.IsPublished(named) {
 			err = sandbox.EnsureImage(ctx, engine, named, item)
+			if err == nil {
+				// The download names an Apptainer file after its release.
+				run.Image, err = sandbox.ResolveImage(named, engine.Name)
+			}
 		}
 		if err == nil {
-			code, err = sandbox.Worker{
-				Agent: request.Agent, Engine: engine, Image: image, State: state, Binds: binds,
-				Isolation: isolation, APIKey: apiKey, Images: images, MCPServers: loaded.MCPServers(), Stdout: item, Stderr: item,
-			}.Run(ctx, func(connection sandbox.Connection) {
+			code, err = run.Run(ctx, func(connection sandbox.Connection) {
 				item.mu.Lock()
 				item.url = connection.URL
 				item.connection = &connection
@@ -682,6 +702,63 @@ func (s *Server) stopWorker(w http.ResponseWriter, r *http.Request) {
 	}
 	item.stop()
 	writeJSON(w, http.StatusOK, item.view())
+}
+
+// fetchWorkerPlugins runs the plugin fetch run for a sandbox the client
+// started, whose bridge then lists the plugins as fetched; the agent picks them
+// up when it restarts. Answers {results}.
+func (s *Server) fetchWorkerPlugins(w http.ResponseWriter, r *http.Request) {
+	item := s.find(r.PathValue("id"))
+	if item == nil {
+		writeError(w, http.StatusNotFound, errors.New("no such sandbox"))
+		return
+	}
+	item.mu.Lock()
+	fetch, busy := item.fetchPlugins, item.fetching
+	if fetch != nil && !busy {
+		item.fetching = true
+	}
+	item.mu.Unlock()
+	switch {
+	case fetch == nil:
+		writeError(w, http.StatusConflict, errors.New("this sandbox was not started here: run `codeflower plugins fetch` "+
+			"for its project where it was started, then restart the agent"))
+		return
+	case busy:
+		writeError(w, http.StatusConflict, errors.New("the plugins are being fetched already"))
+		return
+	}
+	defer func() {
+		item.mu.Lock()
+		item.fetching = false
+		item.mu.Unlock()
+	}()
+	logLine := func(line string) {
+		item.mu.Lock()
+		defer item.mu.Unlock()
+		item.appendLine(line)
+	}
+	logLine("Fetching plugins…")
+	results, err := fetch(r.Context())
+	for _, result := range results {
+		what := result.Plugin
+		if what == "" {
+			what = "catalog " + result.Catalog
+		}
+		if result.Error != "" {
+			logLine(fmt.Sprintf("Plugin %s: %s", what, result.Error))
+		} else {
+			logLine(fmt.Sprintf("Plugin %s fetched", what))
+		}
+	}
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+	if results == nil {
+		results = []sandbox.PluginFetchResult{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"results": results})
 }
 
 // stop stops a sandbox the client started and closes the pages relayed to it.

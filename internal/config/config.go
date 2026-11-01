@@ -139,6 +139,8 @@ type Config struct {
 	Tunnel Tunnel           `yaml:"tunnel"`
 	// MCP are the MCP servers given to the agent of every sandbox, by name.
 	MCP map[string]MCPServer `yaml:"mcp_servers"`
+	// Plugins are the agents' own plugins every sandbox gets, by agent id.
+	Plugins map[string][]PluginEntry `yaml:"plugins"`
 
 	// Directory is the config directory; Path is the file, whether or not it exists.
 	Directory string `yaml:"-"`
@@ -195,6 +197,9 @@ func Load(directory string) (*Config, error) {
 		return nil, fmt.Errorf("%s: images: needs a provider (openai or google)", config.Path)
 	}
 	if err := config.checkMCP(); err != nil {
+		return nil, err
+	}
+	if err := config.checkPlugins(); err != nil {
 		return nil, err
 	}
 	if config.hasInlineKey() || config.hasMCPSecrets() {

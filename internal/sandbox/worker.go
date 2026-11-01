@@ -107,6 +107,12 @@ type Worker struct {
 	TaskInteractive bool
 	// NoTunnel keeps the sandbox from browsers paired through the tunnel.
 	NoTunnel bool
+	// Plugins are the config's plugins for the agent (docs/plugins.md). Those
+	// never fetched are fetched before the worker starts.
+	Plugins []config.PluginEntry
+	// PluginsFetch makes this the fetch run (FetchPlugins): no port, and an
+	// isolated one reaches only the agent's plugin hosts.
+	PluginsFetch bool
 	// Resources the user gave replace those of the batch job the app runs in.
 	Resources Resources
 	Stdin     io.Reader
@@ -172,6 +178,11 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	if err := checkTargets(w.Binds); err != nil {
 		return 1, err
 	}
+	if !w.PluginsFetch && HasPlugins(w.Agent) {
+		w.fetchMissingPlugins(ctx)
+	}
+	// Tasks and fetch runs do not listen for windows.
+	listens := w.Task == "" && !w.PluginsFetch
 	// Mounted for the engine only: VS Code lists the user's folders.
 	claude, err := w.claudeBinds(ctx)
 	if err != nil {
@@ -182,7 +193,7 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	}
 	containerized := w.Engine.Name != EngineApptainer
 	port := w.Port
-	if containerized && port == 0 && w.Isolation == nil && w.Task == "" {
+	if containerized && port == 0 && w.Isolation == nil && listens {
 		// Docker and Podman publish a fixed port, so choose it up front.
 		var err error
 		if port, err = FreePort(); err != nil {
@@ -222,7 +233,7 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 			return 1, err
 		}
 		ingress := ""
-		if w.Task == "" {
+		if listens {
 			ingressHost := listen
 			if containerized {
 				ingressHost = "127.0.0.1"
@@ -230,7 +241,12 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 			ingress = net.JoinHostPort(ingressHost, itoa(port))
 		}
 		log := func(message string) { fmt.Fprintln(w.Stderr, message) }
-		list := newAllowlist(w.Isolation.Allowlist, w.providerHosts(), log)
+		allowlistFile := w.Isolation.Allowlist
+		if w.PluginsFetch {
+			// Only the hosts the agent's installer needs, not the user's.
+			allowlistFile = ""
+		}
+		list := newAllowlist(allowlistFile, w.providerHosts(), log)
 		gate, err = startGateway(netDirectory, ingress, list, log)
 		if err != nil {
 			os.RemoveAll(netDirectory)
@@ -259,6 +275,12 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	}
 	if len(w.MCPServers) > 0 {
 		values[MCPServersVariable] = MCPServersJSON(w.MCPServers)
+	}
+	if len(w.Plugins) > 0 {
+		values[PluginsVariable] = PluginsJSON(w.Agent, w.Plugins)
+	}
+	if w.PluginsFetch {
+		values[PluginsFetchVariable] = "1"
 	}
 	for _, bind := range w.Binds {
 		if bind.Target == IconsRoot {
@@ -302,20 +324,26 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	case w.InitialPrompt != "":
 		kind = "run"
 	}
-	defer register(Running{
-		ID: instanceID, ConnectionFile: connectionFile, Project: filepath.Base(w.State), State: w.State,
-		Agent: w.Agent, Engine: w.Engine.Name, Kind: kind, PID: os.Getpid(), Started: time.Now(), NoTunnel: w.NoTunnel,
-	})()
+	if !w.PluginsFetch {
+		defer register(Running{
+			ID: instanceID, ConnectionFile: connectionFile, Project: filepath.Base(w.State), State: w.State,
+			Agent: w.Agent, Engine: w.Engine.Name, Kind: kind, PID: os.Getpid(), Started: time.Now(), NoTunnel: w.NoTunnel,
+		})()
+	}
 
 	// Stopping the run with a cause reports that cause instead of the exit.
 	running, stopRunning := context.WithCancelCause(ctx)
 	defer stopRunning(nil)
-	if w.Task != "" {
-		// A task never writes a connection file; an image that does not know
-		// tasks starts a worker for VS Code, which would wait forever.
+	if !listens {
+		// A task or fetch run never writes a connection file; an image that
+		// does not know them starts a worker for VS Code, which would wait forever.
+		tooOld := ErrImageWithoutTasks
+		if w.PluginsFetch {
+			tooOld = ErrImageWithoutPlugins
+		}
 		watching, stopWatching := context.WithCancel(ctx)
 		defer stopWatching()
-		go watchConnection(watching, connectionFile, func(Connection) { stopRunning(ErrImageWithoutTasks) })
+		go watchConnection(watching, connectionFile, func(Connection) { stopRunning(tooOld) })
 	} else if ready != nil || gate != nil || w.InitialPrompt != "" {
 		watching, stopWatching := context.WithCancel(ctx)
 		defer stopWatching()
@@ -351,6 +379,9 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 // providerHosts are the hosts an isolated sandbox always reaches: the agent's
 // service, the image model's when one is configured, and the MCP servers'.
 func (w Worker) providerHosts() []string {
+	if w.PluginsFetch {
+		return PluginHosts(w.Agent)
+	}
 	hosts := append([]string(nil), ProviderHosts[w.Agent]...)
 	if w.Images != nil {
 		hosts = append(hosts, config.ImageProviders[w.Images.Provider])
