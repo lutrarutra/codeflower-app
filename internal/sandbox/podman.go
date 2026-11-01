@@ -7,8 +7,10 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -115,6 +117,7 @@ func RunPodman(ctx context.Context, executable string, run PodmanRun) (int, erro
 	if exec.CommandContext(check, executable, "image", "exists", run.Image).Run() != nil {
 		return 1, missingImage{EnginePodman, run.Image}
 	}
+	run = withinControllers(run, podmanControllers(ctx, executable))
 	args, err := PodmanArgs(executable, run)
 	if err != nil {
 		return 1, err
@@ -134,4 +137,41 @@ func RunPodman(ctx context.Context, executable string, run PodmanRun) (int, erro
 			_ = stop.Run()
 		}()
 	})
+}
+
+// podmanControllers lists the cgroup controllers podman can use, or nil when
+// it cannot tell. Rootless Podman has only those delegated to the user, which
+// clusters often limit (or, with cgroups v1, has none).
+func podmanControllers(ctx context.Context, executable string) []string {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, executable, "info", "--format",
+		"{{range .Host.CgroupControllers}}{{.}} {{end}}").Output()
+	if err != nil {
+		return nil
+	}
+	return strings.Fields(string(output))
+}
+
+// withinControllers drops the limits whose controller podman does not have,
+// which crun would refuse; the batch job's cgroup still holds the container.
+// With controllers unknown (nil) it keeps them.
+func withinControllers(run PodmanRun, controllers []string) PodmanRun {
+	if controllers == nil {
+		return run
+	}
+	var dropped []string
+	if run.CPUs > 0 && !slices.Contains(controllers, "cpu") {
+		run.CPUs = 0
+		dropped = append(dropped, "CPUs")
+	}
+	if run.Memory > 0 && !slices.Contains(controllers, "memory") {
+		run.Memory = 0
+		dropped = append(dropped, "memory")
+	}
+	if len(dropped) > 0 && run.Stderr != nil {
+		fmt.Fprintf(run.Stderr, "Podman cannot limit the %s here (the cgroup controller is not delegated to you); the container runs without that limit\n",
+			strings.Join(dropped, " or "))
+	}
+	return run
 }

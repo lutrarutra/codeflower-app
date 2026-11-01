@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -136,5 +137,19 @@ func TestEnginesEnforceTheLimits(t *testing.T) {
 	}
 	if host.NanoCPUs != 4e9 || host.Memory != 8<<30 {
 		t.Fatalf("docker is not limited: %+v", host.Resources)
+	}
+}
+
+func TestPodmanDropsTheLimitsItCannotSet(t *testing.T) {
+	var notes strings.Builder
+	run := withinControllers(PodmanRun{CPUs: 4, Memory: 8 << 30, Stderr: &notes}, []string{"memory", "pids"})
+	if run.CPUs != 0 || run.Memory != 8<<30 || !strings.Contains(notes.String(), "CPUs") {
+		t.Fatalf("got %d CPUs, %d bytes, %q", run.CPUs, run.Memory, notes.String())
+	}
+	if run = withinControllers(PodmanRun{CPUs: 4, Memory: 8 << 30}, []string{}); run.CPUs != 0 || run.Memory != 0 {
+		t.Fatal("without controllers podman cannot limit anything")
+	}
+	if run = withinControllers(PodmanRun{CPUs: 4, Memory: 8 << 30}, nil); run.CPUs != 4 || run.Memory != 8<<30 {
+		t.Fatal("unknown controllers should keep the limits")
 	}
 }
