@@ -569,8 +569,8 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 	item.appendLine(fmt.Sprintf("Starting %s with %s (%s)…", item.label, engine.Label, image))
 	if isolation != nil {
 		item.Allowlist = isolation.Allowlist
-		item.appendLine(fmt.Sprintf("Network isolated: only %s and the hosts in %s",
-			strings.Join(sandbox.ProviderHosts[request.Agent], ", "), isolation.Allowlist))
+		hosts := append(append([]string(nil), sandbox.ProviderHosts[request.Agent]...), sandbox.MCPHosts(loaded.MCPServers())...)
+		item.appendLine(fmt.Sprintf("Network isolated: only %s and the hosts in %s", strings.Join(hosts, ", "), isolation.Allowlist))
 	}
 	s.mu.Lock()
 	s.workers[item.ID] = item
@@ -588,7 +588,7 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			code, err = sandbox.Worker{
 				Agent: request.Agent, Engine: engine, Image: image, State: state, Binds: binds,
-				Isolation: isolation, APIKey: apiKey, Images: images, Stdout: item, Stderr: item,
+				Isolation: isolation, APIKey: apiKey, Images: images, MCPServers: loaded.MCPServers(), Stdout: item, Stderr: item,
 			}.Run(ctx, func(connection sandbox.Connection) {
 				item.mu.Lock()
 				item.url = connection.URL

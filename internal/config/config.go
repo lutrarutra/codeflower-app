@@ -112,6 +112,8 @@ type Config struct {
 	Images         Images           `yaml:"images"`
 	Client         Client           `yaml:"client"`
 	Tunnel         Tunnel           `yaml:"tunnel"`
+	// MCP are the MCP servers given to the agent of every sandbox, by name.
+	MCP map[string]MCPServer `yaml:"mcp_servers"`
 
 	// Directory is the config directory; Path is the file, whether or not it exists.
 	Directory string `yaml:"-"`
@@ -167,8 +169,11 @@ func Load(directory string) (*Config, error) {
 	} else if config.Images != (Images{}) {
 		return nil, fmt.Errorf("%s: images: needs a provider (openai or google)", config.Path)
 	}
-	if config.hasInlineKey() {
-		if err := checkPrivate(config.Path); err != nil {
+	if err := config.checkMCP(); err != nil {
+		return nil, err
+	}
+	if config.hasInlineKey() || config.hasMCPSecrets() {
+		if err := checkPrivate(config.Path, "an API key or MCP server env or headers"); err != nil {
 			return nil, err
 		}
 	}
@@ -192,8 +197,9 @@ func (c *Config) hasInlineKey() bool {
 	return false
 }
 
-// checkPrivate refuses a file other users can read; Windows has no such mode.
-func checkPrivate(path string) error {
+// checkPrivate refuses a file holding secrets (what) that other users can
+// read; Windows has no such mode.
+func checkPrivate(path, what string) error {
 	if runtime.GOOS == "windows" {
 		return nil
 	}
@@ -202,7 +208,7 @@ func checkPrivate(path string) error {
 		return err
 	}
 	if info.Mode().Perm()&0o077 != 0 {
-		return fmt.Errorf("%s holds an API key but can be read by other users: run chmod 600 %s", path, path)
+		return fmt.Errorf("%s holds %s but can be read by other users: run chmod 600 %s", path, what, path)
 	}
 	return nil
 }
@@ -302,7 +308,7 @@ func (c *Config) resolveKey(section, inline, variable, file string) (string, err
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(c.Directory, path)
 		}
-		if err := checkPrivate(path); err != nil {
+		if err := checkPrivate(path, "an API key"); err != nil {
 			return "", err
 		}
 		data, err := os.ReadFile(path)

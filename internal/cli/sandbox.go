@@ -242,8 +242,10 @@ type preparedSandbox struct {
 	// apiKey is the agent's key from the config, if any.
 	apiKey string
 	// images is the image model from the config, if any.
-	images    *config.ImageGeneration
-	resources sandbox.Resources
+	images *config.ImageGeneration
+	// mcpServers are the config's MCP servers.
+	mcpServers []config.MCPServer
+	resources  sandbox.Resources
 }
 
 // prepare mounts the folders, makes sure the image is there and prepares the
@@ -298,13 +300,15 @@ func (options sandboxOptions) prepareWith(ctx context.Context, engine sandbox.En
 		isolation = &sandbox.Isolation{Allowlist: path}
 	}
 
+	mcpServers := options.userConfig.MCPServers()
 	fmt.Fprintf(os.Stderr, "Starting %s for %s with %s (%s)\n", what, sandbox.AgentLabel(options.agent), engine.Label, image)
 	fmt.Fprintf(os.Stderr, "  project  %s\n", state)
 	if isolation != nil {
-		hosts := sandbox.ProviderHosts[options.agent]
+		hosts := append([]string(nil), sandbox.ProviderHosts[options.agent]...)
 		if images != nil {
-			hosts = append(append([]string(nil), hosts...), config.ImageProviders[images.Provider])
+			hosts = append(hosts, config.ImageProviders[images.Provider])
 		}
+		hosts = append(hosts, sandbox.MCPHosts(mcpServers)...)
 		fmt.Fprintf(os.Stderr, "  network  isolated: only %s and the hosts in %s\n",
 			strings.Join(hosts, ", "), isolation.Allowlist)
 	}
@@ -327,8 +331,15 @@ func (options sandboxOptions) prepareWith(ctx context.Context, engine sandbox.En
 	if images != nil {
 		fmt.Fprintf(os.Stderr, "  images   %s, from the config, for generating icons\n", images.Provider)
 	}
+	if len(mcpServers) > 0 {
+		names := make([]string, len(mcpServers))
+		for index, server := range mcpServers {
+			names[index] = server.Name
+		}
+		fmt.Fprintf(os.Stderr, "  mcp      %s, from the config\n", strings.Join(names, ", "))
+	}
 	return preparedSandbox{engine: engine, image: image, state: state, binds: binds, isolation: isolation, apiKey: apiKey,
-		images: images, resources: options.resources}, nil
+		images: images, mcpServers: mcpServers, resources: options.resources}, nil
 }
 
 // withIcons adds the icon gallery's mount, unless it is off or already there
@@ -352,15 +363,16 @@ func withIcons(binds []sandbox.Bind, folder string) ([]sandbox.Bind, error) {
 // worker is the prepared sandbox as a worker for agent.
 func (p preparedSandbox) worker(agent string) sandbox.Worker {
 	return sandbox.Worker{
-		Agent:     agent,
-		Engine:    p.engine,
-		Image:     p.image,
-		State:     p.state,
-		Binds:     p.binds,
-		Isolation: p.isolation,
-		APIKey:    p.apiKey,
-		Images:    p.images,
-		Resources: p.resources,
+		Agent:      agent,
+		Engine:     p.engine,
+		Image:      p.image,
+		State:      p.state,
+		Binds:      p.binds,
+		Isolation:  p.isolation,
+		APIKey:     p.apiKey,
+		Images:     p.images,
+		MCPServers: p.mcpServers,
+		Resources:  p.resources,
 	}
 }
 

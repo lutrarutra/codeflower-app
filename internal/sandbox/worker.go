@@ -91,6 +91,9 @@ type Worker struct {
 	// Images, when set, lets codeflower-sketch generate icons: the key is
 	// given in a private file for the worker's lifetime.
 	Images *config.ImageGeneration
+	// MCPServers from the config are given to the agent in every session; an
+	// isolated sandbox reaches the hosts of those at a URL.
+	MCPServers []config.MCPServer
 	// Task, when set, is the id of a task in the project's tasks folder: the
 	// agent works on its attempt TaskAttempt by itself, and nothing listens
 	// for VS Code.
@@ -246,6 +249,9 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	if w.APIKey != "" {
 		values[APIKeyVariable] = w.APIKey
 	}
+	if len(w.MCPServers) > 0 {
+		values[MCPServersVariable] = MCPServersJSON(w.MCPServers)
+	}
 	for _, bind := range w.Binds {
 		if bind.Target == IconsRoot {
 			values["CODEFLOWER_ICONS"] = IconsRoot
@@ -334,13 +340,13 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 }
 
 // providerHosts are the hosts an isolated sandbox always reaches: the agent's
-// service, and the image model's when one is configured.
+// service, the image model's when one is configured, and the MCP servers'.
 func (w Worker) providerHosts() []string {
 	hosts := append([]string(nil), ProviderHosts[w.Agent]...)
 	if w.Images != nil {
 		hosts = append(hosts, config.ImageProviders[w.Images.Provider])
 	}
-	return hosts
+	return append(hosts, MCPHosts(w.MCPServers)...)
 }
 
 // writeImageKey puts the image model's key in the project's run folder, where

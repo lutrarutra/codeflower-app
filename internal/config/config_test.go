@@ -183,3 +183,56 @@ func TestImageGeneration(t *testing.T) {
 		}
 	}
 }
+
+func TestMCPServers(t *testing.T) {
+	directory := t.TempDir()
+	write(t, directory, `mcp_servers:
+  docs: {url: "https://mcp.example.org/mcp"}
+  files: {command: files-mcp, args: [--root, /workspace]}
+`, 0o644)
+	loaded, err := Load(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	servers := loaded.MCPServers()
+	if len(servers) != 2 || servers[0].Name != "docs" || servers[0].Host() != "mcp.example.org" ||
+		servers[1].Name != "files" || servers[1].Host() != "" || len(servers[1].Args) != 2 {
+		t.Fatalf("got %+v", servers)
+	}
+
+	for content, want := range map[string]string{
+		"mcp_servers:\n  has space: {command: x}\n":                   "names are 1 to 32",
+		"mcp_servers:\n  a: {}\n":                                     "either a command or a url",
+		"mcp_servers:\n  a: {command: x, url: https://x}\n":           "either a command or a url",
+		"mcp_servers:\n  a: {command: x, transport: sse}\n":           "for a url",
+		"mcp_servers:\n  a: {url: https://x, args: [y]}\n":            "for a command",
+		"mcp_servers:\n  a: {url: https://x, transport: websocket}\n": "http or sse",
+		"mcp_servers:\n  a: {url: ftp://x}\n":                         "http or https",
+		"mcp_servers:\n  a: {command: x, cwd: /tmp}\n":                "field cwd not found",
+	} {
+		write(t, directory, content, 0o600)
+		if _, err := Load(directory); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: got %v, want %q", content, err, want)
+		}
+	}
+}
+
+func TestMCPSecretsNeedPrivateFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no file modes")
+	}
+	directory := t.TempDir()
+	write(t, directory, "mcp_servers:\n  docs: {url: \"https://x\", headers: {Authorization: Bearer t}}\n", 0o644)
+	if err := os.Chmod(filepath.Join(directory, FileName), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(directory); err == nil || !strings.Contains(err.Error(), "MCP server env or headers") {
+		t.Fatalf("got %v", err)
+	}
+	if err := os.Chmod(filepath.Join(directory, FileName), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(directory); err != nil {
+		t.Fatal(err)
+	}
+}
