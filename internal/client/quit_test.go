@@ -174,7 +174,7 @@ func TestQuittingWrapsUpTheChatsInItsOwnSandboxesFirst(t *testing.T) {
 func listViews(t *testing.T, httpServer *httptest.Server) map[string]string {
 	t.Helper()
 	request, _ := http.NewRequest("GET", httpServer.URL+"/api/workers", nil)
-	request.AddCookie(&http.Cookie{Name: cookieName, Value: "secret-key"})
+	request.Header.Set("Authorization", "Bearer secret-key")
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
@@ -296,7 +296,9 @@ func TestCtrlCWrapsUpAndAgainStopsNow(t *testing.T) {
 	}
 }
 
-func TestTheKeyRedirectKeepsTheRestOfTheQuery(t *testing.T) {
+// The page takes the key out of its address itself, keeping the rest of the
+// query (quit=1 from the tray): the client serves it as it is.
+func TestTheKeyLinkServesThePageWithItsQuery(t *testing.T) {
 	_, httpServer := testServer(t)
 	client := &http.Client{CheckRedirect: noRedirects}
 	response, err := client.Get(httpServer.URL + "/?key=secret-key&quit=1")
@@ -304,7 +306,7 @@ func TestTheKeyRedirectKeepsTheRestOfTheQuery(t *testing.T) {
 		t.Fatal(err)
 	}
 	response.Body.Close()
-	if location := response.Header.Get("Location"); location != "/?quit=1" {
-		t.Fatalf("location %q", location)
+	if response.StatusCode != http.StatusOK || response.Header.Get("Location") != "" {
+		t.Fatalf("status %d, location %q", response.StatusCode, response.Header.Get("Location"))
 	}
 }

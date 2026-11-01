@@ -43,33 +43,55 @@ func noRedirects(_ *http.Request, _ []*http.Request) error { return http.ErrUseL
 func TestOnlyTheOpeningBrowserMayUseTheApp(t *testing.T) {
 	_, server := testServer(t)
 	client := &http.Client{CheckRedirect: noRedirects}
-
-	for _, path := range []string{"/api/system", "/", "/?key=wrong"} {
-		response, err := client.Get(server.URL + path)
+	get := func(path string, header http.Header) int {
+		t.Helper()
+		request, _ := http.NewRequest("GET", server.URL+path, nil)
+		for name, values := range header {
+			request.Header[name] = values
+		}
+		response, err := client.Do(request)
 		if err != nil {
 			t.Fatal(err)
 		}
 		response.Body.Close()
-		if response.StatusCode != http.StatusForbidden {
-			t.Errorf("%s without the secret: %d", path, response.StatusCode)
+		return response.StatusCode
+	}
+	bearer := http.Header{"Authorization": {"Bearer secret-key"}}
+
+	// The API needs the secret as a bearer token; neither nothing, another
+	// secret nor a cookie (which browsers send to every port) will do.
+	for name, header := range map[string]http.Header{
+		"nothing":        nil,
+		"another secret": {"Authorization": {"Bearer wrong"}},
+		"a cookie":       {"Cookie": {"codeflower-app=secret-key"}},
+	} {
+		if status := get("/api/workers", header); status != http.StatusForbidden {
+			t.Errorf("with %s: %d", name, status)
 		}
 	}
+	if status := get("/api/workers", bearer); status != http.StatusOK {
+		t.Fatalf("with the secret: %d", status)
+	}
 
-	// The secret becomes a strict, HTTP-only cookie.
-	response, err := client.Get(server.URL + "/?key=secret-key")
+	// The page itself holds nothing: it loads without the secret, and sets no cookie.
+	request, _ := http.NewRequest("GET", server.URL+"/?key=secret-key", nil)
+	response, err := client.Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	response.Body.Close()
-	cookies := response.Cookies()
-	if response.StatusCode != http.StatusSeeOther || len(cookies) != 1 || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteStrictMode {
-		t.Fatalf("status %d, cookies %+v", response.StatusCode, cookies)
+	if response.StatusCode == http.StatusForbidden || len(response.Cookies()) != 0 {
+		t.Fatalf("the page: status %d, cookies %v", response.StatusCode, response.Cookies())
+	}
+	// A link with another secret says so.
+	if status := get("/?key=wrong", nil); status != http.StatusForbidden {
+		t.Errorf("a wrong link: %d", status)
 	}
 
-	// Another host name (DNS rebinding) is refused even with the cookie.
-	request, _ := http.NewRequest("GET", server.URL+"/api/workers", nil)
+	// Another host name (DNS rebinding) is refused even with the secret.
+	request, _ = http.NewRequest("GET", server.URL+"/api/workers", nil)
 	request.Host = "attacker.example"
-	request.AddCookie(cookies[0])
+	request.Header.Set("Authorization", "Bearer secret-key")
 	if response, _ := client.Do(request); response.StatusCode != http.StatusForbidden {
 		t.Fatalf("foreign host: %d", response.StatusCode)
 	}
@@ -77,15 +99,47 @@ func TestOnlyTheOpeningBrowserMayUseTheApp(t *testing.T) {
 	// Cross-site form posts cannot send JSON.
 	request, _ = http.NewRequest("POST", server.URL+"/api/quit", strings.NewReader("x=1"))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	request.AddCookie(cookies[0])
+	request.Header.Set("Authorization", "Bearer secret-key")
 	if response, _ := client.Do(request); response.StatusCode != http.StatusUnsupportedMediaType {
 		t.Fatalf("form post: %d", response.StatusCode)
 	}
+}
 
-	request, _ = http.NewRequest("GET", server.URL+"/api/workers", nil)
-	request.AddCookie(cookies[0])
-	if response, _ := client.Do(request); response.StatusCode != http.StatusOK {
-		t.Fatalf("with the cookie: %d", response.StatusCode)
+// ticketFor asks the client for a chat's WebSocket ticket, as the page does.
+func ticketFor(t *testing.T, server *httptest.Server) string {
+	t.Helper()
+	response, data := authorized(t, server, "POST", "/api/ticket", "{}")
+	ticket, _ := data["ticket"].(string)
+	if response.StatusCode != http.StatusOK || ticket == "" {
+		t.Fatalf("ticket: status %d, %v", response.StatusCode, data)
+	}
+	return ticket
+}
+
+func TestTicketsOpenOneChatOnce(t *testing.T) {
+	server, httpServer := testServer(t)
+	ticket := ticketFor(t, httpServer)
+	path := "/api/workers/x/acp?ticket=" + ticket
+	valid := func() bool {
+		request := httptest.NewRequest("GET", path, nil)
+		return server.validTicket(request)
+	}
+	if !valid() {
+		t.Fatal("a new ticket was refused")
+	}
+	if valid() {
+		t.Fatal("a ticket worked twice")
+	}
+	// Only for chats, and only until it expires.
+	ticket = ticketFor(t, httpServer)
+	if server.validTicket(httptest.NewRequest("GET", "/api/workers?ticket="+ticket, nil)) {
+		t.Fatal("a ticket opened another API")
+	}
+	server.ticketsMu.Lock()
+	server.tickets[ticket] = time.Now().Add(-time.Second)
+	server.ticketsMu.Unlock()
+	if server.validTicket(httptest.NewRequest("GET", "/api/workers/x/acp?ticket="+ticket, nil)) {
+		t.Fatal("an expired ticket worked")
 	}
 }
 
@@ -95,7 +149,7 @@ func authorized(t *testing.T, server *httptest.Server, method, path, body string
 	if body != "" {
 		request.Header.Set("Content-Type", "application/json")
 	}
-	request.AddCookie(&http.Cookie{Name: cookieName, Value: "secret-key"})
+	request.Header.Set("Authorization", "Bearer secret-key")
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)

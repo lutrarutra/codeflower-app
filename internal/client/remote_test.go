@@ -83,23 +83,27 @@ func fakeBridge(t *testing.T, token string) (address string, headers chan http.H
 	return "codeflower://" + strings.TrimPrefix(bridge.URL, "http://") + "?token=" + token, headers
 }
 
-// openRelay opens a page's WebSocket to the client, as a browser would.
-func openRelay(t *testing.T, server *httptest.Server, id, origin string, withCookie bool) (net.Conn, *bufio.Reader, *http.Response) {
+// openRelay opens a page's WebSocket to the client, as a browser would: with
+// a ticket from POST /api/ticket.
+func openRelay(t *testing.T, server *httptest.Server, id, origin string, withTicket bool) (net.Conn, *bufio.Reader, *http.Response) {
 	t.Helper()
+	query := ""
+	if withTicket {
+		query = "?ticket=" + ticketFor(t, server)
+	}
 	host := strings.TrimPrefix(server.URL, "http://")
 	conn, err := net.Dial("tcp", host)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { conn.Close() })
-	request := "GET /api/workers/" + id + "/acp HTTP/1.1\r\nHost: " + host + "\r\n" +
+	request := "GET /api/workers/" + id + "/acp" + query + " HTTP/1.1\r\nHost: " + host + "\r\n" +
 		"Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
 	if origin != "" {
 		request += "Origin: " + origin + "\r\n"
 	}
-	if withCookie {
-		request += "Cookie: " + cookieName + "=secret-key\r\n"
-	}
+	// The cookie of an older client admits nothing.
+	request += "Cookie: codeflower-app=secret-key\r\n"
 	conn.Write([]byte(request + "\r\n"))
 	reader := bufio.NewReader(conn)
 	response, err := http.ReadResponse(reader, nil)
@@ -112,7 +116,7 @@ func openRelay(t *testing.T, server *httptest.Server, id, origin string, withCoo
 func listed(t *testing.T, server *httptest.Server) []map[string]any {
 	t.Helper()
 	request, _ := http.NewRequest("GET", server.URL+"/api/workers", nil)
-	request.AddCookie(&http.Cookie{Name: cookieName, Value: "secret-key"})
+	request.Header.Set("Authorization", "Bearer secret-key")
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
@@ -206,15 +210,15 @@ func TestTheRelayAdmitsOnlyThisClientsPages(t *testing.T) {
 
 	for name, test := range map[string]struct {
 		id, origin string
-		cookie     bool
+		ticket     bool
 		want       int
 	}{
 		"another site":   {id, "https://attacker.example", true, http.StatusForbidden},
 		"no origin":      {id, "", true, http.StatusForbidden},
-		"no cookie":      {id, origin, false, http.StatusForbidden},
+		"no ticket":      {id, origin, false, http.StatusForbidden},
 		"unknown worker": {"nope", origin, true, http.StatusNotFound},
 	} {
-		if _, _, response := openRelay(t, server, test.id, test.origin, test.cookie); response.StatusCode != test.want {
+		if _, _, response := openRelay(t, server, test.id, test.origin, test.ticket); response.StatusCode != test.want {
 			t.Errorf("%s: %d, want %d", name, response.StatusCode, test.want)
 		}
 	}
@@ -275,7 +279,7 @@ func hostStatus(t *testing.T, server *httptest.Server, host string) int {
 	t.Helper()
 	request, _ := http.NewRequest("GET", server.URL+"/api/workers", nil)
 	request.Host = host
-	request.AddCookie(&http.Cookie{Name: cookieName, Value: "secret-key"})
+	request.Header.Set("Authorization", "Bearer secret-key")
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)

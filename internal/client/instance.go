@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -35,17 +36,22 @@ func Running(configDirectory string) (string, bool) {
 	if json.Unmarshal(data, &running) != nil || running.URL == "" {
 		return "", false
 	}
-	// The client answers its secret with the cookie and a redirect to the page.
-	client := &http.Client{
-		Timeout:       2 * time.Second,
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	// A client answers its API with its secret, and refuses any other.
+	address, err := url.Parse(running.URL)
+	if err != nil {
+		return "", false
 	}
-	response, err := client.Get(running.URL)
+	request, err := http.NewRequest(http.MethodGet, (&url.URL{Scheme: address.Scheme, Host: address.Host, Path: "/api/quit"}).String(), nil)
+	if err != nil {
+		return "", false
+	}
+	request.Header.Set("Authorization", "Bearer "+address.Query().Get("key"))
+	response, err := (&http.Client{Timeout: 2 * time.Second}).Do(request)
 	if err != nil {
 		return "", false
 	}
 	response.Body.Close()
-	if response.StatusCode != http.StatusSeeOther {
+	if response.StatusCode != http.StatusOK {
 		return "", false
 	}
 	return running.URL, true

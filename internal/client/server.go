@@ -83,8 +83,6 @@ type Options struct {
 	Tunnel *TunnelOptions
 }
 
-const cookieName = "codeflower-app"
-
 // DefaultPort is where the client listens unless told otherwise. Sandboxes
 // print a link to it (http://127.0.0.1:7720/#add=codeflower://…) that adds
 // them; keep it in step with CLIENT_PORT in the bridge.
@@ -115,8 +113,11 @@ type Server struct {
 	// quit closes when the client quits and stops its sandboxes.
 	quit     chan struct{}
 	quitOnce sync.Once
-	cpu      cpuSampler
-	tunnel   tunnelControl
+	// tickets are the chats' WebSocket tickets not used yet, by expiry.
+	ticketsMu sync.Mutex
+	tickets   map[string]time.Time
+	cpu       cpuSampler
+	tunnel    tunnelControl
 }
 
 func randomSecret() string {
@@ -205,6 +206,7 @@ func (s *Server) routes() http.Handler {
 	}
 	mux.Handle("GET /", http.FileServerFS(assets))
 	mux.HandleFunc("GET /api/system", s.system)
+	mux.HandleFunc("POST /api/ticket", s.ticket)
 	mux.HandleFunc("GET /api/resources", s.resources)
 	mux.HandleFunc("GET /api/folders", s.folders)
 	mux.HandleFunc("POST /api/folders", s.createFolder)
@@ -230,9 +232,14 @@ func (s *Server) routes() http.Handler {
 	return s.guard(mux)
 }
 
-// guard admits only this user's browser: the page is opened with a secret,
-// which becomes a cookie. Other local users, and other websites (by DNS
-// rebinding or cross-site requests), cannot drive the app.
+// guard admits only this user's browser. The page is opened with a secret
+// (?key=), which the page keeps in its own storage and sends as a bearer token
+// on every API request; the chats' WebSockets, which cannot send headers, use
+// a ticket from POST /api/ticket. Not a cookie: browsers send cookies to every
+// port of a host, so any server on 127.0.0.1 (a sandbox's, another user's)
+// would receive it. Other websites (by DNS rebinding or cross-site requests)
+// cannot drive the app either. The page's own files hold nothing and need no
+// secret.
 func (s *Server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.allowedHost(r.Host) {
@@ -248,27 +255,19 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		// connect-src: the relay's WebSockets, on this origin only; frames
 		// (default-src): /frame, where interactive reports run.
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'")
-		if key := r.URL.Query().Get("key"); key != "" && r.URL.Path == "/" {
-			if subtle.ConstantTimeCompare([]byte(key), []byte(s.secret)) == 1 {
-				http.SetCookie(w, &http.Cookie{
-					Name: cookieName, Value: s.secret, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode,
-				})
-				// The rest of the query stays, e.g. quit=1 from the tray.
-				query := r.URL.Query()
-				query.Del("key")
-				target := "/"
-				if len(query) > 0 {
-					target += "?" + query.Encode()
-				}
-				http.Redirect(w, r, target, http.StatusSeeOther)
+		if !strings.HasPrefix(r.URL.Path, "/api/") {
+			// A link with another client's (or an old) secret says so at once.
+			if key := r.URL.Query().Get("key"); key != "" && !s.validSecret(key) {
+				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+				w.WriteHeader(http.StatusForbidden)
+				fmt.Fprintln(w, notSignedIn)
 				return
 			}
+			next.ServeHTTP(w, r)
+			return
 		}
-		cookie, err := r.Cookie(cookieName)
-		if err != nil || subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(s.secret)) != 1 {
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			w.WriteHeader(http.StatusForbidden)
-			fmt.Fprintln(w, "Open the code flower app with the address it printed, or run \"codeflower client\" again, then open this link again.")
+		if !s.validSecret(bearerToken(r)) && !s.validTicket(r) {
+			writeError(w, http.StatusForbidden, errors.New(notSignedIn))
 			return
 		}
 		if r.Method != http.MethodGet && r.Header.Get("Content-Type") != "application/json" {
@@ -280,6 +279,51 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		s.mu.Unlock()
 		next.ServeHTTP(w, r)
 	})
+}
+
+const notSignedIn = `Open the code flower app with the address it printed, or run "codeflower client" again, then open this link again.`
+
+func (s *Server) validSecret(candidate string) bool {
+	return candidate != "" && subtle.ConstantTimeCompare([]byte(candidate), []byte(s.secret)) == 1
+}
+
+func bearerToken(r *http.Request) string {
+	token, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	return token
+}
+
+// ticketLifetime is how long a chat's WebSocket ticket works; it works once.
+const ticketLifetime = 30 * time.Second
+
+// ticket gives the page a one-time ticket for a chat's WebSocket.
+func (s *Server) ticket(w http.ResponseWriter, _ *http.Request) {
+	ticket := randomSecret()
+	s.ticketsMu.Lock()
+	now := time.Now()
+	for other, expires := range s.tickets {
+		if now.After(expires) {
+			delete(s.tickets, other)
+		}
+	}
+	if s.tickets == nil {
+		s.tickets = map[string]time.Time{}
+	}
+	s.tickets[ticket] = now.Add(ticketLifetime)
+	s.ticketsMu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]string{"ticket": ticket})
+}
+
+// validTicket uses up the ticket of a chat's WebSocket, if it has a valid one.
+func (s *Server) validTicket(r *http.Request) bool {
+	ticket := r.URL.Query().Get("ticket")
+	if ticket == "" || r.Method != http.MethodGet || !strings.HasSuffix(r.URL.Path, connectionPath) {
+		return false
+	}
+	s.ticketsMu.Lock()
+	defer s.ticketsMu.Unlock()
+	expires, ok := s.tickets[ticket]
+	delete(s.tickets, ticket)
+	return ok && time.Now().Before(expires)
 }
 
 // allowedHost guards against DNS rebinding: another website's name never

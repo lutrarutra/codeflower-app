@@ -244,7 +244,7 @@ func RunningWorkers(configDirectory string) ([]RemoteWorker, error) {
 		return nil, err
 	}
 	request, _ := http.NewRequest(http.MethodGet, (&url.URL{Scheme: parsed.Scheme, Host: parsed.Host, Path: "/api/workers"}).String(), nil)
-	request.AddCookie(&http.Cookie{Name: cookieName, Value: parsed.Query().Get("key")})
+	request.Header.Set("Authorization", "Bearer "+parsed.Query().Get("key"))
 	response, err := (&http.Client{Timeout: 5 * time.Second}).Do(request)
 	if err != nil {
 		return nil, err
