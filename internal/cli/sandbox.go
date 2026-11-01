@@ -272,15 +272,16 @@ func (options sandboxOptions) prepareWith(ctx context.Context, engine sandbox.En
 	if err != nil {
 		return preparedSandbox{}, err
 	}
-	image, err := sandbox.ResolveImage(options.image, engine.Name)
-	if err != nil {
-		return preparedSandbox{}, err
-	}
 	// Only the published image is downloaded: another one is the user's to provide.
 	if sandbox.IsPublished(options.image) {
 		if err := sandbox.EnsureImage(ctx, engine, options.image, os.Stderr); err != nil {
 			return preparedSandbox{}, err
 		}
+	}
+	// After the download, which names an Apptainer file after its release.
+	image, err := sandbox.ResolveImage(options.image, engine.Name)
+	if err != nil {
+		return preparedSandbox{}, err
 	}
 	state, err := sandbox.PrepareState(options.stateDirectory())
 	if err != nil {
