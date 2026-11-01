@@ -16,7 +16,7 @@ import (
 
 // bootstrapHashes are the SHA-256 hashes of the browser code the tunnel serves
 // (ui's tunnel build, `npm run build:tunnel`, at the version this app pins),
-// by path. `make -C app tunnel-hashes` updates the file.
+// by path: a copy of the tunnel's ui-hashes.json, which its `npm run vendor-ui` writes.
 //
 //go:embed bootstrap-hashes.json
 var bootstrapHashes []byte
