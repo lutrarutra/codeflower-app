@@ -13,7 +13,7 @@ func TestInteractiveChecksTheNetworkFlags(t *testing.T) {
 		},
 	}
 	for message, args := range cases {
-		command := interactiveCommand()
+		command := sandboxCommand()
 		command.SetArgs(append([]string{"--state", t.TempDir()}, args...))
 		if err := command.Execute(); err == nil || !strings.Contains(err.Error(), message) {
 			t.Errorf("%v: got %v, want %q", args, err, message)

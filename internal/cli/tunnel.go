@@ -38,8 +38,8 @@ in config.yaml).
 Pairing signs this computer in when needed ("codeflower tunnel login") and
 starts code flower client in the background, which keeps the tunnel connected
 and lists every sandbox on this computer: those it starts, and those
-"codeflower run" and "interactive" start in a terminal (they start the client
-themselves while this computer is signed in and remote access is on).
+"codeflower run" and "codeflower sandbox" start in a terminal (they start the
+client themselves while this computer is signed in and remote access is on).
 
 Everything between a paired browser and this computer is end-to-end encrypted;
 the tunnel cannot read it. Signing in to the tunnel alone does not give access:
@@ -209,12 +209,12 @@ the page shows with the one printed here.
 It does what pairing needs first: signs this computer in to the tunnel, turns
 remote access on, and starts code flower client in the background unless it
 runs, since the client answers the pairing. A client it started quits once the
-browser paired: "codeflower run" and "interactive" start one themselves while
-their sandbox runs, and on a cluster that shares the config directory between
-nodes, a client left running would hold the tunnel (only one computer connects
-it at a time). --keep-running keeps it, so paired browsers reach this computer
-until you quit it ("codeflower client" opens it here) or sign out; so does
---no-wait, as the link needs it.
+browser paired: "codeflower run" and "codeflower sandbox" start one themselves
+while their sandbox runs, and on a cluster that shares the config directory
+between nodes, a client left running would hold the tunnel (only one computer
+connects it at a time). --keep-running keeps it, so paired browsers reach this
+computer until you quit it ("codeflower client" opens it here) or sign out; so
+does --no-wait, as the link needs it.
 
 With "tunnel: {hardened: true}" name the sandboxes (by name or ID, as
 "codeflower tunnel status" lists them) the browser may use; it sees no others.`,
@@ -324,8 +324,8 @@ Open it here with "codeflower client".`)
 				}
 				fmt.Println(`
 Stopped the code flower client that pairing started. The page shows this
-computer's sandboxes while "codeflower run" or "interactive" runs one here (they
-start the client themselves), or while "codeflower client" runs.`)
+computer's sandboxes while "codeflower run" or "codeflower sandbox" runs one
+here (they start the client themselves), or while "codeflower client" runs.`)
 			}
 			return nil
 		},

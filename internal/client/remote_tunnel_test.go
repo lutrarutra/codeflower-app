@@ -159,7 +159,7 @@ func TestRemoteChatsReachOnlyAllowedWorkersWithoutAnOrigin(t *testing.T) {
 func TestSandboxesRunWithNoTunnelStayOffTheTunnel(t *testing.T) {
 	server, local := testServer(t)
 	shared := connectTo(t, local, mustBridge(t, "token-one"))["id"].(string)
-	// `codeflower interactive --no-tunnel` in a terminal.
+	// `codeflower sandbox --no-tunnel` in a terminal.
 	server.syncLocal([]sandbox.Running{{ID: "0123456789ab", Kind: "worker", PID: os.Getpid() + 100000, Agent: "claude", NoTunnel: true}})
 	hidden := LocalID("0123456789ab")
 	if len(listed(t, local)) != 2 {

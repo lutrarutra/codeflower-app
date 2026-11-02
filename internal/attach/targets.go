@@ -93,7 +93,7 @@ func ResolveTarget(argument string, targets []Target) (Target, error) {
 	if argument == "" {
 		switch len(targets) {
 		case 0:
-			return Target{}, errors.New("no sandbox runs on this computer: start one with `codeflower interactive`, or pass its codeflower:// line")
+			return Target{}, errors.New("no sandbox runs on this computer: start one with `codeflower sandbox`, or pass its codeflower:// line")
 		case 1:
 			return targets[0], nil
 		}

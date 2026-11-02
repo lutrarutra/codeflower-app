@@ -190,7 +190,7 @@ call the quit off. Sandboxes running elsewhere keep running.`,
 	// Set when the binary was double-clicked rather than run in a terminal.
 	command.Flags().BoolVar(&desktop, "desktop", false, "")
 	_ = command.Flags().MarkHidden("desktop")
-	// Set when "codeflower tunnel pair", "run" or "interactive" start the
+	// Set when "codeflower tunnel pair", "run" or "sandbox" start the
 	// client for the tunnel: no window, the log in client.log, and it quits
 	// once this computer is signed out of the tunnel.
 	command.Flags().BoolVar(&background, "background", false, "")

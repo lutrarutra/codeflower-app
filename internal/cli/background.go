@@ -56,7 +56,7 @@ func ensureClient(directory string) (bool, error) {
 
 // tunnelLinks starts the client in the background when this computer is
 // signed in to the tunnel with remote access on, so paired browsers reach the
-// sandbox that `run` or `interactive` starts. It returns what to call once the
+// sandbox that `run` or `sandbox` starts. It returns what to call once the
 // sandbox is ready, which prints where to open it: through the tunnel (with a
 // QR code for phones), on this computer, and in VS Code. It returns nil when
 // the tunnel is not used. With the config directory shared between computers

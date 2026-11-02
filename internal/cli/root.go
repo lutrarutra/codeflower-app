@@ -134,7 +134,7 @@ func NewRootCommand() *cobra.Command {
 		Short: "Start code flower sandboxes for Claude Code, Codex, DeepSeek Harness, or OpenCode",
 		Long: `Start code flower sandboxes for Claude Code, Codex, DeepSeek Harness, or OpenCode.
 
-Run "codeflower interactive" for a sandbox to work with from VS Code,
+Run "codeflower sandbox" for a sandbox to work with from VS Code,
 "codeflower run TASK" to start an initial task in a session you can continue
 there, or "codeflower task" to let the agent work on a task by itself.
 
@@ -158,7 +158,7 @@ sandbox with a few clicks, or connects to one running elsewhere. Run
 		}
 		return u.run(command.Context())
 	}
-	root.AddCommand(interactiveCommand(), runCommand(), taskCommand(), tuiCommand(), attachCommand(), chatsCommand(), terminalsCommand(),
+	root.AddCommand(sandboxCommand(), runCommand(), taskCommand(), tuiCommand(), attachCommand(), chatsCommand(), terminalsCommand(),
 		pluginsCommand(), pullCommand(), checkCommand(), clientCommand(), tunnelCommand(), updateCommand())
 	return root
 }

@@ -91,7 +91,7 @@ when redirected; choose raw or attached to override it.
 If the agent offers terminal sign-in and the task does not read standard
 input, "codeflower task" signs in when needed in an interactive terminal,
 then continues the task. Batch runs and tasks read from standard input still
-need sign-in beforehand; use "codeflower interactive" once and sign in there.
+need sign-in beforehand; use "codeflower sandbox" once and sign in there.
 The run is a session of the project, so VS Code lists it afterwards and can
 continue it.
 

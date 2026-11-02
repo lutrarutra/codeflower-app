@@ -11,7 +11,7 @@ import (
 )
 
 // watchLocal lists the sandboxes started on this computer outside this
-// client (`codeflower run`, `interactive` or `task` in a terminal, or another
+// client (`codeflower run`, `sandbox` or `task` in a terminal, or another
 // client) until ctx ends, so they need no pasted line. They come and go with
 // their runs and are never saved.
 func (s *Server) watchLocal(ctx context.Context) {

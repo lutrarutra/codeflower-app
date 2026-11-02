@@ -10,7 +10,7 @@ import (
 
 // Running is a sandbox that runs on this computer, as its run registers it
 // for the app to find: whoever started it (the app, `codeflower run`,
-// `interactive` or `task` in a terminal) and with whichever --config.
+// `sandbox` or `task` in a terminal) and with whichever --config.
 type Running struct {
 	ID string `json:"id"`
 	// ConnectionFile is where the bridge writes its connection line; a task

@@ -28,14 +28,14 @@ the terminal UI does (quit it, e.g. /exit or Ctrl+C there), and nothing else
 runs: no worker for VS Code or the app's page, no port, nothing to connect to.
 
 Folders, network isolation, skills, the config's MCP servers and plugins, and
-the project work as for "codeflower interactive", and the agent signs in in its
+the project work as for "codeflower sandbox", and the agent signs in in its
 own terminal UI, into the project (so a sandbox of the same project is
 signed in too). The chats are the agent's own, kept in the project: open the
 last one again with --continue, or choose one with --resume. They are not in
 the chat list of the app's page or VS Code.
 
 Files the agent shows (codeflower-show) have no page to open in here; to see
-them in the app, use "codeflower interactive" and "codeflower attach" instead.`,
+them in the app, use "codeflower sandbox" and "codeflower attach" instead.`,
 		Example: `  codeflower tui --agent claude --input ~/data/study42
   codeflower tui --agent codex --project study42 --continue
   codeflower tui --agent opencode --project study42 --resume
@@ -46,7 +46,7 @@ them in the app, use "codeflower interactive" and "codeflower attach" instead.`,
 				return err
 			}
 			if options.agent == "dsh" {
-				return errors.New("DeepSeek Harness has no terminal UI: use `codeflower interactive` and its chat")
+				return errors.New("DeepSeek Harness has no terminal UI: use `codeflower sandbox` and its chat")
 			}
 			if continueLast && resume != "" {
 				return errors.New("--continue opens the last chat, --resume another: use one")

@@ -55,10 +55,10 @@ Then:
 ```sh
 codeflower check     # can this machine run sandboxes? how to set it up if not
 codeflower client    # the window: start sandboxes, connect to them, chat
-codeflower interactive --agent claude --input ~/data/study42 --output ~/results/study42
+codeflower sandbox --agent claude --input ~/data/study42 --output ~/results/study42
 ```
 
-The sandbox needs Docker, Podman or Apptainer. `interactive` prints a `codeflower://…` line: paste it
+The sandbox needs Docker, Podman or Apptainer. `codeflower sandbox` prints a `codeflower://…` line: paste it
 into VS Code ("code flower: Connect to worker"), or open the printed link while `codeflower client`
 runs. After connecting, VS Code or the page offers the agent's [sign-in](#sign-in).
 
@@ -67,7 +67,7 @@ runs. After connecting, VS Code or the page offers the agent's [sign-in](#sign-i
 | Command | |
 | --- | --- |
 | [`client`](#codeflower-client) | the window: start sandboxes here, connect to sandboxes elsewhere, chat |
-| [`interactive`](#codeflower-interactive) | start a sandbox to work with from VS Code or the browser |
+| [`sandbox`](#codeflower-sandbox) | start a sandbox to work with from VS Code or the browser |
 | [`run`](#codeflower-run) | the same, with a first task already sent to a new chat |
 | [`task`](#codeflower-task) | let the agent work on a task by itself, then stop (batch jobs) |
 | [`pull`](#codeflower-pull) | download or update the sandbox image |
@@ -111,13 +111,13 @@ from the list, which does not stop it.
   Windows. A click opens the sandbox in VS Code. The tray icon needs a system tray (Windows, macOS,
   KDE, XFCE, Cinnamon, or GNOME with the AppIndicator extension).
 
-### `codeflower interactive`
+### `codeflower sandbox`
 
 Starts a sandbox for a project and keeps it running until Ctrl+C or SIGTERM.
 
 ```sh
-codeflower interactive --agent claude --input ~/data/study42 --output ~/results/study42
-codeflower interactive --agent codex --project study42 --input ~/data/rna --code ~/src/mypkg --isolate-network
+codeflower sandbox --agent claude --input ~/data/study42 --output ~/results/study42
+codeflower sandbox --agent codex --project study42 --input ~/data/rna --code ~/src/mypkg --isolate-network
 ```
 
 | Flag | |
@@ -150,7 +150,7 @@ codeflower run --agent claude --input ~/data/study42 --output ~/results/study42 
   "Analyse the data and generate a report"
 ```
 
-Like `interactive`, with the same flags, but sends the task (the argument, `-` for standard input, or
+Like `codeflower sandbox`, with the same flags, but sends the task (the argument, `-` for standard input, or
 `--prompt FILE`) as the first prompt of a new chat. Connect from VS Code or the page to follow it,
 answer its questions and continue the chat. If the project is not signed in yet, the task waits until
 you connect and sign in.
@@ -166,7 +166,7 @@ sbatch --time=8:00:00 --signal=B:TERM@120 --wrap "codeflower task --agent claude
   --input /data/study42 --output ~/results/study42 --timeout 7h50m --prompt task.md"
 ```
 
-It takes the flags of `interactive` (without `--server` and the listening ones); `--output` is
+It takes the flags of `codeflower sandbox` (without `--server` and the listening ones); `--output` is
 required and the first one gets the results. The agent gets the task as its goal and is told nobody
 will answer: it decides open questions itself and records them as assumptions. It builds a storyteller
 report as it works, delivered as `report.html` in the output folder.
@@ -186,7 +186,7 @@ Before it stops, when the rounds run out or shortly before `--timeout`, the agen
 to bring the report up to date with what it did, found and left open. Exit status: `0` done, `2` not
 done, `3` not signed in, `130` interrupted or timed out, `1` other errors.
 
-Sign in once with `interactive` first. From an interactive terminal, `task` can start the agent's
+Sign in once with `codeflower sandbox` first. From an interactive terminal, `task` can start the agent's
 terminal sign-in itself. The run is a session of the project, so VS Code lists it afterwards.
 
 **Continuing.** The task's folder (`<project>/tasks/<id>/`) is printed when it starts, and the command
@@ -335,7 +335,7 @@ Download the image on the login node, then start the worker in a job:
 codeflower pull --engine apptainer
 sbatch --cpus-per-task=8 --mem=32G --time=8:00:00 --signal=B:TERM@120 \
   --output=$HOME/.codeflower-logs/%j.out \
-  --wrap "codeflower interactive --agent claude --project study42 --input /data/study42 --output ~/results/study42"
+  --wrap "codeflower sandbox --agent claude --project study42 --input /data/study42 --output ~/results/study42"
 ```
 
 The worker prints a link for `codeflower client` on your computer and the line for VS Code:

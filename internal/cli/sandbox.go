@@ -1,16 +1,11 @@
 package cli
 
 import (
-	"bufio"
-	"context"
+	"errors"
 	"fmt"
-	"io"
 	"os"
-	"path/filepath"
-	"slices"
-	"strconv"
-	"strings"
-	"time"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -18,389 +13,111 @@ import (
 	"codeflower-app/internal/sandbox"
 )
 
-// interactive says whether the user can answer questions on this terminal.
-func interactive() bool {
-	return isTerminal(os.Stdin)
-}
+func sandboxCommand() *cobra.Command {
+	var options sandboxOptions
+	var listenHost, advertiseHost string
+	var port, inspectPort int
+	var servePage bool
+	var noTunnel bool
 
-// askAgent lets a user who left out --agent pick one.
-func askAgent(in io.Reader, out io.Writer) (string, error) {
-	fmt.Fprintln(out, "Which agent should the sandbox run?")
-	for index, agent := range sandbox.Agents {
-		fmt.Fprintf(out, "  %d) %s (%s)\n", index+1, sandbox.AgentLabel(agent), agent)
-	}
-	fmt.Fprint(out, "Choose 1-3 [1]: ")
-	line, err := bufio.NewReader(in).ReadString('\n')
-	if err != nil && line == "" {
-		return "", fmt.Errorf("--agent is required: %s", strings.Join(sandbox.Agents, ", "))
-	}
-	line = strings.TrimSpace(line)
-	if line == "" {
-		return sandbox.Agents[0], nil
-	}
-	if number, err := strconv.Atoi(line); err == nil && number >= 1 && number <= len(sandbox.Agents) {
-		return sandbox.Agents[number-1], nil
-	}
-	if slices.Contains(sandbox.Agents, line) {
-		return line, nil
-	}
-	return "", fmt.Errorf("unknown agent %q: choose one of %s", line, strings.Join(sandbox.Agents, ", "))
-}
+	command := &cobra.Command{
+		Use:   "sandbox",
+		Short: "Start a sandbox (worker) to use from VS Code or the browser",
+		Long: `Start a sandbox for a project with one agent, to work with from VS Code.
+Each folder is mounted in a subfolder named after it: data folders read-only
+in /data/input, output folders read-write in /data/output, code folders (your
+repositories and packages, which the agent may change) read-write in
+/data/code, and skills folders read-only in /data/skills, where the agent
+loads them from.
 
-// chooseAgent asks for a missing agent on a terminal and checks it.
-func chooseAgent(agent string) (string, error) {
-	if agent == "" && interactive() {
-		chosen, err := askAgent(os.Stdin, os.Stderr)
-		if err != nil {
-			return "", err
-		}
-		agent = chosen
-	}
-	if !slices.Contains(sandbox.Agents, agent) {
-		return "", fmt.Errorf("--agent must be one of: %s", strings.Join(sandbox.Agents, ", "))
-	}
-	return agent, nil
-}
+With --isolate-network the sandbox has no network of its own: the app
+is its only way out, and lets it reach only its agent's service and the hosts
+in the allowlist file. Edit the file while the sandbox runs to allow more.
 
-// sandboxOptions are the agent, folder and network flags that interactive
-// and task share.
-type sandboxOptions struct {
-	commonOptions
-	agent          string
-	folders        sandbox.Folders
-	bindValues     []string
-	isolateNetwork bool
-	allowlist      string
-	cpus           int
-	memory         string
-	timeLimit      string
-	// resources are --cpus, --memory and --time-limit; set by check.
-	resources sandbox.Resources
+It prints a link to open in the browser while "codeflower client" runs on
+your computer, which adds the sandbox there; or, in VS Code, run "code
+flower: Connect to worker" and paste the codeflower://… line. If the agent
+is not signed in for this project yet, the page or VS Code offers its sign-in
+after connecting. Press Ctrl+C to stop.
 
-	// changed says whether the user gave a flag; set by addSandboxFlags.
-	changed func(name string) bool
-	// userConfig is the config.yaml, read by check.
-	userConfig *config.Config
-	// configSkills are the sources of the skills folders that come from the config.
-	configSkills map[string]bool
-}
+With --server the sandbox also serves its chat page on the same port and
+prints a link to it (http://HOST:PORT/?key=…), like Jupyter's: open it in any
+browser that reaches this machine, e.g. through ssh -L. Anyone with the link
+controls the agent, and plain HTTP carries the key and the chats unencrypted,
+so keep job logs private and prefer --host 127.0.0.1 with a tunnel on shared
+networks.
 
-func addSandboxFlags(command *cobra.Command, options *sandboxOptions) {
-	addCommonFlags(command, &options.commonOptions)
-	options.changed = func(name string) bool { return command.Flags().Changed(name) }
-	command.Flags().StringVar(&options.agent, "agent", os.Getenv("CODEFLOWER_AGENT"),
-		"agent the sandbox runs: claude, codex, dsh, or opencode (or set $CODEFLOWER_AGENT; asked if left out)")
-	command.Flags().StringArrayVarP(&options.folders.Inputs, "input", "i", nil,
-		"folder with your data, mounted read-only at /data/input/NAME (repeatable)")
-	command.Flags().StringArrayVarP(&options.folders.Outputs, "output", "o", nil,
-		"folder for results, created if needed and mounted read-write at /data/output/NAME (repeatable)")
-	command.Flags().StringArrayVarP(&options.folders.Code, "code", "c", nil,
-		"repository or package the agent develops, mounted read-write at /data/code/NAME (repeatable)")
-	command.Flags().StringArrayVarP(&options.folders.Skills, "skills", "s", nil,
-		"folder with a skill (a SKILL.md) or with skill folders, mounted read-only at /data/skills/NAME (repeatable)")
-	command.Flags().BoolVar(&options.isolateNetwork, "isolate-network", false,
-		"cut the sandbox off the network except for its agent's service and the hosts in the allowlist (Linux)")
-	command.Flags().StringVar(&options.allowlist, "allowlist", "",
-		"file of hosts an isolated sandbox may reach, one per line (default: PROJECT.allowed-hosts.txt next to the project)")
-	command.Flags().StringArrayVar(&options.bindValues, "bind", nil,
-		"more mounts: SOURCE[:TARGET[:ro|rw]] (repeatable; default target /data/input/NAME, read-only)")
-	command.Flags().IntVar(&options.cpus, "cpus", 0,
-		"CPUs the agent may use (default: the batch job's allocation; Docker and Podman also enforce it)")
-	command.Flags().StringVar(&options.memory, "memory", "",
-		"memory the agent may use, e.g. 32G (default: the batch job's allocation; Docker and Podman also enforce it)")
-	command.Flags().StringVar(&options.timeLimit, "time-limit", "",
-		"time the agent has, e.g. 8h or 1-12:00:00 (default: the batch job's time limit); reported, not enforced")
-}
-
-// check validates the flags, asking for a missing agent on a terminal.
-func (options *sandboxOptions) check() error {
-	if err := options.applyConfig(); err != nil {
-		return err
+To start a session with an initial task and continue it in VS Code, see
+"codeflower run". To let the agent work on a task by itself instead, see
+"codeflower task".`,
+		Example: `  codeflower sandbox --agent claude --input ~/data/study42 --output ~/results/study42
+  codeflower sandbox --agent claude --input ~/data/rna --input ~/data/atac --code ~/src/mypkg
+  codeflower sandbox --agent codex --project study42 --input /data/study42
+  codeflower sandbox --agent claude --input ~/data/study42 --skills ~/my-skills --isolate-network
+  codeflower sandbox --agent claude --image ./codeflower-sandbox.sif --state ~/cf/study42 --bind /data/ref:/reference`,
+		Args: cobra.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error {
+			if err := options.check(); err != nil {
+				return err
+			}
+			if port < 0 || port > 65535 {
+				return fmt.Errorf("--port must be between 0 and 65535")
+			}
+			if inspectPort < 0 || inspectPort > 65535 {
+				return fmt.Errorf("--inspect-port must be between 0 and 65535")
+			}
+			if options.isolateNetwork && inspectPort > 0 {
+				return fmt.Errorf("--inspect-port cannot be used with --isolate-network")
+			}
+			engine, err := options.chooseEngine(command.Context())
+			if err != nil {
+				return err
+			}
+			if inspectPort > 0 && engine.Name != sandbox.EngineDocker {
+				return fmt.Errorf("--inspect-port needs --engine docker")
+			}
+			ctx, stop := signal.NotifyContext(command.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			prepared, err := options.prepare(ctx, engine, "a code flower sandbox")
+			if err != nil {
+				return err
+			}
+			worker := prepared.worker(options.agent)
+			worker.ListenHost = listenHost
+			worker.AdvertiseHost = advertiseHost
+			worker.Port = port
+			worker.InspectPort = inspectPort
+			worker.ServePage = servePage
+			worker.NoTunnel = noTunnel
+			var ready func(sandbox.Connection)
+			if !noTunnel {
+				ready = tunnelLinks(config.Directory(options.config), os.Stderr)
+			}
+			code, err := worker.Run(ctx, ready)
+			if err != nil {
+				if errors.Is(err, sandbox.ErrNoImage) {
+					return fmt.Errorf("%w\nSee `codeflower check` for what this machine has", err)
+				}
+				return err
+			}
+			if code != 0 {
+				return exitError{code}
+			}
+			return nil
+		},
 	}
-	agent, err := chooseAgent(options.agent)
-	if err != nil {
-		return err
-	}
-	options.agent = agent
-	if err := options.validate(); err != nil {
-		return err
-	}
-	if options.image, err = imageName(options.image, options.imageTag); err != nil {
-		return err
-	}
-	if options.allowlist != "" && !options.isolateNetwork {
-		return fmt.Errorf("--allowlist needs --isolate-network")
-	}
-	return options.checkResources()
-}
-
-// checkResources reads --cpus, --memory and --time-limit.
-func (options *sandboxOptions) checkResources() error {
-	var given []string
-	if options.cpus < 0 {
-		return fmt.Errorf("--cpus must be positive")
-	}
-	if options.cpus > 0 {
-		options.resources.CPUs = options.cpus
-		given = append(given, "--cpus")
-	}
-	if options.memory != "" {
-		memory, err := sandbox.ParseMemory(options.memory)
-		if err != nil {
-			return fmt.Errorf("--memory: %w", err)
-		}
-		options.resources.Memory = memory
-		given = append(given, "--memory")
-	}
-	if options.timeLimit != "" {
-		limit, err := sandbox.ParseTimeLimit(options.timeLimit)
-		if err != nil {
-			return fmt.Errorf("--time-limit: %w", err)
-		}
-		options.resources.End = time.Now().Add(limit)
-		given = append(given, "--time-limit")
-	}
-	options.resources.Source = strings.Join(given, ", ")
-	return nil
-}
-
-// applyConfig reads the config and uses it for what neither a flag nor an
-// environment variable set, and mounts the config's skills folders.
-func (options *sandboxOptions) applyConfig() error {
-	loaded, err := options.loadConfig()
-	if err != nil {
-		return err
-	}
-	options.userConfig = loaded
-	if !options.changed("engine") && os.Getenv("CODEFLOWER_ENGINE") == "" && loaded.Engine != "" {
-		options.engine = loaded.Engine
-	}
-	if !options.changed("image") && os.Getenv("CODEFLOWER_IMAGE") == "" && loaded.Image != "" {
-		options.image = loaded.Image
-	}
-	if !options.changed("isolate-network") && loaded.IsolateNetwork != nil {
-		options.isolateNetwork = *loaded.IsolateNetwork
-	}
-
-	given := map[string]bool{}
-	for _, folder := range options.folders.Skills {
-		given[resolvedPath(folder)] = true
-	}
-	folders, missing := loaded.SkillFolders()
-	for _, folder := range missing {
-		fmt.Fprintf(os.Stderr, "Skipping the skills folder %s from %s: it does not exist\n", folder, loaded.Path)
-	}
-	options.configSkills = map[string]bool{}
-	var fromConfig []string
-	for _, folder := range folders {
-		resolved := resolvedPath(folder)
-		if given[resolved] {
-			continue
-		}
-		given[resolved] = true
-		options.configSkills[resolved] = true
-		fromConfig = append(fromConfig, folder)
-	}
-	options.folders.Skills = append(fromConfig, options.folders.Skills...)
-	return nil
-}
-
-// resolvedPath is a folder as the app mounts it, to tell the same folder apart.
-func resolvedPath(folder string) string {
-	absolute, err := filepath.Abs(folder)
-	if err != nil {
-		return folder
-	}
-	if real, err := filepath.EvalSymlinks(absolute); err == nil {
-		return real
-	}
-	return absolute
-}
-
-// chooseEngine finds the container engine and checks that it can isolate the
-// network when asked to.
-func (options sandboxOptions) chooseEngine(ctx context.Context) (sandbox.EngineStatus, error) {
-	engine, err := sandbox.ChooseEngine(sandbox.DetectEngines(ctx), options.engine, options.image)
-	if err != nil {
-		return engine, engineMissing(os.Stderr, engine, err)
-	}
-	if options.isolateNetwork {
-		if err := sandbox.IsolationProblem(engine.Name); err != nil {
-			return engine, err
-		}
-	}
-	return engine, nil
-}
-
-// preparedSandbox is what a worker needs besides how it is reached.
-type preparedSandbox struct {
-	engine    sandbox.EngineStatus
-	image     string
-	state     string
-	binds     []sandbox.Bind
-	isolation *sandbox.Isolation
-	// apiKey is the agent's key from the config, if any.
-	apiKey string
-	// images is the image model from the config, if any.
-	images *config.ImageGeneration
-	// mcpServers are the config's MCP servers.
-	mcpServers []config.MCPServer
-	// plugins are the config's plugins for the agent.
-	plugins   []config.PluginEntry
-	resources sandbox.Resources
-}
-
-// prepare mounts the folders, makes sure the image is there and prepares the
-// project, then prints what the sandbox will see.
-func (options sandboxOptions) prepare(ctx context.Context, engine sandbox.EngineStatus, what string) (preparedSandbox, error) {
-	binds, err := collectBinds(options.folders, options.bindValues)
-	if err != nil {
-		return preparedSandbox{}, err
-	}
-	return options.prepareWith(ctx, engine, what, binds)
-}
-
-// prepareWith is prepare with the mounts already chosen, e.g. a continued task's.
-func (options sandboxOptions) prepareWith(ctx context.Context, engine sandbox.EngineStatus, what string, binds []sandbox.Bind) (preparedSandbox, error) {
-	apiKey, err := options.userConfig.APIKey(options.agent)
-	if err != nil {
-		return preparedSandbox{}, err
-	}
-	images, err := options.userConfig.ImageGeneration()
-	if err != nil {
-		return preparedSandbox{}, err
-	}
-	binds, err = withIcons(binds, options.userConfig.IconsFolder())
-	if err != nil {
-		return preparedSandbox{}, err
-	}
-	// Only the published image is downloaded: another one is the user's to provide.
-	if sandbox.IsPublished(options.image) {
-		if err := sandbox.EnsureImage(ctx, engine, options.image, os.Stderr); err != nil {
-			return preparedSandbox{}, err
-		}
-	}
-	// After the download, which names an Apptainer file after its release.
-	image, err := sandbox.ResolveImage(options.image, engine.Name)
-	if err != nil {
-		return preparedSandbox{}, err
-	}
-	state, err := sandbox.PrepareState(options.stateDirectory())
-	if err != nil {
-		return preparedSandbox{}, err
-	}
-
-	var isolation *sandbox.Isolation
-	if options.isolateNetwork {
-		allowlist := options.allowlist
-		if allowlist == "" {
-			allowlist = sandbox.DefaultAllowlist(state)
-		}
-		path, err := sandbox.PrepareAllowlist(allowlist)
-		if err != nil {
-			return preparedSandbox{}, err
-		}
-		isolation = &sandbox.Isolation{Allowlist: path}
-	}
-
-	mcpServers := options.userConfig.MCPServers()
-	fmt.Fprintf(os.Stderr, "Starting %s for %s with %s (%s)\n", what, sandbox.AgentLabel(options.agent), engine.Label, image)
-	fmt.Fprintf(os.Stderr, "  project  %s\n", state)
-	if isolation != nil {
-		hosts := append([]string(nil), sandbox.ProviderHosts[options.agent]...)
-		if images != nil {
-			hosts = append(hosts, config.ImageProviders[images.Provider])
-		}
-		hosts = append(hosts, sandbox.MCPHosts(mcpServers)...)
-		fmt.Fprintf(os.Stderr, "  network  isolated: only %s and the hosts in %s\n",
-			strings.Join(hosts, ", "), isolation.Allowlist)
-	}
-	for _, bind := range binds {
-		mode := "read-write"
-		if bind.ReadOnly {
-			mode = "read-only"
-		}
-		origin := ""
-		if options.configSkills[bind.Source] {
-			origin = ", from the config"
-		} else if bind.Target == sandbox.IconsRoot {
-			origin = ", the icon gallery"
-		}
-		fmt.Fprintf(os.Stderr, "  %-20s %s (%s%s)\n", bind.Target, bind.Source, mode, origin)
-	}
-	if apiKey != "" {
-		fmt.Fprintf(os.Stderr, "  api key  from the config, for %s\n", sandbox.AgentLabel(options.agent))
-	}
-	if images != nil {
-		fmt.Fprintf(os.Stderr, "  images   %s, from the config, for generating icons\n", images.Provider)
-	}
-	if len(mcpServers) > 0 {
-		names := make([]string, len(mcpServers))
-		for index, server := range mcpServers {
-			names[index] = server.Name
-		}
-		fmt.Fprintf(os.Stderr, "  mcp      %s, from the config\n", strings.Join(names, ", "))
-	}
-	plugins := options.userConfig.AgentPlugins(options.agent)
-	if len(plugins) > 0 {
-		sources := make([]string, len(plugins))
-		for index, entry := range plugins {
-			sources[index] = entry.Source
-		}
-		fmt.Fprintf(os.Stderr, "  plugins  %s, from the config\n", strings.Join(sources, ", "))
-	}
-	return preparedSandbox{engine: engine, image: image, state: state, binds: binds, isolation: isolation, apiKey: apiKey,
-		images: images, mcpServers: mcpServers, plugins: plugins, resources: options.resources}, nil
-}
-
-// withIcons adds the icon gallery's mount, unless it is off or already there
-// (a continued task's saved mounts).
-func withIcons(binds []sandbox.Bind, folder string) ([]sandbox.Bind, error) {
-	if folder == "" {
-		return binds, nil
-	}
-	for _, bind := range binds {
-		if bind.Target == sandbox.IconsRoot {
-			return binds, nil
-		}
-	}
-	bind, err := sandbox.IconsBind(folder)
-	if err != nil {
-		return nil, err
-	}
-	return append(binds, bind), nil
-}
-
-// worker is the prepared sandbox as a worker for agent.
-func (p preparedSandbox) worker(agent string) sandbox.Worker {
-	return sandbox.Worker{
-		Agent:      agent,
-		Engine:     p.engine,
-		Image:      p.image,
-		State:      p.state,
-		Binds:      p.binds,
-		Isolation:  p.isolation,
-		APIKey:     p.apiKey,
-		Images:     p.images,
-		MCPServers: p.mcpServers,
-		Plugins:    p.plugins,
-		Resources:  p.resources,
-	}
-}
-
-// collectBinds turns --input, --output, --code, --skills and --bind into mounts.
-func collectBinds(folders sandbox.Folders, values []string) ([]sandbox.Bind, error) {
-	var extra []sandbox.Bind
-	for _, value := range values {
-		bind, err := sandbox.ParseBind(value)
-		if err != nil {
-			return nil, err
-		}
-		extra = append(extra, bind)
-	}
-	binds, err := folders.Binds(extra)
-	if err != nil {
-		return nil, err
-	}
-	return append(binds, extra...), nil
+	addSandboxFlags(command, &options)
+	command.Flags().StringVar(&listenHost, "host", "0.0.0.0", "interface the worker listens on")
+	command.Flags().BoolVar(&servePage, "server", false,
+		"also serve the chat page on the worker's port, and print a link to open it in a browser")
+	command.Flags().StringVar(&advertiseHost, "advertise-host", "",
+		"address printed for VS Code and the page link (default: this node's IPv4 address; 127.0.0.1 with Docker or Podman)")
+	command.Flags().BoolVar(&noTunnel, "no-tunnel", false,
+		"keep this sandbox from browsers paired through the tunnel (it does not start the client for the tunnel either)")
+	command.Flags().IntVar(&port, "port", 0, "port of the worker (and its page with --server) (default: any free port)")
+	// Development only: anyone who can reach the inspector can run code in the sandbox.
+	command.Flags().IntVar(&inspectPort, "inspect-port", 0,
+		"publish the bridge's Node inspector on 127.0.0.1:PORT (development, Docker only)")
+	_ = command.Flags().MarkHidden("inspect-port")
+	return command
 }

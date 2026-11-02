@@ -12,7 +12,7 @@ import (
 )
 
 func TestInteractiveRequiresAKnownAgent(t *testing.T) {
-	command := interactiveCommand()
+	command := sandboxCommand()
 	command.SetArgs([]string{"--state", t.TempDir(), "--engine", "docker", "--agent", "gemini"})
 	err := command.Execute()
 	if err == nil || err.Error() != "--agent must be one of: claude, codex, dsh, opencode" {
@@ -26,7 +26,7 @@ func TestInteractiveRejectsUnknownEnginesAndProjectNames(t *testing.T) {
 		"--project must be": {"--agent", "claude", "--project", "../escape"},
 	}
 	for message, args := range cases {
-		command := interactiveCommand()
+		command := sandboxCommand()
 		command.SetArgs(args)
 		if err := command.Execute(); err == nil || !strings.Contains(err.Error(), message) {
 			t.Errorf("%v: got %v, want %q", args, err, message)

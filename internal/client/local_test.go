@@ -24,7 +24,7 @@ func TestSandboxesStartedOnThisComputerAreListedWithoutTheirLine(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// `codeflower interactive` in a terminal: its process, its run's
+	// `codeflower sandbox` in a terminal: its process, its run's
 	// registration, and the connection file its bridge writes later.
 	process := exec.Command("sleep", "60")
 	if err := process.Start(); err != nil {

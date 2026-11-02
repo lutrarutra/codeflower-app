@@ -223,7 +223,7 @@ secret, because the agent sees them in its tool's output.
 ## `codeflower tui`
 
 ```
-codeflower tui [--agent claude|codex|opencode] [the folder, project, engine and network flags of interactive]
+codeflower tui [--agent claude|codex|opencode] [the folder, project, engine and network flags of codeflower sandbox]
                [--continue | --resume[=ID]]
 ```
 
