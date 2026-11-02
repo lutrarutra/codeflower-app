@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -58,8 +59,9 @@ func TestBindKeepsThePathAsGivenWhenLinksChangeIt(t *testing.T) {
 		t.Fatalf("a path without links needs no given path: %+v, %v", bind, err)
 	}
 	environment := WorkerEnvironment(WorkerSettings{Binds: []Bind{bind}})
-	if !strings.Contains(environment["CODEFLOWER_MOUNTS"], `"given":"`+filepath.ToSlash(link)) {
-		t.Fatalf("CODEFLOWER_MOUNTS: %s", environment["CODEFLOWER_MOUNTS"])
+	var mounts []struct{ Given string }
+	if err := json.Unmarshal([]byte(environment["CODEFLOWER_MOUNTS"]), &mounts); err != nil || len(mounts) != 1 || mounts[0].Given != link {
+		t.Fatalf("CODEFLOWER_MOUNTS: %s (%v)", environment["CODEFLOWER_MOUNTS"], err)
 	}
 }
 
