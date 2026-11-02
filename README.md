@@ -345,7 +345,11 @@ code flower worker ready (Claude Code). With the code flower app running on your
 
   http://127.0.0.1:7720/#add=codeflower%3A%2F%2F10.20.3.17%3A41234%3Ftoken%3D…
 
-Or in VS Code, run "code flower: Connect to worker" and paste:
+Or in VS Code on this computer, or connected to it over Remote-SSH, open:
+
+  vscode://codeflower.codeflower/connect?address=codeflower%3A%2F%2F127.0.0.1%3A41234%3Ftoken%3D…
+
+From VS Code elsewhere, run "code flower: Connect to worker" and paste:
 
   codeflower://10.20.3.17:41234?token=…
 ```
