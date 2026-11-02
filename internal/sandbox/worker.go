@@ -109,6 +109,11 @@ type Worker struct {
 	InitialPrompt string
 	// TaskInteractive enables terminal sign-in before the task when stdin is a terminal.
 	TaskInteractive bool
+	// TUI runs the agent's own terminal UI on the user's terminal instead of
+	// the bridge (`codeflower tui`): no port, nothing to connect to, and the
+	// sandbox ends with it. Its value is the chat to open: "new", "last",
+	// "pick" (the agent's own list) or a session id.
+	TUI string
 	// NoTunnel keeps the sandbox from browsers paired through the tunnel.
 	NoTunnel bool
 	// Plugins are the config's plugins for the agent (docs/plugins.md). Those
@@ -127,6 +132,11 @@ type Worker struct {
 // ErrImageWithoutTasks means the sandbox started a worker for VS Code instead
 // of running its task: the image is older than tasks.
 var ErrImageWithoutTasks = errors.New("this sandbox image cannot run tasks (it started a worker for VS Code instead); " +
+	"update it with `codeflower pull`, or choose a newer --image")
+
+// ErrImageWithoutTUI means the sandbox started a worker for VS Code instead
+// of the agent's terminal UI: the image is older than `codeflower tui`.
+var ErrImageWithoutTUI = errors.New("this sandbox image cannot run the agent's terminal UI (it started a worker for VS Code instead); " +
 	"update it with `codeflower pull`, or choose a newer --image")
 
 // ErrImageWithoutInitialPrompt means the sandbox started a worker but ignored
@@ -188,8 +198,8 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	if !w.PluginsFetch && HasPlugins(w.Agent) {
 		w.fetchMissingPlugins(ctx)
 	}
-	// Tasks and fetch runs do not listen for windows.
-	listens := w.Task == "" && !w.PluginsFetch
+	// Tasks, fetch runs and terminal UIs do not listen for windows.
+	listens := w.Task == "" && !w.PluginsFetch && w.TUI == ""
 	// Mounted for the engine only: VS Code lists the user's folders.
 	claude, err := w.claudeBinds(ctx)
 	if err != nil {
@@ -334,6 +344,10 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	if w.InitialPrompt != "" {
 		values["CODEFLOWER_INITIAL_PROMPT_FILE"] = RunPromptFile(w.InitialPrompt)
 	}
+	if w.TUI != "" {
+		values["CODEFLOWER_TUI"] = "1"
+		values["CODEFLOWER_TUI_RESUME"] = w.TUI
+	}
 	connectionFile := filepath.Join(w.State, "instances", instanceID+".json")
 	defer os.Remove(connectionFile)
 	kind := "worker"
@@ -343,7 +357,8 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	case w.InitialPrompt != "":
 		kind = "run"
 	}
-	if !w.PluginsFetch {
+	// A terminal UI is no sandbox the app or the tunnel can open.
+	if !w.PluginsFetch && w.TUI == "" {
 		defer register(Running{
 			ID: instanceID, ConnectionFile: connectionFile, Project: filepath.Base(w.State), State: w.State,
 			Agent: w.Agent, Engine: w.Engine.Name, Kind: kind, PID: os.Getpid(), Started: time.Now(), NoTunnel: w.NoTunnel,
@@ -359,6 +374,8 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 		tooOld := ErrImageWithoutTasks
 		if w.PluginsFetch {
 			tooOld = ErrImageWithoutPlugins
+		} else if w.TUI != "" {
+			tooOld = ErrImageWithoutTUI
 		}
 		watching, stopWatching := context.WithCancel(ctx)
 		defer stopWatching()
@@ -432,11 +449,13 @@ func (w Worker) runEngine(ctx context.Context, instanceID string, values map[str
 		return RunDocker(ctx, DockerRun{
 			Name: name, Image: w.Image, State: w.State, Binds: w.Binds, Env: values,
 			Port: port, InspectPort: w.InspectPort, NetDirectory: netDirectory, CPUs: resources.CPUs, Memory: resources.Memory, Stdin: w.Stdin, Stdout: w.Stdout, Stderr: w.Stderr,
+			TTY: w.TUI != "",
 		})
 	case EnginePodman:
 		return RunPodman(ctx, w.Engine.Executable, PodmanRun{
 			Name: name, Image: w.Image, State: w.State, Binds: w.Binds, Env: values,
 			Port: port, NetDirectory: netDirectory, CPUs: resources.CPUs, Memory: resources.Memory, Stdin: w.Stdin, Stdout: w.Stdout, Stderr: w.Stderr,
+			TTY: w.TUI != "",
 		})
 	case EngineApptainer:
 		scratch, err := newScratch()

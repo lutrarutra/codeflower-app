@@ -49,3 +49,8 @@ func parseAddress(text string) (sandbox.Connection, error) {
 	}
 	return sandbox.Connection{URL: line, Host: host, Port: port, Token: token, Fingerprint: fingerprint}, nil
 }
+
+// ParseAddress reads a pasted worker address, as the client's Add dialog does.
+func ParseAddress(text string) (sandbox.Connection, error) {
+	return parseAddress(text)
+}

@@ -44,6 +44,9 @@ type DockerRun struct {
 	// The container's output; standard output and error when nil.
 	Stdout io.Writer
 	Stderr io.Writer
+	// TTY gives the container a terminal on the user's (`codeflower tui`):
+	// theirs goes raw, and follows its size.
+	TTY bool
 }
 
 // BridgeInspectPort is the bridge's Node inspector port inside the container.
@@ -79,6 +82,7 @@ func DockerConfig(run DockerRun) (*container.Config, *container.HostConfig, erro
 		User:        containerUser(),
 		OpenStdin:   run.Stdin != nil,
 		AttachStdin: run.Stdin != nil,
+		Tty:         run.TTY,
 	}
 	// Mounts rather than "SOURCE:TARGET" strings, which Windows paths break.
 	host := &container.HostConfig{
@@ -168,7 +172,12 @@ func RunDocker(ctx context.Context, run DockerRun) (int, error) {
 	// removed right after it stops.
 	waitStatus, waitError := docker.ContainerWait(ctx, id, container.WaitConditionNextExit)
 
-	go func() { _, _ = stdcopy.StdCopy(run.Stdout, run.Stderr, attached.Reader) }()
+	if run.TTY {
+		// One stream, as the terminal shows it.
+		go func() { _, _ = io.Copy(run.Stdout, attached.Reader) }()
+	} else {
+		go func() { _, _ = stdcopy.StdCopy(run.Stdout, run.Stderr, attached.Reader) }()
+	}
 	if run.Stdin != nil {
 		go func() {
 			_, copyErr := io.Copy(attached.Conn, run.Stdin)
@@ -184,8 +193,18 @@ func RunDocker(ctx context.Context, run DockerRun) (int, error) {
 		}()
 	}
 
+	if run.TTY {
+		restore := rawTerminal(run.Stdin)
+		defer restore()
+	}
 	if err := docker.ContainerStart(ctx, id, container.StartOptions{}); err != nil {
 		return 1, fmt.Errorf("could not start the container: %w", err)
+	}
+	if run.TTY {
+		stopResizing := followTerminalSize(run.Stdout, func(width, height uint) {
+			_ = docker.ContainerResize(ctx, id, container.ResizeOptions{Width: width, Height: height})
+		})
+		defer stopResizing()
 	}
 
 	stopping := false

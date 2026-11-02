@@ -45,6 +45,9 @@ type PodmanRun struct {
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
+	// TTY gives the container a terminal: the agent's own terminal UI runs on
+	// the user's (`codeflower tui`), with podman relaying it.
+	TTY bool
 }
 
 // podmanOwnEnv are variables the podman process reads itself (rootless
@@ -68,6 +71,9 @@ func PodmanArgs(executable string, run PodmanRun) ([]string, error) {
 	}
 	if run.Stdin != nil {
 		args = append(args, "-i")
+	}
+	if run.TTY {
+		args = append(args, "-t")
 	}
 	// Rootless Podman maps the user to root inside; keep-id keeps their uid,
 	// so the files the sandbox writes stay theirs.

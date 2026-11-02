@@ -311,3 +311,26 @@ func (store *workerStore) save(workers []savedWorker) {
 	}
 	_ = os.Rename(temporary.Name(), store.path)
 }
+
+// SavedWorker is a sandbox elsewhere that the client remembers (Add remote
+// sandbox), for commands that connect to it themselves.
+type SavedWorker struct {
+	ID         string
+	Name       string
+	Agent      string
+	Connection sandbox.Connection
+}
+
+// SavedWorkers reads the client's added sandboxes; lines that no longer parse
+// are left out.
+func SavedWorkers() []SavedWorker {
+	var result []SavedWorker
+	for _, saved := range newWorkerStore().load() {
+		connection, err := parseAddress(saved.Address)
+		if err != nil {
+			continue
+		}
+		result = append(result, SavedWorker{ID: saved.ID, Name: saved.Name, Agent: saved.Agent, Connection: connection})
+	}
+	return result
+}
