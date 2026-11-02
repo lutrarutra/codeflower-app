@@ -26,5 +26,28 @@
   },
   "goal": {
     "maxLength": 4000
+  },
+  "subagents": {
+    "adapter": "air-draft",
+    "reports": {
+      "model": true,
+      "effort": false,
+      "usage": "context",
+      "result": true
+    },
+    "settings": {
+      "model": {
+        "kind": "json-env",
+        "variable": "CODEX_CONFIG",
+        "key": "agents.default_subagent_model",
+        "applies": "restart"
+      },
+      "effort": {
+        "kind": "json-env",
+        "variable": "CODEX_CONFIG",
+        "key": "agents.default_subagent_reasoning_effort",
+        "applies": "restart"
+      }
+    }
   }
 }

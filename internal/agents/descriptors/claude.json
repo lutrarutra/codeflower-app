@@ -27,6 +27,27 @@
     "maxLength": 4000
   },
   "costEstimate": true,
+  "subagents": {
+    "adapter": "acp-rfd",
+    "reports": {
+      "model": true,
+      "effort": true,
+      "usage": "none",
+      "result": true
+    },
+    "settings": {
+      "model": {
+        "kind": "session-meta",
+        "path": [
+          "claudeCode",
+          "options",
+          "env",
+          "CLAUDE_CODE_SUBAGENT_MODEL"
+        ],
+        "applies": "session"
+      }
+    }
+  },
   "plugins": {
     "kinds": [
       "marketplace",
