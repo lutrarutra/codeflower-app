@@ -114,6 +114,10 @@ type Worker struct {
 	// sandbox ends with it. Its value is the chat to open: "new", "last",
 	// "pick" (the agent's own list) or a session id.
 	TUI string
+	// TUIAgain is the command that opens a chat of the terminal UI again, up
+	// to its id, which the sandbox prints when the terminal UI ends in place
+	// of the agent's own command.
+	TUIAgain string
 	// NoTunnel keeps the sandbox from browsers paired through the tunnel.
 	NoTunnel bool
 	// Plugins are the config's plugins for the agent (docs/plugins.md). Those
@@ -347,6 +351,9 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	if w.TUI != "" {
 		values["CODEFLOWER_TUI"] = "1"
 		values["CODEFLOWER_TUI_RESUME"] = w.TUI
+		if w.TUIAgain != "" {
+			values["CODEFLOWER_TUI_AGAIN"] = w.TUIAgain
+		}
 	}
 	connectionFile := filepath.Join(w.State, "instances", instanceID+".json")
 	defer os.Remove(connectionFile)

@@ -224,7 +224,7 @@ secret, because the agent sees them in its tool's output.
 
 ```
 codeflower tui [--agent claude|codex|opencode] [the folder, project, engine and network flags of interactive]
-               [--continue | --resume [ID]]
+               [--continue | --resume[=ID]]
 ```
 
 `app/internal/cli/tui.go`; `Worker.TUI` is `new`, `last`, `pick` or an id.
@@ -245,6 +245,13 @@ codeflower tui [--agent claude|codex|opencode] [the folder, project, engine and 
     (`ContainerResize`, `tty.go`).
   - Podman: `-t`.
   - Apptainer: simply the user's terminal.
+- **Opening the chat again.** The agent prints its own resume command, which the user's terminal does not have.
+  The app passes the command line that ran, without `--continue`/`--resume`, and ending in `--resume=`
+  (`CODEFLOWER_TUI_AGAIN`, `tuiAgain`). When the UI ends, `runTui` asks the agent's `lastSession` for the chat written
+  since the UI started, and prints that line with its id:
+  - Claude: the newest transcript in `$CLAUDE_CONFIG_DIR/projects/<cwd slug>/`, named by session id.
+  - Codex: the newest `sessions/**/rollout-*-<id>.jsonl` in `CODEX_HOME`.
+  - OpenCode: the latest top-level session of the folder in `opencode.db`.
 - **Nothing to connect to.** No port, connection file, page or tunnel, and no entry in the run registry.
 - **Chats.** They are the agent's own, kept in the project's agent homes, and code flower does not record them: the
   page and VS Code do not list them.

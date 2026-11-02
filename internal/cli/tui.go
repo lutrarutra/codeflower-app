@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/moby/term"
@@ -38,7 +39,7 @@ them in the app, use "codeflower interactive" and "codeflower attach" instead.`,
 		Example: `  codeflower tui --agent claude --input ~/data/study42
   codeflower tui --agent codex --project study42 --continue
   codeflower tui --agent opencode --project study42 --resume
-  codeflower tui --agent claude --project study42 --resume 3f2a…`,
+  codeflower tui --agent claude --project study42 --resume=3f2a…`,
 		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			if err := options.check(); err != nil {
@@ -72,6 +73,7 @@ them in the app, use "codeflower interactive" and "codeflower attach" instead.`,
 			}
 			worker := prepared.worker(options.agent)
 			worker.TUI = chat
+			worker.TUIAgain = tuiAgain(os.Args[1:])
 			worker.Stdin, worker.Stdout, worker.Stderr = os.Stdin, os.Stdout, os.Stderr
 			code, err := worker.Run(ctx, nil)
 			if err != nil {
@@ -91,4 +93,17 @@ them in the app, use "codeflower interactive" and "codeflower attach" instead.`,
 	command.Flags().StringVar(&resume, "resume", "", "open a chat of the project: its id, or without one the agent's own list")
 	command.Flags().Lookup("resume").NoOptDefVal = "pick"
 	return command
+}
+
+// tuiAgain is the command line that ran, without the chat it opened, and
+// with --resume= to be followed by the id of the chat to open again.
+func tuiAgain(args []string) string {
+	words := []string{"codeflower"}
+	for _, arg := range args {
+		if arg == "--continue" || strings.HasPrefix(arg, "--continue=") || arg == "--resume" || strings.HasPrefix(arg, "--resume=") {
+			continue
+		}
+		words = append(words, shellQuote(arg))
+	}
+	return strings.Join(words, " ") + " --resume="
 }

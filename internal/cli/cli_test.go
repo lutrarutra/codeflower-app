@@ -376,6 +376,13 @@ func TestTheContinueCommandCanBePasted(t *testing.T) {
 	}
 }
 
+func TestTUISaysHowToOpenTheChatAgain(t *testing.T) {
+	got := tuiAgain([]string{"--agent", "claude", "tui", "--input", "/data/my run/", "--resume", "--continue=false", "--resume=abc"})
+	if want := `codeflower --agent claude tui --input '/data/my run/' --resume=`; got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
 func TestTaskSummarySaysHowTheAttemptWentOn(t *testing.T) {
 	var out strings.Builder
 	result := sandbox.TaskResult{Status: "unmet", Rounds: 2, Attempt: 3, Message: "The time limit was near; wrapped up: more to do",
