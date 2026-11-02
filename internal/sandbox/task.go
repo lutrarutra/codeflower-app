@@ -40,6 +40,7 @@ type Task struct {
 // TaskMount is a Bind as task.json keeps it.
 type TaskMount struct {
 	Source   string `json:"source"`
+	Given    string `json:"given,omitempty"`
 	Target   string `json:"target"`
 	ReadOnly bool   `json:"readOnly"`
 }
@@ -48,7 +49,7 @@ type TaskMount struct {
 func TaskMounts(binds []Bind) []TaskMount {
 	mounts := make([]TaskMount, 0, len(binds))
 	for _, bind := range binds {
-		mounts = append(mounts, TaskMount{Source: bind.Source, Target: bind.Target, ReadOnly: bind.ReadOnly})
+		mounts = append(mounts, TaskMount{Source: bind.Source, Given: bind.Given, Target: bind.Target, ReadOnly: bind.ReadOnly})
 	}
 	return mounts
 }
@@ -57,7 +58,7 @@ func TaskMounts(binds []Bind) []TaskMount {
 func (t Task) Binds() []Bind {
 	binds := make([]Bind, 0, len(t.Mounts))
 	for _, mount := range t.Mounts {
-		binds = append(binds, Bind{Source: mount.Source, Target: mount.Target, ReadOnly: mount.ReadOnly})
+		binds = append(binds, Bind{Source: mount.Source, Given: mount.Given, Target: mount.Target, ReadOnly: mount.ReadOnly})
 	}
 	return binds
 }

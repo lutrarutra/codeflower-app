@@ -62,6 +62,7 @@ type WorkerSettings struct {
 type mountInfo struct {
 	Target   string `json:"target"`
 	Source   string `json:"source"`
+	Given    string `json:"given,omitempty"`
 	ReadOnly bool   `json:"readOnly"`
 }
 
@@ -81,7 +82,7 @@ func WorkerEnvironment(settings WorkerSettings) map[string]string {
 	values["CODEFLOWER_ENGINE"] = settings.Engine
 	mounts := make([]mountInfo, 0, len(settings.Binds))
 	for _, bind := range settings.Binds {
-		mounts = append(mounts, mountInfo{Target: bind.Target, Source: bind.Source, ReadOnly: bind.ReadOnly})
+		mounts = append(mounts, mountInfo{Target: bind.Target, Source: bind.Source, Given: bind.Given, ReadOnly: bind.ReadOnly})
 	}
 	if encoded, err := json.Marshal(mounts); err == nil {
 		values["CODEFLOWER_MOUNTS"] = string(encoded)

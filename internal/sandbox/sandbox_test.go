@@ -40,6 +40,29 @@ func TestParseBindDefaultsToReadOnlyInputs(t *testing.T) {
 	}
 }
 
+func TestBindKeepsThePathAsGivenWhenLinksChangeIt(t *testing.T) {
+	base := tempDir(t)
+	real := filepath.Join(base, "real")
+	link := filepath.Join(base, "link")
+	if err := os.Mkdir(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip(err)
+	}
+	bind, err := NewBind(link, "/data/input/link", true)
+	if err != nil || bind.Source != real || bind.Given != link {
+		t.Fatalf("bind %+v, %v", bind, err)
+	}
+	if bind, err := NewBind(real, "/data/input/real", true); err != nil || bind.Given != "" {
+		t.Fatalf("a path without links needs no given path: %+v, %v", bind, err)
+	}
+	environment := WorkerEnvironment(WorkerSettings{Binds: []Bind{bind}})
+	if !strings.Contains(environment["CODEFLOWER_MOUNTS"], `"given":"`+filepath.ToSlash(link)) {
+		t.Fatalf("CODEFLOWER_MOUNTS: %s", environment["CODEFLOWER_MOUNTS"])
+	}
+}
+
 func TestFoldersMountUnderTheirRootsByName(t *testing.T) {
 	base := tempDir(t)
 	folder := func(path string) string {

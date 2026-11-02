@@ -11,7 +11,10 @@ import (
 
 // Bind mounts a host path into the sandbox.
 type Bind struct {
-	Source   string
+	Source string
+	// Given is the absolute path as the user wrote it, when links make Source
+	// differ: files the user has may name either.
+	Given    string
 	Target   string
 	ReadOnly bool
 }
@@ -74,8 +77,12 @@ func NewBind(source, target string, readOnly bool) (Bind, error) {
 	if err != nil {
 		return Bind{}, err
 	}
+	given := resolved
 	if real, err := filepath.EvalSymlinks(resolved); err == nil {
 		resolved = real
+	}
+	if given == resolved {
+		given = ""
 	}
 	info, err := os.Stat(resolved)
 	if err != nil {
@@ -87,7 +94,7 @@ func NewBind(source, target string, readOnly bool) (Bind, error) {
 	if strings.Contains(strings.TrimPrefix(resolved, filepath.VolumeName(resolved)), ":") {
 		return Bind{}, fmt.Errorf("bind source paths must not contain ':'")
 	}
-	return Bind{Source: resolved, Target: target, ReadOnly: readOnly}, nil
+	return Bind{Source: resolved, Given: given, Target: target, ReadOnly: readOnly}, nil
 }
 
 // Spec renders the bind for Apptainer and Docker: SOURCE:TARGET[:ro].

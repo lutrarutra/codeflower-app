@@ -15,7 +15,7 @@ func TestTasksAreWrittenPrivatelyAndTheirResultsRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	binds := []Bind{{Source: "/home/u/results", Target: OutputsRoot + "/study42"}, {Source: "/home/u/data", Target: "/data/input/data", ReadOnly: true}}
+	binds := []Bind{{Source: "/home/u/results", Target: OutputsRoot + "/study42"}, {Source: "/gpfs/u/data", Given: "/home/u/data", Target: "/data/input/data", ReadOnly: true}}
 	task := Task{Task: "Cluster the cells", Agent: "claude", Output: OutputsRoot + "/study42", Report: true, MaxRounds: 3,
 		Model: "opus", Effort: "high", Options: map[string]string{"fast": "on"}, Mounts: TaskMounts(binds),
 		Allowlist: "/home/u/allowed.txt", Engine: "auto", Image: "codeflower-sandbox:dev"}
