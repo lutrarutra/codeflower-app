@@ -12,8 +12,7 @@
   "env": {
     "OPENCODE_DISABLE_AUTOUPDATE": "1",
     "OPENCODE_DISABLE_MODELS_FETCH": "1",
-    "OPENCODE_DISABLE_LSP_DOWNLOAD": "1",
-    "OPENCODE_DISABLE_FREE_MODELS": "1"
+    "OPENCODE_DISABLE_LSP_DOWNLOAD": "1"
   },
   "credentialVariables": [
     "OPENCODE_API_KEY",
@@ -30,7 +29,7 @@
     "openrouter.ai"
   ],
   "files": {
-    "opencode.jsonc": "// Written once by codeflower; edit freely.\n// Providers of your own, e.g. vLLM on the cluster: https://opencode.ai/docs/providers\n{\n  \"share\": \"disabled\"\n}\n"
+    "opencode.jsonc": "// Written once by codeflower; edit freely.\n// Providers of your own, e.g. vLLM on the cluster: https://opencode.ai/docs/providers\n// Without OpenCode Zen's free models: \"disabled_providers\": [\"opencode\"]\n{\n  \"share\": \"disabled\"\n}\n"
   },
   "goal": {
     "maxLength": 4000
