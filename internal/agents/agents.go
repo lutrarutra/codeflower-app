@@ -42,6 +42,16 @@ type Descriptor struct {
 	// catalogs, and the hosts a fetch of them needs (docs/plugins.md). No
 	// kinds: the agent has no plugins.
 	Plugins Plugins `json:"plugins"`
+	// Container is what the agent needs of a Docker or Podman container.
+	Container Container `json:"container"`
+}
+
+// Container is a descriptor's container block.
+type Container struct {
+	// UserNamespaces: the agent sandboxes its commands itself with user
+	// namespaces (Codex's bubblewrap), which Docker's default seccomp profile
+	// keeps an unprivileged container from creating.
+	UserNamespaces bool `json:"userNamespaces"`
 }
 
 // Plugins is a descriptor's plugins block.

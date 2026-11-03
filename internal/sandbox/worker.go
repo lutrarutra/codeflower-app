@@ -451,18 +451,35 @@ func writeImageKey(state, instanceID, key string) (string, error) {
 // containers the daemon or podman start outside them, are limited here.
 func (w Worker) runEngine(ctx context.Context, instanceID string, values map[string]string, port int, netDirectory string, resources Resources) (int, error) {
 	name := "codeflower-" + instanceID[:8]
+	// An agent that sandboxes its commands itself needs user namespaces
+	// (Docker's and Podman's default profiles refuse them); Apptainer has none.
+	var seccomp []byte
+	if descriptor, _ := agents.Get(w.Agent); descriptor.Container.UserNamespaces && w.Engine.Name != EngineApptainer {
+		var err error
+		if seccomp, err = UserNamespacesSeccomp(); err != nil {
+			return 1, err
+		}
+	}
 	switch w.Engine.Name {
 	case EngineDocker:
 		return RunDocker(ctx, DockerRun{
 			Name: name, Image: w.Image, State: w.State, Binds: w.Binds, Env: values,
 			Port: port, InspectPort: w.InspectPort, NetDirectory: netDirectory, CPUs: resources.CPUs, Memory: resources.Memory, Stdin: w.Stdin, Stdout: w.Stdout, Stderr: w.Stderr,
-			TTY: w.TUI != "",
+			TTY: w.TUI != "", Seccomp: seccomp,
 		})
 	case EnginePodman:
+		var seccompFile string
+		if seccomp != nil {
+			var err error
+			if seccompFile, err = writeSeccomp(w.State, instanceID, seccomp); err != nil {
+				return 1, err
+			}
+			defer os.Remove(seccompFile)
+		}
 		return RunPodman(ctx, w.Engine.Executable, PodmanRun{
 			Name: name, Image: w.Image, State: w.State, Binds: w.Binds, Env: values,
 			Port: port, NetDirectory: netDirectory, CPUs: resources.CPUs, Memory: resources.Memory, Stdin: w.Stdin, Stdout: w.Stdout, Stderr: w.Stderr,
-			TTY: w.TUI != "",
+			TTY: w.TUI != "", SeccompFile: seccompFile,
 		})
 	case EngineApptainer:
 		scratch, err := newScratch()

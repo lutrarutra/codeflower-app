@@ -10,12 +10,16 @@
     "path": "harness/codex"
   },
   "env": {
-    "NO_BROWSER": "1"
+    "NO_BROWSER": "1",
+    "CODEX_CONFIG": "{\"features.multi_agent_v2\":true}"
   },
   "credentialVariables": [
     "OPENAI_API_KEY",
     "CODEX_API_KEY"
   ],
+  "container": {
+    "userNamespaces": true
+  },
   "providerHosts": [
     "api.openai.com",
     "auth.openai.com",

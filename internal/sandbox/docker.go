@@ -47,6 +47,9 @@ type DockerRun struct {
 	// TTY gives the container a terminal on the user's (`codeflower tui`):
 	// theirs goes raw, and follows its size.
 	TTY bool
+	// Seccomp, when set, is the container's seccomp profile (JSON) instead
+	// of Docker's default (UserNamespacesSeccomp).
+	Seccomp []byte
 }
 
 // BridgeInspectPort is the bridge's Node inspector port inside the container.
@@ -89,6 +92,9 @@ func DockerConfig(run DockerRun) (*container.Config, *container.HostConfig, erro
 		Mounts:     []mount.Mount{{Type: mount.TypeBind, Source: run.State, Target: ContainerState}},
 		AutoRemove: true,
 		Init:       &init,
+	}
+	if len(run.Seccomp) > 0 {
+		host.SecurityOpt = append(host.SecurityOpt, "seccomp="+string(run.Seccomp))
 	}
 	host.NanoCPUs = int64(run.CPUs) * 1e9
 	host.Memory = run.Memory

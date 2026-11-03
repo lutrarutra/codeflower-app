@@ -48,6 +48,9 @@ type PodmanRun struct {
 	// TTY gives the container a terminal: the agent's own terminal UI runs on
 	// the user's (`codeflower tui`), with podman relaying it.
 	TTY bool
+	// SeccompFile, when set, holds the container's seccomp profile instead of
+	// Podman's default (UserNamespacesSeccomp).
+	SeccompFile string
 }
 
 // podmanOwnEnv are variables the podman process reads itself (rootless
@@ -68,6 +71,9 @@ func PodmanArgs(executable string, run PodmanRun) ([]string, error) {
 		// (:z) would change it.
 		"--security-opt", "label=disable",
 		"--mount", "type=bind,source=" + run.State + ",target=" + ContainerState,
+	}
+	if run.SeccompFile != "" {
+		args = append(args, "--security-opt", "seccomp="+run.SeccompFile)
 	}
 	if run.Stdin != nil {
 		args = append(args, "-i")
