@@ -117,7 +117,7 @@ networks.`,
 	}
 	addSandboxFlags(command, &options)
 	command.Flags().StringVar(&promptFile, "prompt", "", "read TASK from this Markdown file instead of an argument")
-	command.Flags().StringVar(&listenHost, "host", "0.0.0.0", "interface the worker listens on")
+	command.Flags().StringVar(&listenHost, "host", "0.0.0.0", "interface the worker listens on (Apptainer; Docker and Podman always publish on 127.0.0.1)")
 	command.Flags().BoolVar(&servePage, "server", false,
 		"also serve the chat page on the worker's port, and print a link to open it in a browser")
 	command.Flags().StringVar(&advertiseHost, "advertise-host", "",

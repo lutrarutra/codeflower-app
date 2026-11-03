@@ -230,7 +230,9 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 		}
 	}
 	listen := w.ListenHost
-	if listen == "" {
+	if listen == "" || containerized {
+		// Docker and Podman publish the port on the host's 127.0.0.1 only;
+		// inside the container, a loopback address would be out of their reach.
 		listen = "0.0.0.0"
 	}
 	instanceID := NewInstanceID()
