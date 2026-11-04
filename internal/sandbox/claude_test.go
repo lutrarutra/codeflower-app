@@ -142,6 +142,9 @@ func TestTasksOfOtherAgentsNeedNoClaude(t *testing.T) {
 }
 
 func TestASandboxStartsWithoutClaudeWhenItCannotBeDownloaded(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a shell script as the engine")
+	}
 	directory := t.TempDir()
 	t.Setenv("CODEFLOWER_AGENTS_DIR", directory)
 	previous := npmRegistry

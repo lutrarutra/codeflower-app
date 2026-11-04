@@ -400,7 +400,7 @@ func (c *Config) path(value string) string {
 	if !filepath.IsAbs(value) && c.Directory != "" {
 		value = filepath.Join(c.Directory, value)
 	}
-	return value
+	return filepath.Clean(value)
 }
 
 func expandHome(value string) string {

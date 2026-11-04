@@ -123,7 +123,8 @@ func TestSkillFolders(t *testing.T) {
 func TestProjectsAndEnvDirectories(t *testing.T) {
 	directory := t.TempDir()
 	home, _ := os.UserHomeDir()
-	t.Setenv("CODEFLOWER_TEST_SCRATCH", "/scratch/me")
+	scratch := filepath.Join(t.TempDir(), "scratch")
+	t.Setenv("CODEFLOWER_TEST_SCRATCH", scratch)
 	write(t, directory, "projects_dir: ~/cf\nenv_dir: $CODEFLOWER_TEST_SCRATCH/cf\n", 0o644)
 	loaded, err := Load(directory)
 	if err != nil {
@@ -132,7 +133,7 @@ func TestProjectsAndEnvDirectories(t *testing.T) {
 	if got := loaded.ProjectsDirectory(); got != filepath.Join(home, "cf") {
 		t.Errorf("projects_dir: %s", got)
 	}
-	if got := loaded.EnvDirectory(); got != filepath.Join("/scratch/me", "cf") {
+	if got := loaded.EnvDirectory(); got != filepath.Join(scratch, "cf") {
 		t.Errorf("env_dir: %s", got)
 	}
 
