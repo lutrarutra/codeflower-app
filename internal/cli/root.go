@@ -19,7 +19,11 @@ var Version = "dev"
 type commonOptions struct {
 	project string
 	state   string
-	image   string
+	// projectsDir and envDir are --projects-dir and --env-dir, else the
+	// config's projects_dir and env_dir (useDirectories).
+	projectsDir string
+	envDir      string
+	image       string
 	// imageTag picks a build of the published image instead of --image.
 	imageTag string
 	engine   string
@@ -43,6 +47,7 @@ func addCommonFlags(command *cobra.Command, options *commonOptions) {
 	command.Flags().StringVarP(&options.project, "project", "p", "default",
 		"project name: its sessions, logins and workspace live in "+filepath.Join(ProjectsDirectory(), "NAME"))
 	command.Flags().StringVar(&options.state, "state", "", "project directory, instead of --project (created with owner-only permissions)")
+	addDirectoryFlags(command, options)
 	command.Flags().StringVar(&options.image, "image", os.Getenv("CODEFLOWER_IMAGE"),
 		"sandbox image: a Docker/Podman image name, or an Apptainer .sif file (or set $CODEFLOWER_IMAGE; default "+sandbox.DefaultImage+", downloaded on first use)")
 	addImageTagFlag(command, &options.imageTag)
@@ -50,6 +55,26 @@ func addCommonFlags(command *cobra.Command, options *commonOptions) {
 		"container engine: auto, docker, podman, or apptainer (or set $CODEFLOWER_ENGINE)")
 	command.Flags().StringVar(&options.config, "config", "",
 		"config directory with config.yaml and skills (or set $CODEFLOWER_CONFIG; default ~/.codeflower)")
+}
+
+// projectsDirectory is the config's projects_dir, else the default.
+func projectsDirectory(loaded *config.Config) string {
+	if projects := loaded.ProjectsDirectory(); projects != "" {
+		return projects
+	}
+	return ProjectsDirectory()
+}
+
+func addDirectoryFlags(command *cobra.Command, options *commonOptions) {
+	addProjectsDirFlag(command, options)
+	command.Flags().StringVar(&options.envDir, "env-dir", "",
+		"folder for the projects' software environments and download caches, e.g. on scratch, in a subfolder per project "+
+			"(or env_dir in the config; default: in the project)")
+}
+
+func addProjectsDirFlag(command *cobra.Command, options *commonOptions) {
+	command.Flags().StringVar(&options.projectsDir, "projects-dir", "",
+		"folder of the projects started with --project (or projects_dir in the config; default "+ProjectsDirectory()+")")
 }
 
 func addImageTagFlag(command *cobra.Command, tag *string) {
@@ -72,6 +97,17 @@ func imageName(image, tag string) (string, error) {
 // loadConfig reads the config directory (--config, $CODEFLOWER_CONFIG or ~/.codeflower).
 func (options commonOptions) loadConfig() (*config.Config, error) {
 	return config.Load(config.Directory(options.config))
+}
+
+// useDirectories takes the config's projects_dir and env_dir for what
+// --projects-dir and --env-dir did not set.
+func (options *commonOptions) useDirectories(loaded *config.Config) {
+	if options.projectsDir == "" {
+		options.projectsDir = loaded.ProjectsDirectory()
+	}
+	if options.envDir == "" {
+		options.envDir = loaded.EnvDirectory()
+	}
 }
 
 func (options commonOptions) validate() error {
@@ -100,7 +136,19 @@ func (options commonOptions) stateDirectory() string {
 	if options.state != "" {
 		return options.state
 	}
-	return filepath.Join(ProjectsDirectory(), options.project)
+	projects := options.projectsDir
+	if projects == "" {
+		projects = ProjectsDirectory()
+	}
+	return filepath.Join(projects, options.project)
+}
+
+// envDirectory is the project's folder in --env-dir, or "" for none.
+func (options commonOptions) envDirectory(state string) string {
+	if options.envDir == "" {
+		return ""
+	}
+	return sandbox.EnvFolder(options.envDir, state)
 }
 
 // exitError carries the sandbox's exit code through cobra.

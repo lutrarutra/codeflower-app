@@ -51,6 +51,7 @@ func addPluginsFlags(command *cobra.Command, target *pluginsTarget) {
 	command.Flags().StringVarP(&target.project, "project", "p", "default",
 		"project name: its plugins live in "+filepath.Join(ProjectsDirectory(), "NAME", "plugins"))
 	command.Flags().StringVar(&target.state, "state", "", "project directory, instead of --project")
+	addProjectsDirFlag(command, &target.commonOptions)
 	command.Flags().StringVar(&target.config, "config", "",
 		"config directory with config.yaml (or set $CODEFLOWER_CONFIG; default ~/.codeflower)")
 	command.Flags().StringVar(&target.agent, "agent", os.Getenv("CODEFLOWER_AGENT"), "the agent whose plugins these are")
@@ -70,6 +71,7 @@ func (target *pluginsTarget) resolve() (string, []config.PluginEntry, error) {
 	if err != nil {
 		return "", nil, err
 	}
+	target.useDirectories(loaded)
 	state, err := filepath.Abs(target.stateDirectory())
 	if err != nil {
 		return "", nil, err
@@ -320,5 +322,6 @@ installer needs. A running agent picks the plugins up when it restarts.`,
 		},
 	}
 	addSandboxFlags(command, &options)
+	addAgentFlag(command, &options, "agent whose plugins are fetched", true)
 	return command
 }

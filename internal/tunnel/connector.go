@@ -683,7 +683,8 @@ func (c *connector) serveHTTP(ctx context.Context, s *stream, open OpenRequest) 
 	}
 }
 
-var acpPath = regexp.MustCompile(`^/api/workers/[^/]+/acp$`)
+// A sandbox's chat WebSocket: the sandbox's own, or one agent's (?agent=NAME).
+var acpPath = regexp.MustCompile(`^/api/workers/[^/?]+/acp(\?agent=[A-Za-z0-9_-]+)?$`)
 
 func (c *connector) serveWebSocket(ctx context.Context, s *stream, open OpenRequest) {
 	if !acpPath.MatchString(open.Path) {

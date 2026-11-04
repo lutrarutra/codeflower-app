@@ -184,6 +184,43 @@ func TestPrepareStateIsPrivateAndKeepsUserEdits(t *testing.T) {
 	}
 }
 
+func TestPrepareEnvMountsOverTheProject(t *testing.T) {
+	root := tempDir(t)
+	state, err := PrepareState(filepath.Join(root, "projects", "study"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	folder := EnvFolder(filepath.Join(root, "scratch"), state)
+	if folder != filepath.Join(root, "scratch", "study") {
+		t.Fatalf("env folder %s", folder)
+	}
+	env, err := PrepareEnv(folder, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{env, filepath.Join(env, "env", "exports"), filepath.Join(env, "cache"), filepath.Join(state, "env", "exports")} {
+		if info, err := os.Stat(path); err != nil || (runtime.GOOS != "windows" && info.Mode().Perm() != 0o700) {
+			t.Errorf("%s: %v %v", path, info, err)
+		}
+	}
+	want := []Bind{
+		{Source: filepath.Join(env, "env"), Target: ContainerState + "/env"},
+		{Source: filepath.Join(state, "env", "exports"), Target: ContainerState + "/env/exports"},
+		{Source: filepath.Join(env, "cache"), Target: ContainerState + "/cache"},
+	}
+	if got := EnvBinds(env, state); !slices.Equal(got, want) {
+		t.Fatalf("binds %+v", got)
+	}
+	if EnvBinds("", state) != nil {
+		t.Fatal("binds without an env folder")
+	}
+	for _, inside := range []string{state, filepath.Join(state, "env"), root} {
+		if _, err := PrepareEnv(inside, state); err == nil {
+			t.Errorf("env folder %s overlapping the project was accepted", inside)
+		}
+	}
+}
+
 func TestApptainerCommandConfinesTheSandbox(t *testing.T) {
 	dir := tempDir(t)
 	args, err := ApptainerCommand("apptainer", "/images/sandbox.sif", dir, "/local/codeflower-tmp-1",
@@ -274,7 +311,7 @@ func TestDockerConfigPublishesTheInspectorOnLoopback(t *testing.T) {
 
 func TestEnvironmentKeepsToolStateInTheProject(t *testing.T) {
 	env := WorkerEnvironment(WorkerSettings{Agent: "claude", InstanceID: "id", Token: "t", Port: 1, HostState: "/home/me/p", Engine: "apptainer"})
-	for _, name := range []string{"HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "DSH_HOME", "VIRTUAL_ENV", "CONDA_ENVS_DIRS", "CODEFLOWER_SESSIONS_DIR"} {
+	for _, name := range []string{"HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "DSH_HOME", "VIRTUAL_ENV", "CONDA_ENVS_DIRS", "R_LIBS_USER", "RENV_PATHS_CACHE", "R_USER_CACHE_DIR", "CODEFLOWER_SESSIONS_DIR"} {
 		if !strings.HasPrefix(env[name], ContainerState) {
 			t.Errorf("%s = %q is outside the project", name, env[name])
 		}

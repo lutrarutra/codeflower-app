@@ -62,6 +62,12 @@ func (s *Server) relayToWorker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	// The agent the page speaks to; without one, the sandbox's own requests.
+	if agent := r.URL.Query().Get("agent"); agent != "" {
+		query := target.Query()
+		query.Set("agent", agent)
+		target.RawQuery = query.Encode()
+	}
 	transport := connection.Transport()
 	transport.DialContext = item.relays.dial
 	// A chat's socket lives long: no deadline but the ones it brings itself.

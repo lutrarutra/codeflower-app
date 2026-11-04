@@ -202,7 +202,6 @@ func (s *Server) addWorker(saved savedWorker, connection sandbox.Connection) *wo
 		Code:       []string{},
 		Skills:     []string{},
 		Started:    saved.Added,
-		agent:      saved.Agent,
 		label:      saved.Label,
 		status:     "connecting",
 		url:        connection.URL,
@@ -239,7 +238,7 @@ func (s *Server) saveAdded() {
 			continue
 		}
 		item.mu.Lock()
-		saved = append(saved, savedWorker{ID: item.ID, Address: item.url, Name: item.name, Agent: item.agent, Label: item.label, Added: item.Started})
+		saved = append(saved, savedWorker{ID: item.ID, Address: item.url, Name: item.name, Label: item.label, Added: item.Started})
 		item.mu.Unlock()
 	}
 	s.added.save(saved)
@@ -251,7 +250,6 @@ type savedWorker struct {
 	ID      string    `json:"id"`
 	Address string    `json:"address"`
 	Name    string    `json:"name,omitempty"`
-	Agent   string    `json:"agent,omitempty"`
 	Label   string    `json:"label,omitempty"`
 	Added   time.Time `json:"added"`
 }
@@ -317,7 +315,6 @@ func (store *workerStore) save(workers []savedWorker) {
 type SavedWorker struct {
 	ID         string
 	Name       string
-	Agent      string
 	Connection sandbox.Connection
 }
 
@@ -330,7 +327,7 @@ func SavedWorkers() []SavedWorker {
 		if err != nil {
 			continue
 		}
-		result = append(result, SavedWorker{ID: saved.ID, Name: saved.Name, Agent: saved.Agent, Connection: connection})
+		result = append(result, SavedWorker{ID: saved.ID, Name: saved.Name, Connection: connection})
 	}
 	return result
 }

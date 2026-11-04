@@ -568,3 +568,18 @@ func TestAHoldThatWasNotRenewedLapses(t *testing.T) {
 		t.Error("this computer's own hold refused it")
 	}
 }
+
+func TestOnlyChatSocketsAreReachable(t *testing.T) {
+	for path, want := range map[string]bool{
+		"/api/workers/local-1a2b/acp":               true,
+		"/api/workers/local-1a2b/acp?agent=codex":   true,
+		"/api/workers/local-1a2b/acp?agent=x&y=1":   false,
+		"/api/workers/local-1a2b/acp?ticket=secret": false,
+		"/api/workers/local-1a2b/files":             false,
+		"/api/workers/a/b/acp":                      false,
+	} {
+		if got := acpPath.MatchString(path); got != want {
+			t.Errorf("%s: %v, want %v", path, got, want)
+		}
+	}
+}

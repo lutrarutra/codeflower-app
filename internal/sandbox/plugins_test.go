@@ -18,7 +18,7 @@ import (
 func enabled(value bool) *bool { return &value }
 
 func TestPluginsJSONGivesTheAgentsEntries(t *testing.T) {
-	got := PluginsJSON("claude", []config.PluginEntry{{Source: "github:a/b"}, {Source: "path:/x", Enabled: enabled(false)}})
+	got := PluginsJSON(map[string][]config.PluginEntry{"claude": {{Source: "github:a/b"}, {Source: "path:/x", Enabled: enabled(false)}}})
 	want := `{"claude":[{"source":"github:a/b","enabled":true},{"source":"path:/x","enabled":false}]}`
 	if got != want {
 		t.Fatalf("got %s", got)
@@ -107,7 +107,7 @@ func TestWorkerFetchesMissingPluginsFirstWithoutKeys(t *testing.T) {
 	engine := filepath.Join(directory, "apptainer")
 	script := "#!/bin/sh\n[ \"$1\" = inspect ] && { echo '{}'; exit 0; }\n" +
 		"if [ \"$APPTAINERENV_CODEFLOWER_PLUGINS_FETCH\" = 1 ]; then\n" +
-		"  echo \"fetch key=$APPTAINERENV_CODEFLOWER_API_KEY port=$APPTAINERENV_CODEFLOWER_PORT plugins=$APPTAINERENV_CODEFLOWER_PLUGINS\" >> " + log + "\n" +
+		"  echo \"fetch key=$APPTAINERENV_CODEFLOWER_API_KEYS port=$APPTAINERENV_CODEFLOWER_PORT plugins=$APPTAINERENV_CODEFLOWER_PLUGINS\" >> " + log + "\n" +
 		"  mkdir -p " + state + "/plugins/claude\n" +
 		"  echo '{\"fetched\":{\"claude:github:org/mine\":{\"version\":\"1.0.0\"}}}' > " + state + "/plugins/claude/state.json\n" +
 		"  echo 'some log line'\n  echo '{\"plugin\":\"claude:github:org/mine\",\"version\":\"1.0.0\"}'\n  echo '{\"done\":true,\"errors\":0}'\n  exit 0\nfi\n" +
@@ -120,8 +120,8 @@ func TestWorkerFetchesMissingPluginsFirstWithoutKeys(t *testing.T) {
 		Engine:  EngineStatus{Name: EngineApptainer, Executable: engine},
 		Image:   filepath.Join(directory, "image.sif"),
 		State:   state,
-		APIKey:  "sk-secret",
-		Plugins: []config.PluginEntry{{Source: "github:org/mine"}},
+		APIKeys: map[string]string{"claude": "sk-secret"},
+		Plugins: map[string][]config.PluginEntry{"claude": {{Source: "github:org/mine"}}},
 		Stdout:  io.Discard, Stderr: io.Discard,
 	}
 	for range 2 {

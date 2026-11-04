@@ -115,6 +115,7 @@ networks.`,
 		},
 	}
 	addSandboxFlags(command, &options)
+	addAgentFlag(command, &options, "agent that starts on the task; the sandbox runs every agent", false)
 	command.Flags().StringVar(&promptFile, "prompt", "", "read TASK from this Markdown file instead of an argument")
 	command.Flags().StringVar(&listenHost, "host", "0.0.0.0", "interface the worker listens on (Apptainer; Docker and Podman always publish on 127.0.0.1)")
 	command.Flags().BoolVar(&servePage, "server", false,

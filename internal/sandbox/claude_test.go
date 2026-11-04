@@ -134,9 +134,36 @@ func TestEnsureClaudeRejectsADownloadThatDoesNotMatchItsHash(t *testing.T) {
 	}
 }
 
-func TestWorkersOfOtherAgentsNeedNoClaude(t *testing.T) {
-	binds, err := Worker{Agent: "codex"}.claudeBinds(context.Background())
+func TestTasksOfOtherAgentsNeedNoClaude(t *testing.T) {
+	binds, err := Worker{Agent: "codex", Task: "task-1"}.claudeBinds(context.Background())
 	if err != nil || binds != nil {
 		t.Fatalf("binds = %v, %v", binds, err)
+	}
+}
+
+func TestASandboxStartsWithoutClaudeWhenItCannotBeDownloaded(t *testing.T) {
+	directory := t.TempDir()
+	t.Setenv("CODEFLOWER_AGENTS_DIR", directory)
+	previous := npmRegistry
+	npmRegistry = "http://127.0.0.1:9"
+	t.Cleanup(func() { npmRegistry = previous })
+	engine := filepath.Join(directory, "podman")
+	// An image that names a Claude Code version, which nothing can download.
+	script := "#!/bin/sh\necho '{\"codeflower.claude-agent-sdk\":\"0.0.1\"}'\n"
+	if err := os.WriteFile(engine, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var log strings.Builder
+	worker := Worker{Engine: EngineStatus{Name: EnginePodman, Executable: engine}, Image: "image", Stderr: &log}
+	if binds, err := worker.claudeBinds(context.Background()); err != nil || binds != nil {
+		t.Fatalf("a sandbox for windows: binds = %v, %v", binds, err)
+	}
+	if !strings.Contains(log.String(), "could not be downloaded") {
+		t.Fatalf("logged %q", log.String())
+	}
+	task := worker
+	task.Agent, task.Task = "claude", "task-1"
+	if _, err := task.claudeBinds(context.Background()); err == nil {
+		t.Fatal("a Claude Code task started without Claude Code")
 	}
 }

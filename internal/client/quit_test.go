@@ -53,7 +53,7 @@ func newWrapUpBridge(t *testing.T, answer int) (*wrapUpBridge, *sandbox.Connecti
 			if len(bridge.asked) > 0 && bridge.answer == http.StatusAccepted {
 				wrapUp = fmt.Sprintf(`,"wrapUp":{"reason":"quit","state":%q,"chats":1}`, state)
 			}
-			fmt.Fprintf(w, `{"agent":"claude","working":1,"waiting":0,"chats":[]%s}`, wrapUp)
+			fmt.Fprintf(w, `{"working":1,"waiting":0,"chats":[]%s}`, wrapUp)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}

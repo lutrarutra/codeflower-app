@@ -22,7 +22,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -670,8 +669,4 @@ func openBrowser(url string) error {
 		return nil
 	}
 	return lastError
-}
-
-func validAgent(agent string) bool {
-	return slices.Contains(sandbox.Agents, agent)
 }

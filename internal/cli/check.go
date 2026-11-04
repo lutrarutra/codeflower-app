@@ -105,7 +105,7 @@ func checkCommand() *cobra.Command {
 			}
 			resolved, _ := sandbox.ResolveImage(image, engine.Name)
 			fmt.Fprintf(out, "The sandbox image %s is ready.\n", resolved)
-			fmt.Fprintln(out, "\nStart one with:  codeflower sandbox --agent claude --input DATA_FOLDER  (or: codeflower gui)")
+			fmt.Fprintln(out, "\nStart one with:  codeflower sandbox --input DATA_FOLDER  (or: codeflower gui)")
 			return nil
 		},
 	}

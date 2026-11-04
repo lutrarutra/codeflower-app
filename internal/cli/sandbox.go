@@ -24,22 +24,25 @@ func sandboxCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "sandbox",
 		Short: "Start a sandbox (worker) to use from VS Code or the browser",
-		Long: `Start a sandbox for a project with one agent, to work with from VS Code.
+		Long: `Start a sandbox for a project, to work with from VS Code or the browser.
+Every agent runs in it: Claude Code, Codex, DeepSeek Harness and OpenCode;
+each chat is one agent's, chosen when it starts.
+
 Each folder is mounted in a subfolder named after it: data folders read-only
 in /data/input, output folders read-write in /data/output, code folders (your
-repositories and packages, which the agent may change) read-write in
-/data/code, and skills folders read-only in /data/skills, where the agent
-loads them from.
+repositories and packages, which the agents may change) read-write in
+/data/code, and skills folders read-only in /data/skills, where the agents
+load them from.
 
 With --isolate-network the sandbox has no network of its own: the app
-is its only way out, and lets it reach only its agent's service and the hosts
-in the allowlist file. Edit the file while the sandbox runs to allow more.
+is its only way out, and lets it reach only the agents' services and the
+hosts in the allowlist file. Edit the file while the sandbox runs to allow more.
 
 It prints a link to open in the browser while "codeflower client" runs on
 your computer, which adds the sandbox there; or, in VS Code, run "code
-flower: Connect to worker" and paste the codeflower://… line. If the agent
-is not signed in for this project yet, the page or VS Code offers its sign-in
-after connecting. Press Ctrl+C to stop.
+flower: Connect to worker" and paste the codeflower://… line. Sign in to the
+agents from the page's or VS Code's view of the sandbox; logins are kept in
+the project. Press Ctrl+C to stop.
 
 With --server the sandbox also serves its chat page on the same port and
 prints a link to it (http://HOST:PORT/?key=…), like Jupyter's: open it in any
@@ -51,11 +54,11 @@ networks.
 To start a session with an initial task and continue it in VS Code, see
 "codeflower run". To let the agent work on a task by itself instead, see
 "codeflower task".`,
-		Example: `  codeflower sandbox --agent claude --input ~/data/study42 --output ~/results/study42
-  codeflower sandbox --agent claude --input ~/data/rna --input ~/data/atac --code ~/src/mypkg
-  codeflower sandbox --agent codex --project study42 --input /data/study42
-  codeflower sandbox --agent claude --input ~/data/study42 --skills ~/my-skills --isolate-network
-  codeflower sandbox --agent claude --image ./codeflower-sandbox.sif --state ~/cf/study42 --bind /data/ref:/reference`,
+		Example: `  codeflower sandbox --input ~/data/study42 --output ~/results/study42
+  codeflower sandbox --input ~/data/rna --input ~/data/atac --code ~/src/mypkg
+  codeflower sandbox --project study42 --input /data/study42
+  codeflower sandbox --input ~/data/study42 --skills ~/my-skills --isolate-network
+  codeflower sandbox --image ./codeflower-sandbox.sif --state ~/cf/study42 --bind /data/ref:/reference`,
 		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			if err := options.check(); err != nil {

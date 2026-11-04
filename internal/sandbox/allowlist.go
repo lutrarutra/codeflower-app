@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,6 +27,19 @@ var ProviderHosts = func() map[string][]string {
 	}
 	return hosts
 }()
+
+// ProviderHostsOf are the services of the agents, each once.
+func ProviderHostsOf(agentIDs []string) []string {
+	var hosts []string
+	for _, agent := range agentIDs {
+		for _, host := range ProviderHosts[agent] {
+			if !slices.Contains(hosts, host) {
+				hosts = append(hosts, host)
+			}
+		}
+	}
+	return hosts
+}
 
 // AllowlistPreset is a set of hosts one service needs, allowed by a single
 // "@name" line in the allowlist file.
@@ -84,7 +98,7 @@ func allowlistHeader() string {
 #   *.example.org        every subdomain of example.org (not example.org itself)
 #   example.org:8443     example.org on port 8443 only
 #   @pypi                a preset: every host one service needs (see below)
-# The agent's own service is always allowed. Every host here is also a place
+# The agents' own services are always allowed. Every host here is also a place
 # the agent could send your data to: prefer hosts that only serve downloads.
 # Changes apply immediately, without restarting the sandbox.
 #
@@ -275,7 +289,7 @@ func (a *allowlist) refresh() {
 	info, err := os.Stat(a.path)
 	if err != nil {
 		if a.content != nil || a.modified.IsZero() {
-			a.log(fmt.Sprintf("network: cannot read the allowlist %s: %v; only the agent's service is allowed", a.path, err))
+			a.log(fmt.Sprintf("network: cannot read the allowlist %s: %v; only the agents' services are allowed", a.path, err))
 		}
 		a.content, a.user, a.modified = nil, nil, time.Unix(1, 0)
 		return

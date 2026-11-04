@@ -63,17 +63,23 @@ func NewToken() string {
 	return base64.RawURLEncoding.EncodeToString(bytes)
 }
 
-// Worker is one sandbox with its agent bridge.
-// APIKeyVariable carries the API key of the config to the bridge, which
-// removes it from its environment again.
-const APIKeyVariable = "CODEFLOWER_API_KEY"
+// APIKeysVariable carries the config's API keys to the bridge, as JSON by
+// agent, which removes it from its environment again.
+const APIKeysVariable = "CODEFLOWER_API_KEYS"
 
+// Worker is one sandbox with its agent bridge. A worker for windows runs
+// every agent; a task, a terminal UI and a plugins fetch run run one.
 type Worker struct {
+	// Agent is the one agent of a task, a terminal UI or a plugins fetch run,
+	// and the agent of a run's initial prompt.
 	Agent  string
 	Engine EngineStatus
 	Image  string
 	// State is the prepared, absolute project directory.
-	State         string
+	State string
+	// Env, when set, is the project's prepared env folder (PrepareEnv),
+	// mounted over the project's software environment and caches.
+	Env           string
 	Binds         []Bind
 	ListenHost    string
 	AdvertiseHost string
@@ -90,9 +96,9 @@ type Worker struct {
 	// Isolation, when set, cuts the sandbox off the network except for what
 	// the app's proxy allows.
 	Isolation *Isolation
-	// APIKey, when set, is given to the agent's bridge in the environment (never
-	// in the command line); it stores the key in the agent's own files.
-	APIKey string
+	// APIKeys, by agent, are given to the bridge in the environment (never in
+	// the command line); it stores each in its agent's own files.
+	APIKeys map[string]string
 	// Images, when set, lets codeflower-sketch generate icons: the key is
 	// given in a private file for the worker's lifetime.
 	Images *config.ImageGeneration
@@ -120,9 +126,9 @@ type Worker struct {
 	TUIAgain string
 	// NoTunnel keeps the sandbox from browsers paired through the tunnel.
 	NoTunnel bool
-	// Plugins are the config's plugins for the agent (docs/plugins.md). Those
+	// Plugins are the config's plugins, by agent (docs/plugins.md). Those
 	// never fetched are fetched before the worker starts.
-	Plugins []config.PluginEntry
+	Plugins map[string][]config.PluginEntry
 	// PluginsFetch makes this the fetch run (FetchPlugins): no port, and an
 	// isolated one reaches only the agent's plugin hosts.
 	PluginsFetch bool
@@ -158,7 +164,6 @@ type Connection struct {
 	URL           string `json:"url"`
 	Host          string `json:"host"`
 	Port          int    `json:"port"`
-	Agent         string `json:"agent"`
 	InitialPrompt bool   `json:"initialPrompt,omitempty"`
 	// Token also authorizes the bridge's /status.
 	Token string `json:"token"`
@@ -202,8 +207,12 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	if err := checkTargets(w.Binds); err != nil {
 		return 1, err
 	}
-	if !w.PluginsFetch && HasPlugins(w.Agent) {
-		w.fetchMissingPlugins(ctx)
+	if !w.PluginsFetch {
+		for _, agent := range w.agentsRun() {
+			if HasPlugins(agent) {
+				w.fetchMissingPlugins(ctx, agent)
+			}
+		}
 	}
 	// Tasks, fetch runs and terminal UIs do not listen for windows.
 	listens := w.Task == "" && !w.PluginsFetch && w.TUI == ""
@@ -287,7 +296,7 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 		token = NewToken()
 	}
 	values := WorkerEnvironment(WorkerSettings{
-		Agent:         w.Agent,
+		Agent:         w.oneAgent(),
 		InstanceID:    instanceID,
 		Token:         token,
 		ListenHost:    listen,
@@ -300,17 +309,21 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 		Binds:         w.Binds,
 	})
 	resources.environment(values)
-	if w.APIKey != "" {
-		values[APIKeyVariable] = w.APIKey
+	if keys := w.apiKeys(); len(keys) > 0 {
+		values[APIKeysVariable] = keys
 	}
 	if len(w.MCPServers) > 0 {
 		values[MCPServersVariable] = MCPServersJSON(w.MCPServers)
 	}
-	if len(w.Plugins) > 0 {
-		values[PluginsVariable] = PluginsJSON(w.Agent, w.Plugins)
+	if plugins := w.pluginsRun(); len(plugins) > 0 {
+		values[PluginsVariable] = PluginsJSON(plugins)
 	}
 	if w.PluginsFetch {
 		values[PluginsFetchVariable] = "1"
+	}
+	// env/ and cache/ are separate mounts then, which hard links cannot cross.
+	if w.Env != "" {
+		values["UV_LINK_MODE"] = "copy"
 	}
 	for _, bind := range w.Binds {
 		if bind.Target == IconsRoot {
@@ -352,6 +365,7 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	}
 	if w.InitialPrompt != "" {
 		values["CODEFLOWER_INITIAL_PROMPT_FILE"] = RunPromptFile(w.InitialPrompt)
+		values["CODEFLOWER_INITIAL_PROMPT_AGENT"] = w.Agent
 	}
 	if w.TUI != "" {
 		values["CODEFLOWER_TUI"] = "1"
@@ -373,7 +387,7 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	if !w.PluginsFetch && w.TUI == "" {
 		defer register(Running{
 			ID: instanceID, ConnectionFile: connectionFile, Project: filepath.Base(w.State), State: w.State,
-			Agent: w.Agent, Engine: w.Engine.Name, Kind: kind, PID: os.Getpid(), Started: time.Now(), NoTunnel: w.NoTunnel,
+			Agent: w.oneAgent(), Engine: w.Engine.Name, Kind: kind, PID: os.Getpid(), Started: time.Now(), NoTunnel: w.NoTunnel,
 		})()
 	}
 
@@ -424,17 +438,72 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	return code, err
 }
 
-// providerHosts are the hosts an isolated sandbox always reaches: the agent's
-// service, the image model's when one is configured, and the MCP servers'.
+// agentsRun are the agents the sandbox runs: one for a task, a terminal UI
+// or a fetch run, every one for windows.
+func (w Worker) agentsRun() []string {
+	if agent := w.oneAgent(); agent != "" {
+		return []string{agent}
+	}
+	return Agents
+}
+
+// oneAgent is the agent of a sandbox that runs one, else "".
+func (w Worker) oneAgent() string {
+	if w.Task != "" || w.TUI != "" || w.PluginsFetch {
+		return w.Agent
+	}
+	return ""
+}
+
+// apiKeys is APIKeysVariable's value: the keys of the agents the sandbox runs.
+func (w Worker) apiKeys() string {
+	keys := map[string]string{}
+	for _, agent := range w.agentsRun() {
+		if key := w.APIKeys[agent]; key != "" {
+			keys[agent] = key
+		}
+	}
+	if len(keys) == 0 {
+		return ""
+	}
+	data, _ := json.Marshal(keys)
+	return string(data)
+}
+
+// pluginsRun are the config's plugins of the agents the sandbox runs.
+func (w Worker) pluginsRun() map[string][]config.PluginEntry {
+	plugins := map[string][]config.PluginEntry{}
+	for _, agent := range w.agentsRun() {
+		if entries := w.Plugins[agent]; len(entries) > 0 {
+			plugins[agent] = entries
+		}
+	}
+	return plugins
+}
+
+// providerHosts are the hosts an isolated sandbox always reaches: the
+// services of the agents it runs, the image model's when one is configured,
+// and the MCP servers'.
 func (w Worker) providerHosts() []string {
 	if w.PluginsFetch {
 		return PluginHosts(w.Agent)
 	}
-	hosts := append([]string(nil), ProviderHosts[w.Agent]...)
+	hosts := ProviderHostsOf(w.agentsRun())
 	if w.Images != nil {
 		hosts = append(hosts, config.ImageProviders[w.Images.Provider])
 	}
 	return append(hosts, MCPHosts(w.MCPServers)...)
+}
+
+// needsUserNamespaces is whether an agent the sandbox runs sandboxes its
+// commands itself (Codex's bubblewrap).
+func (w Worker) needsUserNamespaces() bool {
+	for _, agent := range w.agentsRun() {
+		if descriptor, _ := agents.Get(agent); descriptor.Container.UserNamespaces {
+			return true
+		}
+	}
+	return false
 }
 
 // writeImageKey puts the image model's key in the project's run folder, where
@@ -456,10 +525,11 @@ func writeImageKey(state, instanceID, key string) (string, error) {
 // containers the daemon or podman start outside them, are limited here.
 func (w Worker) runEngine(ctx context.Context, instanceID string, values map[string]string, port int, netDirectory string, resources Resources) (int, error) {
 	name := "codeflower-" + instanceID[:8]
+	binds := append(EnvBinds(w.Env, w.State), w.Binds...)
 	// An agent that sandboxes its commands itself needs user namespaces
 	// (Docker's and Podman's default profiles refuse them); Apptainer has none.
 	var seccomp []byte
-	if descriptor, _ := agents.Get(w.Agent); descriptor.Container.UserNamespaces && w.Engine.Name != EngineApptainer {
+	if w.needsUserNamespaces() && w.Engine.Name != EngineApptainer {
 		var err error
 		if seccomp, err = UserNamespacesSeccomp(); err != nil {
 			return 1, err
@@ -468,7 +538,7 @@ func (w Worker) runEngine(ctx context.Context, instanceID string, values map[str
 	switch w.Engine.Name {
 	case EngineDocker:
 		return RunDocker(ctx, DockerRun{
-			Name: name, Image: w.Image, State: w.State, Binds: w.Binds, Env: values,
+			Name: name, Image: w.Image, State: w.State, Binds: binds, Env: values,
 			Port: port, InspectPort: w.InspectPort, NetDirectory: netDirectory, CPUs: resources.CPUs, Memory: resources.Memory, Stdin: w.Stdin, Stdout: w.Stdout, Stderr: w.Stderr,
 			TTY: w.TUI != "", Seccomp: seccomp, Kill: w.Kill,
 		})
@@ -482,7 +552,7 @@ func (w Worker) runEngine(ctx context.Context, instanceID string, values map[str
 			defer os.Remove(seccompFile)
 		}
 		return RunPodman(ctx, w.Engine.Executable, PodmanRun{
-			Name: name, Image: w.Image, State: w.State, Binds: w.Binds, Env: values,
+			Name: name, Image: w.Image, State: w.State, Binds: binds, Env: values,
 			Port: port, NetDirectory: netDirectory, CPUs: resources.CPUs, Memory: resources.Memory, Stdin: w.Stdin, Stdout: w.Stdout, Stderr: w.Stderr,
 			TTY: w.TUI != "", SeccompFile: seccompFile, Kill: w.Kill,
 		})
@@ -492,7 +562,7 @@ func (w Worker) runEngine(ctx context.Context, instanceID string, values map[str
 			return 1, err
 		}
 		defer os.RemoveAll(scratch)
-		args, err := ApptainerCommand(w.Engine.Executable, w.Image, w.State, scratch, w.Binds, netDirectory)
+		args, err := ApptainerCommand(w.Engine.Executable, w.Image, w.State, scratch, binds, netDirectory)
 		if err != nil {
 			return 1, err
 		}

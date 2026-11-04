@@ -392,7 +392,7 @@ func describeWorkers(workers []client.RemoteWorker) string {
 	}
 	var lines []string
 	for _, worker := range workers {
-		lines = append(lines, fmt.Sprintf("  %-24s %s (%s)", worker.ID, worker.Label, worker.Agent))
+		lines = append(lines, fmt.Sprintf("  %-24s %s", worker.ID, worker.Label))
 	}
 	return strings.Join(lines, "\n")
 }

@@ -132,6 +132,20 @@ func (c *Config) AgentPlugins(agent string) []PluginEntry {
 	return result
 }
 
+// AllPlugins are the config's plugins of every agent that has some, by agent.
+func (c *Config) AllPlugins() map[string][]PluginEntry {
+	result := map[string][]PluginEntry{}
+	if c == nil {
+		return result
+	}
+	for agent := range c.Plugins {
+		if entries := c.AgentPlugins(agent); len(entries) > 0 {
+			result[agent] = entries
+		}
+	}
+	return result
+}
+
 // checkPlugins refuses unknown agents, bad sources and kinds an agent does not take.
 func (c *Config) checkPlugins() error {
 	for agent, entries := range c.Plugins {

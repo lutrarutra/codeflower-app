@@ -33,7 +33,7 @@ const (
 	SandboxProxy = "http://127.0.0.1:3128"
 )
 
-// Isolation cuts the sandbox off the network except for its agent's service
+// Isolation cuts the sandbox off the network except for its agents' services
 // and the hosts in the allowlist file.
 type Isolation struct {
 	// Allowlist is the absolute path of the user's allowlist file.
@@ -392,7 +392,7 @@ func (p *egressProxy) handle(conn net.Conn) {
 
 	case request.Method == http.MethodGet && request.URL.Path == "/allowlist":
 		provider, user := p.allowlist.rules()
-		body, _ := json.Marshal(map[string]any{"file": p.allowlist.path, "agent": provider, "allowed": user,
+		body, _ := json.Marshal(map[string]any{"file": p.allowlist.path, "providers": provider, "allowed": user,
 			"presets": AllowlistPresets})
 		writeResponse(conn, http.StatusOK, "application/json", string(body))
 

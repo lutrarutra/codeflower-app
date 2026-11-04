@@ -20,7 +20,6 @@ type Target struct {
 	// ID is how the app's page names it: local-1a2b3c4d, or the added one's id.
 	ID      string
 	Name    string
-	Agent   string
 	Source  string // local or added
 	Started time.Time
 	// RunID is a local sandbox's full run id.
@@ -52,7 +51,6 @@ func Targets() []Target {
 		local = append(local, Target{
 			ID:         client.LocalID(running.ID),
 			Name:       projectName(running),
-			Agent:      running.Agent,
 			Source:     "local",
 			Started:    running.Started,
 			RunID:      running.ID,
@@ -63,7 +61,7 @@ func Targets() []Target {
 	sort.SliceStable(local, func(i, j int) bool { return local[i].Started.After(local[j].Started) })
 	targets := local
 	for _, saved := range client.SavedWorkers() {
-		targets = append(targets, Target{ID: saved.ID, Name: saved.Name, Agent: saved.Agent, Source: "added", Connection: saved.Connection})
+		targets = append(targets, Target{ID: saved.ID, Name: saved.Name, Source: "added", Connection: saved.Connection})
 	}
 	return targets
 }
@@ -129,7 +127,9 @@ var errAmbiguous = errors.New("several sandboxes run: name one")
 
 // Chat is a chat of a sandbox, as `_codeflower/sessions/list` lists it.
 type Chat struct {
-	Key       string    `json:"key"`
+	Key string `json:"key"`
+	// Harness is the chat's agent.
+	Harness   string    `json:"harness"`
 	Title     string    `json:"title"`
 	UpdatedAt string    `json:"updatedAt"`
 	Terminal  *Terminal `json:"terminal,omitempty"`
@@ -137,10 +137,14 @@ type Chat struct {
 	State string `json:"state,omitempty"`
 }
 
-// Terminal is a chat's terminal UI, running in the sandbox.
+// Terminal is a chat's terminal UI, or a shell the user opened on the app's
+// page, running in the sandbox.
 type Terminal struct {
 	TerminalID string `json:"terminalId"`
-	SessionKey string `json:"sessionKey"`
+	// Kind is "chat" or "shell"; empty from bridges older than shells, whose
+	// terminals are all chats'.
+	Kind       string `json:"kind,omitempty"`
+	SessionKey string `json:"sessionKey,omitempty"`
 	SessionID  string `json:"sessionId"`
 	Viewers    int    `json:"viewers"`
 	StartedAt  string `json:"startedAt"`
@@ -171,14 +175,56 @@ func ResolveChat(argument string, chats []Chat) (Chat, error) {
 	return Chat{}, fmt.Errorf("%q begins the titles of %d chats: give more of it, or the chat's number", argument, len(matches))
 }
 
-// status is what the bridge says of itself (`_codeflower/status`).
+// status is what the bridge says of itself (`_codeflower/status`): the
+// sandbox, and each of its agents.
 type status struct {
-	Agent        string `json:"agent"`
-	AgentLabel   string `json:"agentLabel"`
-	SignedIn     bool   `json:"signedIn"`
+	Capabilities struct {
+		ShellTerminals bool `json:"shellTerminals"`
+	} `json:"capabilities"`
+	Agents []agentState `json:"agents"`
+}
+
+// agentState is one agent of the sandbox (`_codeflower/agents`).
+type agentState struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	SignedIn bool   `json:"signedIn"`
+	// Unavailable says why the agent cannot run in the sandbox, if it cannot.
+	Unavailable  string `json:"unavailable"`
 	Capabilities struct {
 		ChatTerminals bool `json:"chatTerminals"`
 	} `json:"capabilities"`
+}
+
+// agent is the sandbox's agent id, or one without a name when there is none.
+func (s status) agent(id string) agentState {
+	for _, agent := range s.Agents {
+		if agent.ID == id {
+			return agent
+		}
+	}
+	return agentState{ID: id, Name: id}
+}
+
+// terminalAgents are the agents that have a terminal UI here.
+func (s status) terminalAgents() []agentState {
+	var found []agentState
+	for _, agent := range s.Agents {
+		if agent.Capabilities.ChatTerminals && agent.Unavailable == "" {
+			found = append(found, agent)
+		}
+	}
+	return found
+}
+
+// chatAgent is the agent of a terminal/start: the one named, or the chat's.
+func chatAgent(start map[string]any) string {
+	if agent, ok := start["agent"].(string); ok {
+		return agent
+	}
+	key, _ := start["sessionKey"].(string)
+	agent, _, _ := strings.Cut(key, "-")
+	return agent
 }
 
 type activity struct {

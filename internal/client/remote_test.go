@@ -58,7 +58,7 @@ func fakeBridgeWith(t *testing.T, token string, certificate *sandbox.Certificate
 		}
 		switch r.URL.Path {
 		case "/status":
-			w.Write([]byte(`{"agent":"claude","agentLabel":"Claude Code","connected":false,"working":0,"waiting":0,"chats":[]}`))
+			w.Write([]byte(`{"connected":false,"working":0,"waiting":0,"chats":[]}`))
 			return
 		case "/sessions":
 			w.Write([]byte(`{"sessions":[{"key":"claude-abc","title":"Explore the data","harness":"claude"}]}`))
@@ -68,7 +68,10 @@ func fakeBridgeWith(t *testing.T, token string, certificate *sandbox.Certificate
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		headers <- r.Header.Clone()
+		seen := r.Header.Clone()
+		// What the page's query became (the agent it speaks to).
+		seen.Set("X-Test-Query", r.URL.RawQuery)
+		headers <- seen
 		conn, buffered, err := w.(http.Hijacker).Hijack()
 		if err != nil {
 			return
@@ -108,7 +111,7 @@ func openRelay(t *testing.T, server *httptest.Server, id, origin string, withTic
 	t.Helper()
 	query := ""
 	if withTicket {
-		query = "?ticket=" + ticketFor(t, server)
+		query = "?ticket=" + ticketFor(t, server) + "&agent=codex"
 	}
 	host := strings.TrimPrefix(server.URL, "http://")
 	conn, err := net.Dial("tcp", host)
@@ -173,7 +176,7 @@ func TestPagesReachAnAddedWorkerThroughTheRelay(t *testing.T) {
 	id := connectTo(t, server, address)["id"].(string)
 	waitFor(t, "the worker to answer", func() bool {
 		workers := listed(t, server)
-		return len(workers) == 1 && workers[0]["status"] == "ready" && workers[0]["label"] == "Claude Code"
+		return len(workers) == 1 && workers[0]["status"] == "ready"
 	})
 	if workers := listed(t, server); workers[0]["source"] != "added" {
 		t.Fatalf("worker %v", workers[0])
@@ -187,6 +190,10 @@ func TestPagesReachAnAddedWorkerThroughTheRelay(t *testing.T) {
 	seen := <-headers
 	if seen.Get("Authorization") != "Bearer bridge-token" || seen.Get("Cookie") != "" || seen.Get("Origin") != "" {
 		t.Fatalf("the bridge got %v", seen)
+	}
+	// The page's agent goes on to the bridge; its ticket does not.
+	if query := seen.Get("X-Test-Query"); query != "agent=codex" {
+		t.Fatalf("the bridge got the query %q", query)
 	}
 	conn.Write([]byte("hello\n"))
 	if line, _ := reader.ReadString('\n'); line != "echo:hello\n" {
@@ -368,7 +375,7 @@ func TestWithoutAnEngineTheClientStillConnects(t *testing.T) {
 		capabilities["startDisabledReason"] == "" || data["guide"] == nil || data["pageApi"] != float64(pageAPI) {
 		t.Fatalf("system %d %v", response.StatusCode, data)
 	}
-	response, data = authorized(t, web, "POST", "/api/workers", `{"agent":"claude"}`)
+	response, data = authorized(t, web, "POST", "/api/workers", `{}`)
 	if response.StatusCode != 412 || data["guide"] == nil || data["error"] == "" {
 		t.Fatalf("start %d %v", response.StatusCode, data)
 	}
@@ -388,7 +395,7 @@ func TestConnectOnlyNeverLooksForEngines(t *testing.T) {
 	if response.StatusCode != 200 || capabilities["connectOnly"] != true || capabilities["start"] != false || data["pageApi"] != float64(pageAPI) {
 		t.Fatalf("system %d %v", response.StatusCode, data)
 	}
-	if response, data := authorized(t, web, "POST", "/api/workers", `{"agent":"claude"}`); response.StatusCode != 403 {
+	if response, data := authorized(t, web, "POST", "/api/workers", `{}`); response.StatusCode != 403 {
 		t.Fatalf("start %d %v", response.StatusCode, data)
 	}
 }

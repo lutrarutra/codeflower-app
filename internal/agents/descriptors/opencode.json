@@ -3,6 +3,10 @@
   "name": "OpenCode",
   "description": "Any provider: OpenAI, Anthropic, OpenRouter, OpenCode Zen and more. Sign in with a ChatGPT subscription or an API key, or use a model on the cluster.",
   "color": "violet",
+  "icon": {
+    "file": "icon.svg",
+    "mono": true
+  },
   "order": 40,
   "launch": ".bin/opencode",
   "home": {

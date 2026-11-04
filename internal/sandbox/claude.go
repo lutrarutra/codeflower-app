@@ -15,6 +15,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -165,9 +166,12 @@ func ClaudeBinds(directory string) []Bind {
 }
 
 // claudeBinds installs the Claude Code the worker's image needs and mounts
-// it; nothing for other agents and for images with Claude Code inside.
+// it; nothing when the sandbox does not run Claude Code, or for images with
+// Claude Code inside. Without it, a sandbox that runs only Claude Code does
+// not start; one that runs every agent starts with the others, and its
+// windows show Claude Code as not installed.
 func (w Worker) claudeBinds(ctx context.Context) ([]Bind, error) {
-	if w.Agent != claudeAgent {
+	if !slices.Contains(w.agentsRun(), claudeAgent) {
 		return nil, nil
 	}
 	version, err := ImageClaudeVersion(ctx, w.Engine, w.Image)
@@ -176,9 +180,14 @@ func (w Worker) claudeBinds(ctx context.Context) ([]Bind, error) {
 	}
 	directory, err := EnsureClaude(ctx, version, w.Stderr)
 	if err != nil {
-		return nil, fmt.Errorf("Claude Code %s is not in %s and could not be downloaded: %w\n"+
+		err = fmt.Errorf("Claude Code %s is not in %s and could not be downloaded: %w\n"+
 			"Without internet access here (as on many compute nodes), run `codeflower pull` once where there is",
 			version, AgentsDirectory(), err)
+		if w.oneAgent() == claudeAgent {
+			return nil, err
+		}
+		fmt.Fprintf(w.Stderr, "  claude   %v\n", err)
+		return nil, nil
 	}
 	return ClaudeBinds(directory), nil
 }

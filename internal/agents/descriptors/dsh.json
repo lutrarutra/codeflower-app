@@ -3,6 +3,9 @@
   "name": "DeepSeek Harness",
   "description": "DeepSeek, or any OpenAI-compatible endpoint, with an API key.",
   "color": "indigo",
+  "icon": {
+    "file": "icon.svg"
+  },
   "order": 30,
   "launch": "@deepseek-ai/dsh/lib/bin.js",
   "home": {

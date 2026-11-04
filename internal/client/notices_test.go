@@ -67,7 +67,7 @@ func TestNoticeNamesTheSandboxAndOpensIt(t *testing.T) {
 	server, _ := testServer(t)
 	var told []Notice
 	server.options.Notify = func(notice Notice) { told = append(told, notice) }
-	item := &worker{ID: "w1", Project: "atlas", label: "Claude Code", url: "codeflower://127.0.0.1:4100?token=t"}
+	item := &worker{ID: "w1", Project: "atlas", label: "atlas", url: "codeflower://127.0.0.1:4100?token=t"}
 	polled := server.noticesFor(item)
 	polled(poll(t, `{"turns":0,"chats":[]}`))
 	polled(poll(t, `{"turns":5,"ended":[
@@ -80,7 +80,7 @@ func TestNoticeNamesTheSandboxAndOpensIt(t *testing.T) {
 		t.Fatalf("told %d notices, want one per poll", len(told))
 	}
 	want := Notice{
-		Title: "Claude Code · atlas",
+		Title: "atlas",
 		Body:  "“One” finished\n“Two” finished\nand 2 more",
 		URL:   "vscode://codeflower.codeflower/connect?address=codeflower%3A%2F%2F127.0.0.1%3A4100%3Ftoken%3Dt",
 	}

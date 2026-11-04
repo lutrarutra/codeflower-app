@@ -120,6 +120,31 @@ func TestSkillFolders(t *testing.T) {
 	}
 }
 
+func TestProjectsAndEnvDirectories(t *testing.T) {
+	directory := t.TempDir()
+	home, _ := os.UserHomeDir()
+	t.Setenv("CODEFLOWER_TEST_SCRATCH", "/scratch/me")
+	write(t, directory, "projects_dir: ~/cf\nenv_dir: $CODEFLOWER_TEST_SCRATCH/cf\n", 0o644)
+	loaded, err := Load(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.ProjectsDirectory(); got != filepath.Join(home, "cf") {
+		t.Errorf("projects_dir: %s", got)
+	}
+	if got := loaded.EnvDirectory(); got != filepath.Join("/scratch/me", "cf") {
+		t.Errorf("env_dir: %s", got)
+	}
+
+	write(t, directory, "env_dir: envs\n", 0o644)
+	if loaded, err = Load(directory); err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ProjectsDirectory() != "" || loaded.EnvDirectory() != filepath.Join(directory, "envs") {
+		t.Fatalf("got %q %q", loaded.ProjectsDirectory(), loaded.EnvDirectory())
+	}
+}
+
 func TestIconsFolder(t *testing.T) {
 	directory := t.TempDir()
 	loaded, err := Load(directory)

@@ -55,7 +55,7 @@ Then:
 ```sh
 codeflower check     # can this machine run sandboxes? how to set it up if not
 codeflower client    # the window: start sandboxes, connect to them, chat
-codeflower sandbox --agent claude --input ~/data/study42 --output ~/results/study42
+codeflower sandbox --input ~/data/study42 --output ~/results/study42
 ```
 
 The sandbox needs Docker, Podman or Apptainer. `codeflower sandbox` prints a `codeflower://…` line: paste it
@@ -113,16 +113,17 @@ from the list, which does not stop it.
 
 ### `codeflower sandbox`
 
-Starts a sandbox for a project and keeps it running until Ctrl+C or SIGTERM.
+Starts a sandbox for a project and keeps it running until Ctrl+C or SIGTERM. Every agent runs in it:
+Claude Code, Codex, DeepSeek Harness and OpenCode. Each chat is one agent's, chosen when it starts; sign in
+to the agents from VS Code's Agents node or the page's Manage view.
 
 ```sh
-codeflower sandbox --agent claude --input ~/data/study42 --output ~/results/study42
-codeflower sandbox --agent codex --project study42 --input ~/data/rna --code ~/src/mypkg --isolate-network
+codeflower sandbox --input ~/data/study42 --output ~/results/study42
+codeflower sandbox --project study42 --input ~/data/rna --code ~/src/mypkg --isolate-network
 ```
 
 | Flag | |
 | --- | --- |
-| `--agent` | `claude` (Claude Code), `codex` (Codex), `dsh` (DeepSeek Harness) or `opencode` (OpenCode); asked for on a terminal |
 | `-i, --input DIR` | your data, read-only at `/data/input/NAME` |
 | `-o, --output DIR` | results, created if needed, read-write at `/data/output/NAME` |
 | `-c, --code DIR` | a repository or package the agent changes and runs, read-write at `/data/code/NAME` |
@@ -130,7 +131,9 @@ codeflower sandbox --agent codex --project study42 --input ~/data/rna --code ~/s
 | `--bind SRC[:DST[:ro\|rw]]` | another mount; read-only at `/data/input/NAME` by default |
 | `-p, --project NAME` | the project in `~/codeflower/projects/NAME` (default `default`) |
 | `--state DIR` | the project directory, instead of `--project` |
-| `--isolate-network` | no network except the agent's service and the [allowlist](#network-isolation) |
+| `--projects-dir DIR` | the folder of named projects (default `~/codeflower/projects`) |
+| `--env-dir DIR` | keep the projects' software environments and caches in `DIR/NAME`, e.g. on scratch (default: in the project) |
+| `--isolate-network` | no network except the agents' services and the [allowlist](#network-isolation) |
 | `--allowlist FILE` | the allowlist (default `PROJECT.allowed-hosts.txt` next to the project) |
 | `--cpus`, `--memory 32G`, `--time-limit 8h` | resources the agent is told it has (default: the batch job's); Docker and Podman enforce CPUs and memory |
 | `--port`, `--host`, `--advertise-host` | where the worker listens and the address it prints |
@@ -146,12 +149,13 @@ logins, the workspace and caches, with owner-only permissions; several sandboxes
 ### `codeflower run`
 
 ```sh
-codeflower run --agent claude --input ~/data/study42 --output ~/results/study42 \
+codeflower run --agent codex --input ~/data/study42 --output ~/results/study42 \
   "Analyse the data and generate a report"
 ```
 
 Like `codeflower sandbox`, with the same flags, but sends the task (the argument, `-` for standard input, or
-`--prompt FILE`) as the first prompt of a new chat. Connect from VS Code or the page to follow it,
+`--prompt FILE`) as the first prompt of a new chat with the agent `--agent` names (`claude`, `codex`, `dsh` or
+`opencode`; asked for on a terminal). Connect from VS Code or the page to follow it,
 answer its questions and continue the chat. If the project is not signed in yet, the task waits until
 you connect and sign in.
 
@@ -252,6 +256,8 @@ is optional and a mistyped key is an error. Flags beat environment variables, wh
 engine: auto               # --engine
 image: ""                  # --image
 isolate_network: false     # --isolate-network
+projects_dir: ~/codeflower/projects   # --projects-dir
+env_dir: /scratch/$USER/codeflower    # --env-dir (default: unset, in the project)
 skills: [~/more-skills]    # more skills folders to mount in every sandbox
 agents:                    # claude, codex, dsh or opencode
   claude:
@@ -295,7 +301,7 @@ tunnel:
 
 | Environment variable | |
 | --- | --- |
-| `CODEFLOWER_AGENT`, `CODEFLOWER_ENGINE`, `CODEFLOWER_IMAGE`, `CODEFLOWER_IMAGE_TAG` | defaults for `--agent`, `--engine`, `--image`, `--image-tag` |
+| `CODEFLOWER_AGENT`, `CODEFLOWER_ENGINE`, `CODEFLOWER_IMAGE`, `CODEFLOWER_IMAGE_TAG` | defaults for `--agent` (of `run`, `task`, `tui` and `plugins`), `--engine`, `--image`, `--image-tag` |
 | `CODEFLOWER_CONFIG` | the config directory |
 | `CODEFLOWER_IMAGE_DIR` | where Apptainer images are kept (default `~/codeflower/images`) |
 
@@ -312,7 +318,7 @@ tunnel:
   agents take them that way). A `command` runs inside the sandbox, so it must be installed there,
   for example in the project's environment. A server the agent cannot use (sse for Codex and dsh, a
   command not found, one that does not start) is left out, and the chat says so. With `--isolate-network`, the hosts
-  of `url` servers are reachable like the agent's service, unless they are on a private network:
+  of `url` servers are reachable like the agents' services, unless they are on a private network:
   add those to the allowlist file. A file whose servers have `env` or
   `headers` must not be readable by others (`chmod 600`), as these usually hold tokens; the agent
   can read them inside the sandbox.
@@ -335,7 +341,7 @@ Download the image on the login node, then start the worker in a job:
 codeflower pull --engine apptainer
 sbatch --cpus-per-task=8 --mem=32G --time=8:00:00 --signal=B:TERM@120 \
   --output=$HOME/.codeflower-logs/%j.out \
-  --wrap "codeflower sandbox --agent claude --project study42 --input /data/study42 --output ~/results/study42"
+  --wrap "codeflower sandbox --project study42 --input /data/study42 --output ~/results/study42"
 ```
 
 The worker prints a link for `codeflower client` on your computer and the line for VS Code:
@@ -388,7 +394,7 @@ sandbox release it was tested with (`codeflower --help` shows it under `--image-
 ## Network isolation
 
 With `--isolate-network` the sandbox has no network of its own. The app is its only way out and lets
-it reach only its agent's service and the hosts in the allowlist file, printing what it refuses.
+it reach only its agents' services and the hosts in the allowlist file, printing what it refuses.
 
 - One host per line, `*.example.org` for subdomains, `example.org:8443` for another port. Edits apply
   at once.

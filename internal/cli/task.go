@@ -44,7 +44,7 @@ type taskFlags struct {
 
 // continueKeeps are the flags a continued task cannot change: it keeps its
 // project, agent, folders, network and report.
-var continueKeeps = []string{"agent", "project", "state", "input", "output", "code", "skills", "bind",
+var continueKeeps = []string{"agent", "project", "state", "projects-dir", "input", "output", "code", "skills", "bind",
 	"isolate-network", "allowlist", "skip-report"}
 
 func taskCommand() *cobra.Command {
@@ -140,6 +140,7 @@ interrupted or timed out, 1 other errors.`,
 		},
 	}
 	addSandboxFlags(command, &options)
+	addAgentFlag(command, &options, "agent that works on the task", true)
 	command.Flags().StringVar(&flags.continueDirectory, "continue", "",
 		"continue the task in this folder (PROJECT/tasks/ID, printed when it started) in its session")
 	command.Flags().StringVar(&flags.promptFile, "prompt", "",

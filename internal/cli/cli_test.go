@@ -8,22 +8,31 @@ import (
 	"testing"
 	"time"
 
+	"codeflower-app/internal/config"
 	"codeflower-app/internal/sandbox"
 )
 
-func TestInteractiveRequiresAKnownAgent(t *testing.T) {
-	command := sandboxCommand()
-	command.SetArgs([]string{"--state", t.TempDir(), "--engine", "docker", "--agent", "gemini"})
+func TestATaskRequiresAKnownAgent(t *testing.T) {
+	command := taskCommand()
+	command.SetArgs([]string{"--state", t.TempDir(), "--output", t.TempDir(), "--engine", "docker", "--agent", "gemini", "do it"})
 	err := command.Execute()
 	if err == nil || err.Error() != "--agent must be one of: claude, codex, dsh, opencode" {
 		t.Fatalf("got %v", err)
 	}
 }
 
+func TestASandboxRunsEveryAgentAndTakesNoAgent(t *testing.T) {
+	command := sandboxCommand()
+	command.SetArgs([]string{"--state", t.TempDir(), "--agent", "claude"})
+	if err := command.Execute(); err == nil || !strings.Contains(err.Error(), "unknown flag: --agent") {
+		t.Fatalf("got %v", err)
+	}
+}
+
 func TestInteractiveRejectsUnknownEnginesAndProjectNames(t *testing.T) {
 	cases := map[string][]string{
-		"--engine must be":  {"--agent", "claude", "--engine", "lxc"},
-		"--project must be": {"--agent", "claude", "--project", "../escape"},
+		"--engine must be":  {"--engine", "lxc"},
+		"--project must be": {"--project", "../escape"},
 	}
 	for message, args := range cases {
 		command := sandboxCommand()
@@ -80,6 +89,32 @@ func TestProjectsLiveInTheProjectsDirectory(t *testing.T) {
 	options.state = "/somewhere"
 	if got := options.stateDirectory(); got != "/somewhere" {
 		t.Fatalf("--state did not win: %s", got)
+	}
+}
+
+func TestDirectoryFlagsWinOverTheConfig(t *testing.T) {
+	loaded := &config.Config{ProjectsDir: "/config/projects", EnvDir: "/config/env"}
+	options := commonOptions{project: "study42"}
+	options.useDirectories(loaded)
+	if got := options.stateDirectory(); got != filepath.Join("/config/projects", "study42") {
+		t.Errorf("projects_dir: %s", got)
+	}
+	if got := options.envDirectory(options.stateDirectory()); got != filepath.Join("/config/env", "study42") {
+		t.Errorf("env_dir: %s", got)
+	}
+
+	options = commonOptions{project: "study42", projectsDir: "/flag/projects", envDir: "/flag/env"}
+	options.useDirectories(loaded)
+	if got := options.stateDirectory(); got != filepath.Join("/flag/projects", "study42") {
+		t.Errorf("--projects-dir: %s", got)
+	}
+	// --state names the project's env folder after its own.
+	options.state = "/somewhere/mine"
+	if got := options.envDirectory(options.stateDirectory()); got != filepath.Join("/flag/env", "mine") {
+		t.Errorf("--env-dir: %s", got)
+	}
+	if got := (commonOptions{}).envDirectory("/somewhere/mine"); got != "" {
+		t.Errorf("env folder without --env-dir: %s", got)
 	}
 }
 

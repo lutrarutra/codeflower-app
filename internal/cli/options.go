@@ -25,11 +25,11 @@ func interactive() bool {
 
 // askAgent lets a user who left out --agent pick one.
 func askAgent(in io.Reader, out io.Writer) (string, error) {
-	fmt.Fprintln(out, "Which agent should the sandbox run?")
+	fmt.Fprintln(out, "Which agent?")
 	for index, agent := range sandbox.Agents {
 		fmt.Fprintf(out, "  %d) %s (%s)\n", index+1, sandbox.AgentLabel(agent), agent)
 	}
-	fmt.Fprint(out, "Choose 1-3 [1]: ")
+	fmt.Fprintf(out, "Choose 1-%d [1]: ", len(sandbox.Agents))
 	line, err := bufio.NewReader(in).ReadString('\n')
 	if err != nil && line == "" {
 		return "", fmt.Errorf("--agent is required: %s", strings.Join(sandbox.Agents, ", "))
@@ -62,11 +62,16 @@ func chooseAgent(agent string) (string, error) {
 	return agent, nil
 }
 
-// sandboxOptions are the agent, folder and network flags that sandbox
-// and task share.
+// sandboxOptions are the folder and network flags that sandbox and task
+// share, and the agent of the commands that run one (addAgentFlag).
 type sandboxOptions struct {
 	commonOptions
+	// agent is --agent, for a command that names one agent (addAgentFlag);
+	// runsOne says the sandbox runs only it: not a run's, which serves
+	// windows and so runs every agent.
 	agent          string
+	oneAgent       bool
+	runsOne        bool
 	folders        sandbox.Folders
 	bindValues     []string
 	isolateNetwork bool
@@ -88,8 +93,6 @@ type sandboxOptions struct {
 func addSandboxFlags(command *cobra.Command, options *sandboxOptions) {
 	addCommonFlags(command, &options.commonOptions)
 	options.changed = func(name string) bool { return command.Flags().Changed(name) }
-	command.Flags().StringVar(&options.agent, "agent", os.Getenv("CODEFLOWER_AGENT"),
-		"agent the sandbox runs: claude, codex, dsh, or opencode (or set $CODEFLOWER_AGENT; asked if left out)")
 	command.Flags().StringArrayVarP(&options.folders.Inputs, "input", "i", nil,
 		"folder with your data, mounted read-only at /data/input/NAME (repeatable)")
 	command.Flags().StringArrayVarP(&options.folders.Outputs, "output", "o", nil,
@@ -99,7 +102,7 @@ func addSandboxFlags(command *cobra.Command, options *sandboxOptions) {
 	command.Flags().StringArrayVarP(&options.folders.Skills, "skills", "s", nil,
 		"folder with a skill (a SKILL.md) or with skill folders, mounted read-only at /data/skills/NAME (repeatable)")
 	command.Flags().BoolVar(&options.isolateNetwork, "isolate-network", false,
-		"cut the sandbox off the network except for its agent's service and the hosts in the allowlist (Linux)")
+		"cut the sandbox off the network except for its agents' services and the hosts in the allowlist (Linux)")
 	command.Flags().StringVar(&options.allowlist, "allowlist", "",
 		"file of hosts an isolated sandbox may reach, one per line (default: PROJECT.allowed-hosts.txt next to the project)")
 	command.Flags().StringArrayVar(&options.bindValues, "bind", nil,
@@ -112,19 +115,30 @@ func addSandboxFlags(command *cobra.Command, options *sandboxOptions) {
 		"time the agent has, e.g. 8h or 1-12:00:00 (default: the batch job's time limit); reported, not enforced")
 }
 
+// addAgentFlag adds --agent to a command that names one agent: a task, a
+// terminal UI or a plugins fetch, which run only it (runsOne), or a run's prompt.
+func addAgentFlag(command *cobra.Command, options *sandboxOptions, usage string, runsOne bool) {
+	options.oneAgent, options.runsOne = true, runsOne
+	command.Flags().StringVar(&options.agent, "agent", os.Getenv("CODEFLOWER_AGENT"),
+		usage+": "+strings.Join(sandbox.Agents, ", ")+" (or set $CODEFLOWER_AGENT; asked if left out)")
+}
+
 // check validates the flags, asking for a missing agent on a terminal.
 func (options *sandboxOptions) check() error {
 	if err := options.applyConfig(); err != nil {
 		return err
 	}
-	agent, err := chooseAgent(options.agent)
-	if err != nil {
-		return err
+	if options.oneAgent {
+		agent, err := chooseAgent(options.agent)
+		if err != nil {
+			return err
+		}
+		options.agent = agent
 	}
-	options.agent = agent
 	if err := options.validate(); err != nil {
 		return err
 	}
+	var err error
 	if options.image, err = imageName(options.image, options.imageTag); err != nil {
 		return err
 	}
@@ -172,6 +186,7 @@ func (options *sandboxOptions) applyConfig() error {
 		return err
 	}
 	options.userConfig = loaded
+	options.useDirectories(loaded)
 	if !options.changed("engine") && os.Getenv("CODEFLOWER_ENGINE") == "" && loaded.Engine != "" {
 		options.engine = loaded.Engine
 	}
@@ -234,19 +249,21 @@ func (options sandboxOptions) chooseEngine(ctx context.Context) (sandbox.EngineS
 
 // preparedSandbox is what a worker needs besides how it is reached.
 type preparedSandbox struct {
-	engine    sandbox.EngineStatus
-	image     string
-	state     string
+	engine sandbox.EngineStatus
+	image  string
+	state  string
+	// env is the project's env folder (--env-dir), or "".
+	env       string
 	binds     []sandbox.Bind
 	isolation *sandbox.Isolation
-	// apiKey is the agent's key from the config, if any.
-	apiKey string
+	// apiKeys are the agents' keys from the config, by agent.
+	apiKeys map[string]string
 	// images is the image model from the config, if any.
 	images *config.ImageGeneration
 	// mcpServers are the config's MCP servers.
 	mcpServers []config.MCPServer
-	// plugins are the config's plugins for the agent.
-	plugins   []config.PluginEntry
+	// plugins are the config's plugins, by agent.
+	plugins   map[string][]config.PluginEntry
 	resources sandbox.Resources
 }
 
@@ -262,9 +279,18 @@ func (options sandboxOptions) prepare(ctx context.Context, engine sandbox.Engine
 
 // prepareWith is prepare with the mounts already chosen, e.g. a continued task's.
 func (options sandboxOptions) prepareWith(ctx context.Context, engine sandbox.EngineStatus, what string, binds []sandbox.Bind) (preparedSandbox, error) {
-	apiKey, err := options.userConfig.APIKey(options.agent)
+	apiKeys, err := options.userConfig.APIKeys()
 	if err != nil {
 		return preparedSandbox{}, err
+	}
+	// The agents the sandbox runs: one, or every one for windows.
+	agentsRun := sandbox.Agents
+	if options.runsOne {
+		agentsRun = []string{options.agent}
+	}
+	labels := make([]string, len(agentsRun))
+	for index, agent := range agentsRun {
+		labels[index] = sandbox.AgentLabel(agent)
 	}
 	images, err := options.userConfig.ImageGeneration()
 	if err != nil {
@@ -289,6 +315,12 @@ func (options sandboxOptions) prepareWith(ctx context.Context, engine sandbox.En
 	if err != nil {
 		return preparedSandbox{}, err
 	}
+	var env string
+	if dir := options.envDirectory(state); dir != "" {
+		if env, err = sandbox.PrepareEnv(dir, state); err != nil {
+			return preparedSandbox{}, err
+		}
+	}
 
 	var isolation *sandbox.Isolation
 	if options.isolateNetwork {
@@ -304,10 +336,13 @@ func (options sandboxOptions) prepareWith(ctx context.Context, engine sandbox.En
 	}
 
 	mcpServers := options.userConfig.MCPServers()
-	fmt.Fprintf(os.Stderr, "Starting %s for %s with %s (%s)\n", what, sandbox.AgentLabel(options.agent), engine.Label, image)
+	fmt.Fprintf(os.Stderr, "Starting %s for %s with %s (%s)\n", what, strings.Join(labels, ", "), engine.Label, image)
 	fmt.Fprintf(os.Stderr, "  project  %s\n", state)
+	if env != "" {
+		fmt.Fprintf(os.Stderr, "  env      %s (software environments and caches)\n", env)
+	}
 	if isolation != nil {
-		hosts := append([]string(nil), sandbox.ProviderHosts[options.agent]...)
+		hosts := sandbox.ProviderHostsOf(agentsRun)
 		if images != nil {
 			hosts = append(hosts, config.ImageProviders[images.Provider])
 		}
@@ -328,8 +363,14 @@ func (options sandboxOptions) prepareWith(ctx context.Context, engine sandbox.En
 		}
 		fmt.Fprintf(os.Stderr, "  %-20s %s (%s%s)\n", bind.Target, bind.Source, mode, origin)
 	}
-	if apiKey != "" {
-		fmt.Fprintf(os.Stderr, "  api key  from the config, for %s\n", sandbox.AgentLabel(options.agent))
+	var keyed []string
+	for _, agent := range agentsRun {
+		if apiKeys[agent] != "" {
+			keyed = append(keyed, sandbox.AgentLabel(agent))
+		}
+	}
+	if len(keyed) > 0 {
+		fmt.Fprintf(os.Stderr, "  api key  from the config, for %s\n", strings.Join(keyed, ", "))
 	}
 	if images != nil {
 		fmt.Fprintf(os.Stderr, "  images   %s, from the config, for generating icons\n", images.Provider)
@@ -341,15 +382,17 @@ func (options sandboxOptions) prepareWith(ctx context.Context, engine sandbox.En
 		}
 		fmt.Fprintf(os.Stderr, "  mcp      %s, from the config\n", strings.Join(names, ", "))
 	}
-	plugins := options.userConfig.AgentPlugins(options.agent)
-	if len(plugins) > 0 {
-		sources := make([]string, len(plugins))
-		for index, entry := range plugins {
-			sources[index] = entry.Source
+	plugins := options.userConfig.AllPlugins()
+	var sources []string
+	for _, agent := range agentsRun {
+		for _, entry := range plugins[agent] {
+			sources = append(sources, entry.Source)
 		}
+	}
+	if len(sources) > 0 {
 		fmt.Fprintf(os.Stderr, "  plugins  %s, from the config\n", strings.Join(sources, ", "))
 	}
-	return preparedSandbox{engine: engine, image: image, state: state, binds: binds, isolation: isolation, apiKey: apiKey,
+	return preparedSandbox{engine: engine, image: image, state: state, env: env, binds: binds, isolation: isolation, apiKeys: apiKeys,
 		images: images, mcpServers: mcpServers, plugins: plugins, resources: options.resources}, nil
 }
 
@@ -371,16 +414,18 @@ func withIcons(binds []sandbox.Bind, folder string) ([]sandbox.Bind, error) {
 	return append(binds, bind), nil
 }
 
-// worker is the prepared sandbox as a worker for agent.
+// worker is the prepared sandbox as a worker; agent is the one agent of a
+// task, a terminal UI or a fetch run, or the agent of a run's prompt.
 func (p preparedSandbox) worker(agent string) sandbox.Worker {
 	return sandbox.Worker{
 		Agent:      agent,
 		Engine:     p.engine,
 		Image:      p.image,
 		State:      p.state,
+		Env:        p.env,
 		Binds:      p.binds,
 		Isolation:  p.isolation,
-		APIKey:     p.apiKey,
+		APIKeys:    p.apiKeys,
 		Images:     p.images,
 		MCPServers: p.mcpServers,
 		Plugins:    p.plugins,

@@ -48,7 +48,7 @@ they have the chat again. DeepSeek Harness has no terminal UI.`,
 		Example: `  codeflower attach
   codeflower attach study42 --last
   codeflower attach study42 "PCA of batch 3"
-  codeflower attach study42 --new
+  codeflower attach study42 --new --agent codex
   ssh -t login-node codeflower attach study42 --last`,
 		Args: cobra.MaximumNArgs(2),
 		RunE: func(command *cobra.Command, args []string) error {
@@ -60,6 +60,9 @@ they have the chat again. DeepSeek Harness has no terminal UI.`,
 			}
 			if options.New && (options.Last || options.Chat != "") {
 				return fmt.Errorf("--new starts a chat of its own: leave out CHAT and --last")
+			}
+			if options.Agent != "" && !options.New && !options.Last {
+				return fmt.Errorf("--agent is for a new chat (--new, or --last without chats); a chat's agent is its own")
 			}
 			switch options.Links {
 			case attach.LinksAuto, attach.LinksLocal, attach.LinksTunnel, attach.LinksPath:
@@ -74,6 +77,8 @@ they have the chat again. DeepSeek Harness has no terminal UI.`,
 		},
 	}
 	command.Flags().BoolVar(&options.New, "new", false, "start a new chat")
+	command.Flags().StringVar(&options.Agent, "agent", "",
+		"agent of a new chat: claude, codex or opencode (default: asked, unless only one has a terminal UI)")
 	command.Flags().BoolVar(&options.Last, "last", false, "open the chat that changed last")
 	command.Flags().BoolVar(&options.Watch, "watch", false, "only watch: what you type is not sent")
 	command.Flags().StringVar(&options.Links, "links", attach.LinksAuto,
@@ -103,9 +108,9 @@ Without SANDBOX, and with more than one running, it lists the sandboxes.`,
 			}
 			out := command.OutOrStdout()
 			if asJSON {
-				return json.NewEncoder(out).Encode(map[string]any{"sandbox": listing.Target.ID, "agent": listing.Agent, "chats": listing.Chats})
+				return json.NewEncoder(out).Encode(map[string]any{"sandbox": listing.Target.ID, "chats": listing.Chats})
 			}
-			fmt.Fprintf(out, "%s · %s\n", listing.Target.Label(), listing.Agent)
+			fmt.Fprintf(out, "%s\n", listing.Target.Label())
 			attach.PrintChats(out, listing.Chats, "")
 			return nil
 		},
@@ -119,7 +124,7 @@ func terminalsCommand() *cobra.Command {
 	var closing string
 	command := &cobra.Command{
 		Use:   "terminals [SANDBOX]",
-		Short: "List the agent's terminal UIs running in a sandbox, or quit one",
+		Short: "List the agent's terminal UIs and the shells running in a sandbox, or quit one",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
 			ctx, cancel := context.WithTimeout(command.Context(), 30*time.Second)
@@ -133,20 +138,24 @@ func terminalsCommand() *cobra.Command {
 			}
 			out := command.OutOrStdout()
 			if asJSON {
-				return json.NewEncoder(out).Encode(map[string]any{"sandbox": listing.Target.ID, "agent": listing.Agent, "terminals": listing.Terminals})
+				return json.NewEncoder(out).Encode(map[string]any{"sandbox": listing.Target.ID, "terminals": listing.Terminals})
 			}
 			if len(listing.Terminals) == 0 {
-				fmt.Fprintf(out, "No terminal UI runs in %s.\n", listing.Target.Label())
+				fmt.Fprintf(out, "No terminal runs in %s.\n", listing.Target.Label())
 				return nil
 			}
 			for _, terminal := range listing.Terminals {
-				fmt.Fprintf(out, "%s  %-48s %d watching  since %s\n", terminal.TerminalID, terminal.SessionKey, terminal.Viewers, terminal.StartedAt)
+				name := terminal.SessionKey
+				if terminal.Kind == "shell" {
+					name = "shell"
+				}
+				fmt.Fprintf(out, "%s  %-48s %d watching  since %s\n", terminal.TerminalID, name, terminal.Viewers, terminal.StartedAt)
 			}
 			return nil
 		},
 	}
 	command.Flags().BoolVar(&asJSON, "json", false, "print JSON")
-	command.Flags().StringVar(&closing, "close", "", "quit the terminal UI with this id or chat key")
+	command.Flags().StringVar(&closing, "close", "", "quit the terminal UI or shell with this id, or a chat's terminal UI by its key")
 	return command
 }
 

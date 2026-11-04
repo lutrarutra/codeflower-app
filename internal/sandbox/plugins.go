@@ -35,13 +35,17 @@ type pluginJSON struct {
 	Enabled bool   `json:"enabled"`
 }
 
-// PluginsJSON is the value of PluginsVariable for one agent's entries.
-func PluginsJSON(agent string, entries []config.PluginEntry) string {
-	list := make([]pluginJSON, 0, len(entries))
-	for _, entry := range entries {
-		list = append(list, pluginJSON{Source: entry.Source, Enabled: entry.IsEnabled()})
+// PluginsJSON is the value of PluginsVariable for the agents' entries.
+func PluginsJSON(plugins map[string][]config.PluginEntry) string {
+	byAgent := make(map[string][]pluginJSON, len(plugins))
+	for agent, entries := range plugins {
+		list := make([]pluginJSON, 0, len(entries))
+		for _, entry := range entries {
+			list = append(list, pluginJSON{Source: entry.Source, Enabled: entry.IsEnabled()})
+		}
+		byAgent[agent] = list
 	}
-	data, _ := json.Marshal(map[string][]pluginJSON{agent: list})
+	data, _ := json.Marshal(byAgent)
 	return string(data)
 }
 
@@ -183,7 +187,7 @@ func (w Worker) FetchPlugins(ctx context.Context) ([]PluginFetchResult, error) {
 	run := w
 	run.PluginsFetch = true
 	run.Task, run.TaskAttempt, run.InitialPrompt = "", 0, ""
-	run.APIKey, run.Images, run.MCPServers = "", nil, nil
+	run.APIKeys, run.Images, run.MCPServers = nil, nil, nil
 	run.ServePage, run.InspectPort, run.Port = false, 0, 0
 	run.Stdin = nil
 	var output bytes.Buffer
@@ -203,11 +207,11 @@ func (w Worker) FetchPlugins(ctx context.Context) ([]PluginFetchResult, error) {
 	return results, nil
 }
 
-// fetchMissingPlugins runs the fetch run before a worker starts when the
-// project has plugins that were never fetched. A failure is reported, and the
-// agent starts without those plugins.
-func (w Worker) fetchMissingPlugins(ctx context.Context) {
-	missing, err := PluginsMissing(w.State, w.Agent, w.Plugins)
+// fetchMissingPlugins runs the agent's fetch run before a worker starts when
+// the project has plugins of it that were never fetched. A failure is
+// reported, and the agent starts without those plugins.
+func (w Worker) fetchMissingPlugins(ctx context.Context, agent string) {
+	missing, err := PluginsMissing(w.State, agent, w.Plugins[agent])
 	if err != nil {
 		fmt.Fprintf(w.Stderr, "  plugins  could not read the project's plugins: %v\n", err)
 		return
@@ -215,8 +219,9 @@ func (w Worker) fetchMissingPlugins(ctx context.Context) {
 	if len(missing) == 0 {
 		return
 	}
-	fmt.Fprintf(w.Stderr, "  plugins  fetching %s for %s…\n", strings.Join(missing, ", "), AgentLabel(w.Agent))
+	fmt.Fprintf(w.Stderr, "  plugins  fetching %s for %s…\n", strings.Join(missing, ", "), AgentLabel(agent))
 	fetch := w
+	fetch.Agent = agent
 	fetch.Stdout = io.Discard
 	results, err := fetch.FetchPlugins(ctx)
 	if err != nil {

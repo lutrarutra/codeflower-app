@@ -164,10 +164,13 @@ func (s *Server) noticesFor(item *worker) func(*activity) {
 			return
 		}
 		item.mu.Lock()
-		title, address := item.label, item.url
+		// The sandbox's name, which every agent's chats share.
+		title, address := item.name, item.url
 		item.mu.Unlock()
-		if item.Project != "" {
-			title += " · " + item.Project
+		for _, candidate := range []string{item.Project, item.label, "A sandbox"} {
+			if title == "" {
+				title = candidate
+			}
 		}
 		s.options.Notify(notice(title, address, lines))
 	}

@@ -36,7 +36,7 @@ func TestSandboxesStartedOnThisComputerAreListedWithoutTheirLine(t *testing.T) {
 	connectionFile := filepath.Join(t.TempDir(), "instance.json")
 	terminal := sandbox.Running{
 		ID: "0123456789ab", ConnectionFile: connectionFile, Project: "study", State: "/projects/study",
-		Agent: "claude", Engine: "docker", Kind: "worker", PID: process.Process.Pid, Started: time.Now(),
+		Engine: "docker", Kind: "worker", PID: process.Process.Pid, Started: time.Now(),
 	}
 	// This client's own sandboxes are listed as started, not again as local.
 	own := sandbox.Running{ID: "fedcba987654", Kind: "worker", PID: os.Getpid()}
@@ -44,7 +44,7 @@ func TestSandboxesStartedOnThisComputerAreListedWithoutTheirLine(t *testing.T) {
 	server.syncLocal([]sandbox.Running{terminal, own})
 	workers := listed(t, page)
 	if len(workers) != 1 || workers[0]["source"] != "local" || workers[0]["status"] != "starting" ||
-		workers[0]["project"] != "study" || workers[0]["label"] != "Claude Code" {
+		workers[0]["project"] != "study" || workers[0]["label"] != "study" {
 		t.Fatalf("before the bridge listens: %v", workers)
 	}
 	id := workers[0]["id"].(string)

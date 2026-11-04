@@ -330,7 +330,7 @@ func TestProxyAnswersWithTheAllowlist(t *testing.T) {
 		t.Fatal(err)
 	}
 	body, _ := io.ReadAll(response.Body)
-	for _, want := range []string{`"agent":["api.example.com"]`, `"allowed":["pypi.org","*.hf.co"]`, `hosts.txt"`, `"name":"pypi"`} {
+	for _, want := range []string{`"providers":["api.example.com"]`, `"allowed":["pypi.org","*.hf.co"]`, `hosts.txt"`, `"name":"pypi"`} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("missing %s in %s", want, body)
 		}

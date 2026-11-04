@@ -80,19 +80,9 @@ func writeOnce(path string, content []byte) error {
 // PrepareState creates the project layout and its default files, and returns
 // the absolute project path.
 func PrepareState(dir string) (string, error) {
-	state, err := filepath.Abs(expandHome(dir))
+	state, err := privateRoot(dir, "state")
 	if err != nil {
 		return "", err
-	}
-	// Apptainer binds are SOURCE:TARGET; a Windows drive letter is not part of that.
-	if strings.Contains(strings.TrimPrefix(state, filepath.VolumeName(state)), ":") {
-		return "", fmt.Errorf("state path must not contain ':'")
-	}
-	if err := privateDirectory(state); err != nil {
-		return "", err
-	}
-	if resolved, err := filepath.EvalSymlinks(state); err == nil {
-		state = resolved
 	}
 	for _, name := range StateDirectories {
 		if err := privateDirectory(filepath.Join(state, name)); err != nil {
@@ -121,4 +111,69 @@ func PrepareState(dir string) (string, error) {
 		}
 	}
 	return state, nil
+}
+
+// privateRoot creates dir with owner-only permissions and returns its
+// absolute, resolved path.
+func privateRoot(dir, what string) (string, error) {
+	root, err := filepath.Abs(expandHome(dir))
+	if err != nil {
+		return "", err
+	}
+	// Apptainer binds are SOURCE:TARGET; a Windows drive letter is not part of that.
+	if strings.Contains(strings.TrimPrefix(root, filepath.VolumeName(root)), ":") {
+		return "", fmt.Errorf("%s path must not contain ':'", what)
+	}
+	if err := privateDirectory(root); err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	return root, nil
+}
+
+// EnvFolder is the project's folder in an env directory (--env-dir), named
+// after the project.
+func EnvFolder(envDir, state string) string {
+	return filepath.Join(envDir, filepath.Base(state))
+}
+
+// PrepareEnv creates a project's env folder (EnvFolder) with the env/ and
+// cache/ that EnvBinds mount over the project's own, and returns its
+// absolute path. The project's env/exports, the environment's recipe, stays
+// in the project, so a purged env folder can be rebuilt from it.
+func PrepareEnv(dir, state string) (string, error) {
+	env, err := privateRoot(dir, "env")
+	if err != nil {
+		return "", err
+	}
+	if env == state || strings.HasPrefix(env, state+string(filepath.Separator)) ||
+		strings.HasPrefix(state, env+string(filepath.Separator)) {
+		return "", fmt.Errorf("the env folder %s must be outside the project %s", env, state)
+	}
+	// env/exports is the mount point of the project's own.
+	for _, name := range []string{"env/exports", "cache"} {
+		if err := privateDirectories(env, name); err != nil {
+			return "", err
+		}
+	}
+	if err := privateDirectories(state, "env/exports"); err != nil {
+		return "", err
+	}
+	return env, nil
+}
+
+// EnvBinds mount a project's env folder (PrepareEnv) over its env/ and
+// cache/, and its own env/exports back over the env folder's. None when env
+// is empty: the environment is in the project.
+func EnvBinds(env, state string) []Bind {
+	if env == "" {
+		return nil
+	}
+	return []Bind{
+		{Source: filepath.Join(env, "env"), Target: ContainerState + "/env"},
+		{Source: filepath.Join(state, "env", "exports"), Target: ContainerState + "/env/exports"},
+		{Source: filepath.Join(env, "cache"), Target: ContainerState + "/cache"},
+	}
 }

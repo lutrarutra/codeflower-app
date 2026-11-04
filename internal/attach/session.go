@@ -19,7 +19,9 @@ type Options struct {
 	Sandbox string
 	Chat    string
 	New     bool
-	Last    bool
+	// Agent of a new chat; without it, the only one with a terminal UI, or the user's pick.
+	Agent string
+	Last  bool
 	// Watch only: what is typed is not sent, and the size stays the typist's.
 	Watch bool
 	// Links: how the files the agent shows are linked (LinksAuto, …).
@@ -75,18 +77,16 @@ func Run(ctx context.Context, options Options) error {
 	if err := c.call(ctx, "_codeflower/status", map[string]any{}, &bridge); err != nil {
 		return err
 	}
-	label := bridge.AgentLabel
-	if !bridge.Capabilities.ChatTerminals {
-		return fmt.Errorf("%s in %s has no terminal UI in code flower (Claude Code, Codex and OpenCode have), or its image is older than `codeflower attach`", label, target.Label())
-	}
-	if !bridge.SignedIn {
-		fmt.Fprintf(options.Err, "%s is not signed in in %s: sign in from its chat (Sign in…) first.\n", label, target.Label())
+	if len(bridge.terminalAgents()) == 0 {
+		return fmt.Errorf("no agent in %s has a terminal UI in code flower (Claude Code, Codex and OpenCode have), or its image is older than `codeflower attach`", target.Label())
 	}
 
 	start := map[string]any{"kind": "chat"}
 	switch {
 	case options.New:
-		start["new"] = true
+		if start, err = newChat(options.Out, input, bridge, options.Agent); err != nil {
+			return err
+		}
 	case options.Chat != "" || options.Last:
 		list, err := chats(ctx, c)
 		if err != nil {
@@ -94,7 +94,9 @@ func Run(ctx context.Context, options Options) error {
 		}
 		if options.Last {
 			if len(list) == 0 {
-				start["new"] = true
+				if start, err = newChat(options.Out, input, bridge, options.Agent); err != nil {
+					return err
+				}
 				break
 			}
 			start["sessionKey"] = list[0].Key
@@ -106,7 +108,7 @@ func Run(ctx context.Context, options Options) error {
 		}
 		start["sessionKey"] = chat.Key
 	default:
-		chosen, err := pickChat(ctx, c, options.Out, input, target, label, "")
+		chosen, err := pickChat(ctx, c, options.Out, input, target, bridge, "")
 		if err != nil {
 			return err
 		}
@@ -120,7 +122,7 @@ func Run(ctx context.Context, options Options) error {
 	if page.note != "" {
 		fmt.Fprintln(options.Err, page.note)
 	}
-	session := &session{conn: c, options: options, input: input, target: target, label: label, page: page, handsOver: bridge.Agent == "claude"}
+	session := &session{conn: c, options: options, input: input, target: target, bridge: bridge, page: page}
 	return session.run(ctx, start)
 }
 
@@ -129,10 +131,9 @@ type session struct {
 	options Options
 	input   <-chan []byte
 	target  Target
-	label   string
-	page    pageLinks
-	// The agent's terminal UI takes the chat over (Claude Code) instead of sharing it.
-	handsOver bool
+	// bridge is what the sandbox said of itself and its agents.
+	bridge status
+	page   pageLinks
 	// The files the agent showed, newest last, with their links.
 	shown []shownFile
 }
@@ -164,7 +165,7 @@ func (s *session) run(ctx context.Context, start map[string]any) error {
 		case ended:
 			return nil
 		}
-		chosen, err := pickChat(ctx, s.conn, s.options.Out, s.input, s.target, s.label, started.SessionKey)
+		chosen, err := pickChat(ctx, s.conn, s.options.Out, s.input, s.target, s.bridge, started.SessionKey)
 		if err != nil {
 			return err
 		}
@@ -189,8 +190,13 @@ func (s *session) attach(ctx context.Context, start map[string]any) (Terminal, e
 		start["linkBase"] = base
 	}
 	var started Terminal
-	fmt.Fprintf(out, "%s · %s · opening the terminal UI… (after Enter: ~. detach, ~s switch chat, ~? help)\r\n", s.target.Label(), s.label)
-	if s.handsOver {
+	agent := s.bridge.agent(chatAgent(start))
+	if !agent.SignedIn {
+		fmt.Fprintf(s.options.Err, "%s is not signed in in %s: sign in from the sandbox's view (Sign in…) first.\r\n", agent.Name, s.target.Label())
+	}
+	fmt.Fprintf(out, "%s · %s · opening the terminal UI… (after Enter: ~. detach, ~s switch chat, ~? help)\r\n", s.target.Label(), agent.Name)
+	// Claude Code's terminal UI takes the chat over instead of sharing it.
+	if agent.ID == "claude" {
 		fmt.Fprint(out, "It takes the chat over once the chat's current turn, if any, has ended.\r\n")
 	}
 	if err := s.conn.call(ctx, "_codeflower/terminal/start", start, &started); err != nil {

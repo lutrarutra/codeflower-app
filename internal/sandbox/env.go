@@ -74,7 +74,11 @@ type mountInfo struct {
 // WorkerEnvironment is the full environment the bridge starts with.
 func WorkerEnvironment(settings WorkerSettings) map[string]string {
 	values := ContainerEnvironment()
-	values["CODEFLOWER_AGENT"] = settings.Agent
+	// The one agent of a task, a terminal UI or a fetch run; a worker for
+	// windows runs them all.
+	if settings.Agent != "" {
+		values["CODEFLOWER_AGENT"] = settings.Agent
+	}
 	values["CODEFLOWER_INSTANCE_ID"] = settings.InstanceID
 	values["CODEFLOWER_TOKEN"] = settings.Token
 	values["CODEFLOWER_CONNECTION_FILE"] = ContainerState + "/instances/" + settings.InstanceID + ".json"

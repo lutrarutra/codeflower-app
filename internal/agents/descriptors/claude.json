@@ -3,6 +3,9 @@
   "name": "Claude Code",
   "description": "Anthropic. Sign in with a Claude subscription or an API key.",
   "color": "orange",
+  "icon": {
+    "file": "icon.svg"
+  },
   "order": 10,
   "launch": "@agentclientprotocol/claude-agent-acp/dist/index.js",
   "home": {

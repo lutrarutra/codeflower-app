@@ -79,8 +79,7 @@ type worker struct {
 	address string
 	// name is the one the user gave it in the list (an added one's is remembered).
 	name string
-	// Agent and Label of an added worker are known once its bridge answers.
-	agent string
+	// label names the sandbox: its project's name, when the client knows it.
 	label string
 	// status of a started worker: starting, ready, stopping, stopped, failed;
 	// of an added one: connecting, ready, unreachable, unauthorized; of a
@@ -100,7 +99,7 @@ type worker struct {
 	partial bytes.Buffer
 	// fetchPlugins runs the plugin fetch run for a sandbox the client started;
 	// fetching is set while one runs.
-	fetchPlugins func(context.Context) ([]sandbox.PluginFetchResult, error)
+	fetchPlugins func(ctx context.Context, agent string) ([]sandbox.PluginFetchResult, error)
 	fetching     bool
 	cancel       context.CancelFunc
 	done         chan struct{}
@@ -115,7 +114,6 @@ type workerView struct {
 	*worker
 	Address  string    `json:"address,omitempty"`
 	Name     string    `json:"name,omitempty"`
-	Agent    string    `json:"agent"`
 	Label    string    `json:"label"`
 	Status   string    `json:"status"`
 	URL      string    `json:"url,omitempty"`
@@ -135,18 +133,16 @@ func (w *worker) view() workerView {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return workerView{
-		worker: w, Address: w.address, Name: w.name, Agent: w.agent, Label: w.label, Status: w.status, URL: w.url, Error: w.err, ExitCode: w.code,
+		worker: w, Address: w.address, Name: w.name, Label: w.label, Status: w.status, URL: w.url, Error: w.err, ExitCode: w.code,
 		Log: nonNil(slicesClone(w.log)), Activity: w.activity, Relays: relays,
 	}
 }
 
-// activity is what the sandbox's agent does, as its bridge reports at /status:
+// activity is what the sandbox's agents do, as its bridge reports at /status:
 // how many chats work or wait for the user, and whether a window (VS Code, a
 // page) is connected.
 type activity struct {
-	Agent      string `json:"agent"`
-	AgentLabel string `json:"agentLabel"`
-	Connected  bool   `json:"connected"`
+	Connected bool `json:"connected"`
 	// Clients counts the connected windows, and MultiClient says they attach
 	// side by side instead of taking the sandbox over (both missing from older
 	// bridges).
@@ -155,8 +151,8 @@ type activity struct {
 	Working     int            `json:"working"`
 	Waiting     int            `json:"waiting"`
 	Chats       []chatActivity `json:"chats"`
-	// Missing from bridges older than usage tracking.
-	Usage *usage `json:"usage,omitempty"`
+	// Agents: whether each runs, and its account and totals.
+	Agents []agentActivity `json:"agents"`
 	// WrapUp: the chats were asked to wrap up (missing from older bridges).
 	WrapUp *wrapUpActivity `json:"wrapUp,omitempty"`
 	// Ended lists the turns that ended in the last minute, and Turns counts
@@ -173,7 +169,15 @@ type wrapUpActivity struct {
 	Chats  int    `json:"chats"`
 }
 
-// usage is the agent's login, its subscription quota, and the tokens and
+// agentActivity is one agent of the sandbox at /status: whether it runs, and
+// its usage.
+type agentActivity struct {
+	ID      string `json:"id"`
+	Running bool   `json:"running"`
+	Usage   *usage `json:"usage,omitempty"`
+}
+
+// usage is an agent's login, its subscription quota, and the tokens and
 // cost of the sandbox so far.
 type usage struct {
 	Auth struct {
@@ -262,9 +266,6 @@ func (w *worker) watchActivity(ctx context.Context, polled func(*activity)) {
 			switch {
 			case err == nil:
 				w.status, w.err = "ready", ""
-				if current.Agent != "" {
-					w.agent, w.label = current.Agent, current.AgentLabel
-				}
 			case errors.Is(err, errUnauthorized):
 				w.status, w.err = "unauthorized", "The worker refused its token; edit it, or add its current line again."
 			default:
@@ -405,7 +406,6 @@ func (w *worker) setStatus(status string) {
 }
 
 type startRequest struct {
-	Agent   string   `json:"agent"`
 	Inputs  []string `json:"inputs"`
 	Outputs []string `json:"outputs"`
 	Code    []string `json:"code"`
@@ -415,7 +415,7 @@ type startRequest struct {
 	Image   string   `json:"image"`
 	// ImageTag picks a build of the published image instead of Image.
 	ImageTag string `json:"imageTag"`
-	// IsolateNetwork limits the sandbox to its agent's service and the
+	// IsolateNetwork limits the sandbox to its agents' services and the
 	// project's allowlist.
 	IsolateNetwork bool `json:"isolateNetwork"`
 }
@@ -461,10 +461,6 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 	if request.Project == "" {
 		request.Project = "default"
 	}
-	if !validAgent(request.Agent) {
-		writeError(w, http.StatusBadRequest, errors.New("choose an agent"))
-		return
-	}
 	if !projectName.MatchString(request.Project) {
 		writeError(w, http.StatusBadRequest, errors.New("the project name may use letters, digits, '.', '-' and '_'"))
 		return
@@ -487,7 +483,7 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	apiKey, err := loaded.APIKey(request.Agent)
+	apiKeys, err := loaded.APIKeys()
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -550,6 +546,13 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	var env string
+	if dir := loaded.EnvDirectory(); dir != "" {
+		if env, err = sandbox.PrepareEnv(sandbox.EnvFolder(dir, state), state); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+	}
 	var isolation *sandbox.Isolation
 	if request.IsolateNetwork {
 		allowlist, err := sandbox.PrepareAllowlist(sandbox.DefaultAllowlist(state))
@@ -560,23 +563,22 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		isolation = &sandbox.Isolation{Allowlist: allowlist}
 	}
 	s.settings.save(Settings{
-		Agent: request.Agent, Inputs: request.Inputs, Outputs: request.Outputs, Code: request.Code,
+		Inputs: request.Inputs, Outputs: request.Outputs, Code: request.Code,
 		Skills: request.Skills, Project: request.Project, Engine: request.Engine, Image: request.Image, ImageTag: request.ImageTag,
 		IsolateNetwork: request.IsolateNetwork,
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	run := sandbox.Worker{
-		Token: sandbox.NewToken(),
-		Agent: request.Agent, Engine: engine, Image: image, State: state, Binds: binds,
-		Isolation: isolation, APIKey: apiKey, Images: images, MCPServers: loaded.MCPServers(),
-		Plugins: loaded.AgentPlugins(request.Agent),
+		Token:  sandbox.NewToken(),
+		Engine: engine, Image: image, State: state, Env: env, Binds: binds,
+		Isolation: isolation, APIKeys: apiKeys, Images: images, MCPServers: loaded.MCPServers(),
+		Plugins: loaded.AllPlugins(),
 	}
 	item := &worker{
 		ID:      sandbox.NewInstanceID()[:8],
 		Source:  sourceStarted,
-		agent:   request.Agent,
-		label:   sandbox.AgentLabel(request.Agent),
+		label:   request.Project,
 		Engine:  engine.Label,
 		Project: request.Project,
 		State:   state,
@@ -591,26 +593,25 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		token:   run.Token,
 	}
 	run.Stdout, run.Stderr = item, item
-	if sandbox.HasPlugins(request.Agent) {
-		// The page's Fetch now, for a sandbox without the network: the same
-		// image and project, briefly with it.
-		item.fetchPlugins = func(ctx context.Context) ([]sandbox.PluginFetchResult, error) {
-			fetch := run
-			fetch.Stdout = nil
-			return fetch.FetchPlugins(ctx)
-		}
+	// The page's Fetch now, for a sandbox without the network: the same image
+	// and project, briefly with it, for one agent.
+	item.fetchPlugins = func(ctx context.Context, agent string) ([]sandbox.PluginFetchResult, error) {
+		fetch := run
+		fetch.Agent = agent
+		fetch.Stdout = nil
+		return fetch.FetchPlugins(ctx)
 	}
-	item.appendLine(fmt.Sprintf("Starting %s with %s (%s)…", item.label, engine.Label, image))
+	item.appendLine(fmt.Sprintf("Starting the sandbox of %s with %s (%s)…", request.Project, engine.Label, image))
 	if isolation != nil {
 		item.Allowlist = isolation.Allowlist
-		hosts := append(append([]string(nil), sandbox.ProviderHosts[request.Agent]...), sandbox.MCPHosts(loaded.MCPServers())...)
+		hosts := append(sandbox.ProviderHostsOf(sandbox.Agents), sandbox.MCPHosts(loaded.MCPServers())...)
 		item.appendLine(fmt.Sprintf("Network isolated: only %s and the hosts in %s", strings.Join(hosts, ", "), isolation.Allowlist))
 	}
 	s.mu.Lock()
 	s.workers[item.ID] = item
 	s.order = append(s.order, item.ID)
 	s.mu.Unlock()
-	fmt.Fprintf(s.options.Log, "Starting %s for project %s\n", item.label, request.Project)
+	fmt.Fprintf(s.options.Log, "Starting a sandbox for project %s\n", request.Project)
 
 	go func() {
 		defer close(item.done)
@@ -716,13 +717,18 @@ func (s *Server) stopWorker(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, item.view())
 }
 
-// fetchWorkerPlugins runs the plugin fetch run for a sandbox the client
-// started, whose bridge then lists the plugins as fetched; the agent picks them
-// up when it restarts. Answers {results}.
+// fetchWorkerPlugins runs the plugin fetch run of an agent (?agent=) for a
+// sandbox the client started, whose bridge then lists the plugins as fetched;
+// the agent picks them up when it restarts. Answers {results}.
 func (s *Server) fetchWorkerPlugins(w http.ResponseWriter, r *http.Request) {
 	item := s.find(r.PathValue("id"))
 	if item == nil {
 		writeError(w, http.StatusNotFound, errors.New("no such sandbox"))
+		return
+	}
+	agent := r.URL.Query().Get("agent")
+	if !sandbox.HasPlugins(agent) {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("%s has no plugins in code flower", sandbox.AgentLabel(agent)))
 		return
 	}
 	item.mu.Lock()
@@ -751,7 +757,7 @@ func (s *Server) fetchWorkerPlugins(w http.ResponseWriter, r *http.Request) {
 		item.appendLine(line)
 	}
 	logLine("Fetching plugins…")
-	results, err := fetch(r.Context())
+	results, err := fetch(r.Context(), agent)
 	for _, result := range results {
 		what := result.Plugin
 		if what == "" {
@@ -864,7 +870,6 @@ func nonNil(values []string) []string {
 
 // Settings are the choices the window remembers between runs.
 type Settings struct {
-	Agent   string   `json:"agent,omitempty"`
 	Inputs  []string `json:"inputs"`
 	Outputs []string `json:"outputs"`
 	Code    []string `json:"code"`

@@ -89,6 +89,7 @@ them in the app, use "codeflower sandbox" and "codeflower attach" instead.`,
 		},
 	}
 	addSandboxFlags(command, &options)
+	addAgentFlag(command, &options, "agent whose terminal UI runs", true)
 	command.Flags().BoolVar(&continueLast, "continue", false, "open the agent's last chat in the project")
 	command.Flags().StringVar(&resume, "resume", "", "open a chat of the project: its id, or without one the agent's own list")
 	command.Flags().Lookup("resume").NoOptDefVal = "pick"

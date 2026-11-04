@@ -3,6 +3,9 @@
   "name": "Codex",
   "description": "OpenAI. Sign in with ChatGPT or an OpenAI API key.",
   "color": "teal",
+  "icon": {
+    "file": "icon.svg"
+  },
   "order": 20,
   "launch": "@agentclientprotocol/codex-acp/dist/index.js",
   "home": {

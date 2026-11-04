@@ -112,7 +112,7 @@ call the quit off. Sandboxes running elsewhere keep running.`,
 			controls := make(chan *client.Control, 1)
 			options := client.Options{
 				Address:           listenAddress,
-				ProjectsDirectory: ProjectsDirectory(),
+				ProjectsDirectory: projectsDirectory(loaded),
 				ConfigDirectory:   directory,
 				Version:           Version,
 				OpenBrowser:       !noBrowser,

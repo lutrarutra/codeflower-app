@@ -55,7 +55,7 @@ func MCPServersJSON(servers []config.MCPServer) string {
 }
 
 // MCPHosts are the hosts of the servers at a URL, which an isolated sandbox
-// reaches like the agent's service.
+// reaches like the agents' services.
 func MCPHosts(servers []config.MCPServer) []string {
 	var hosts []string
 	for _, server := range servers {

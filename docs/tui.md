@@ -14,7 +14,7 @@ DeepSeek Harness has no terminal UI, and neither command offers it. The user's d
 ## `codeflower attach`
 
 ```
-codeflower attach [SANDBOX] [CHAT] [--new | --last] [--watch] [--links auto|local|tunnel|path] [--config DIR]
+codeflower attach [SANDBOX] [CHAT] [--new [--agent NAME] | --last] [--watch] [--links auto|local|tunnel|path] [--config DIR]
 codeflower chats [SANDBOX] [--json]
 codeflower terminals [SANDBOX] [--json] [--close ID|KEY]
 ```
@@ -68,6 +68,9 @@ work after Enter or at the start (`escaper` in `session.go`):
 - **Worker-level.** A chat's terminal belongs to the worker, not a window: it keeps running without viewers. Sign-in
   terminals (`kind: "auth"`) are still per window and end with it.
 - **One per chat,** keyed by the session key.
+- **The user's shells** (`kind: "shell"`, the page's *Terminal*) share the registry: a login `bash` in the workspace,
+  with the environment of `!command`s and without the worker's token, keyed `shell:<uuid>`, at most 8. They have no
+  session key, get no resize nudge and no `terminal/show`; capability `shellTerminals`.
 - **Replay.** A window that attaches gets a ring buffer of the last 256 KiB (`replayed: true`) and a resize nudge (one
   row less, then its size), so a full-screen UI draws itself again.
 - **Viewers.** The last viewer to type or resize sets the size. Viewers with `watch` can neither type nor resize.
@@ -80,12 +83,13 @@ All under `_codeflower/`. They go into `docs/architecture.md`'s contract.
 
 | | |
 | --- | --- |
-| `terminal/start {kind:"chat", sessionKey \| new:true, columns, rows, watch?, linkBase?}` | `{terminalId, sessionKey, sessionId}`; a chat with a UI already running is attached to |
+| `terminal/start {kind:"chat", sessionKey \| new:true + agent, columns, rows, watch?, linkBase?}` | `{terminalId, sessionKey, sessionId}`; a chat with a UI already running is attached to; a new chat names its agent |
+| `terminal/start {kind:"shell", columns, rows}` | `{terminalId}`; a new shell, attached to |
 | `terminal/attach {terminalId, columns, rows, watch?, linkBase?}` | watch again (replay, nudge) |
 | `terminal/resize {terminalId, columns, rows}` | |
 | `terminal/detach {terminalId}` | |
 | `terminal/input {terminalId, data}` / `terminal/close {terminalId}` | for both kinds of terminal |
-| `terminal/list` | `{terminals: [{terminalId, sessionKey, sessionId, mode, viewers, startedAt}]}`; `mode` is `shared` or `handoff` |
+| `terminal/list` | `{terminals: [{terminalId, kind, sessionKey, sessionId, mode, viewers, startedAt}]}`; `mode` is `shared` or `handoff`; shells have `kind: "shell"` and only `terminalId`, `viewers`, `startedAt` |
 | notification `terminal/output {terminalId, data, replayed?}`, `terminal/exit {terminalId, exitCode}` | to the terminal's viewers |
 | notification `terminal/changed {terminals}` | to every window when one starts, ends, or a viewer comes or goes |
 | notification `terminal/show {terminalId, files:[{path,url}], title?, message?}` | to viewers: the rail |
@@ -95,7 +99,9 @@ All under `_codeflower/`. They go into `docs/architecture.md`'s contract.
 
 - **Opening a chat.** `startChatTerminal` opens a recorded chat in the agent as a window does (`openSession`): resume
   where offered, else load, refused while another worker holds its lease.
-- **New chats.** `new` starts a chat with `session/new`.
+- **New chats.** `new` starts a chat with `session/new` on the agent `agent` names. `attach` connects to the worker's
+  own connection (`/acp`), so its chats are every agent's; for a new chat it takes `--agent`, else the one agent with
+  a terminal UI, else asks (`newChat` in `picker.go`). A chat's agent is its key's (`chatAgent` in `targets.go`).
 - **Windows.** Windows are marked `acp` on `initialize`, and `newestClient` skips connections without it (`attach`),
   so files to show reach a window.
 - **Closing.** The bridge now handles `session/close`: the chat leaves `host.sessions`, the windows' sessions and the

@@ -227,7 +227,6 @@ func tunnelDirectory(socket string) string {
 type RemoteWorker struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
-	Agent string `json:"agent"`
 	// NoTunnel: run with --no-tunnel, so never shared with a paired browser.
 	NoTunnel bool `json:"noTunnel,omitempty"`
 }

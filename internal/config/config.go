@@ -128,6 +128,14 @@ type Config struct {
 	// IsolateNetwork: start the command line's sandboxes as with
 	// --isolate-network.
 	IsolateNetwork *bool `yaml:"isolate_network"`
+	// ProjectsDir: the folder of projects started by name, when --projects-dir
+	// is not given (default ~/codeflower/projects). ~ and $VARIABLES are
+	// expanded in it and EnvDir, and relative paths are in the config directory.
+	ProjectsDir string `yaml:"projects_dir"`
+	// EnvDir: a folder for the projects' software environments and download
+	// caches, e.g. on scratch, when --env-dir is not given; each project gets
+	// a subfolder. Unset, they stay in the project.
+	EnvDir string `yaml:"env_dir"`
 	// Skills: more folders of skills, mounted read-only in every sandbox
 	// besides <config dir>/skills; relative paths are in the config directory.
 	Skills []string `yaml:"skills"`
@@ -282,6 +290,24 @@ func (c *Config) APIKey(agent string) (string, error) {
 	return c.resolveKey("agents."+agent, entry.APIKey, entry.APIKeyEnv, entry.APIKeyFile)
 }
 
+// APIKeys are the API keys configured for the agents, by agent.
+func (c *Config) APIKeys() (map[string]string, error) {
+	keys := map[string]string{}
+	if c == nil {
+		return keys, nil
+	}
+	for agent := range c.Agents {
+		key, err := c.APIKey(agent)
+		if err != nil {
+			return nil, err
+		}
+		if key != "" {
+			keys[agent] = key
+		}
+	}
+	return keys, nil
+}
+
 // IconsFolder is the icon gallery's folder on this computer, or "" when the
 // config turns the gallery off.
 func (c *Config) IconsFolder() string {
@@ -352,6 +378,29 @@ func (c *Config) resolveKey(section, inline, variable, file string) (string, err
 		return key, nil
 	}
 	return "", nil
+}
+
+// ProjectsDirectory is projects_dir, or "".
+func (c *Config) ProjectsDirectory() string {
+	return c.path(c.ProjectsDir)
+}
+
+// EnvDirectory is env_dir, or "".
+func (c *Config) EnvDirectory() string {
+	return c.path(c.EnvDir)
+}
+
+// path expands ~ and $VARIABLES in a folder of the config; a relative one is
+// in the config directory.
+func (c *Config) path(value string) string {
+	if value == "" {
+		return ""
+	}
+	value = expandHome(os.ExpandEnv(value))
+	if !filepath.IsAbs(value) && c.Directory != "" {
+		value = filepath.Join(c.Directory, value)
+	}
+	return value
 }
 
 func expandHome(value string) string {
