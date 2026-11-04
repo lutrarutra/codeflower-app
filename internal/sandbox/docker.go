@@ -50,6 +50,8 @@ type DockerRun struct {
 	// Seccomp, when set, is the container's seccomp profile (JSON) instead
 	// of Docker's default (UserNamespacesSeccomp).
 	Seccomp []byte
+	// Kill, once closed, kills a stopping container at once.
+	Kill <-chan struct{}
 }
 
 // BridgeInspectPort is the bridge's Node inspector port inside the container.
@@ -227,11 +229,19 @@ func RunDocker(ctx context.Context, run DockerRun) (int, error) {
 		}()
 	}
 
+	kill := run.Kill
 	for {
 		select {
 		case <-stopRequested:
 			stopRequested = nil
 			stop()
+		case <-kill:
+			kill = nil
+			go func() {
+				killContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = docker.ContainerKill(killContext, id, "KILL")
+			}()
 		case status := <-waitStatus:
 			if status.Error != nil {
 				return int(status.StatusCode), fmt.Errorf("container failed: %s", status.Error.Message)

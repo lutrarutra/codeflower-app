@@ -131,6 +131,9 @@ type Worker struct {
 	Stdin     io.Reader
 	Stdout    io.Writer
 	Stderr    io.Writer
+	// Kill, once closed, kills the sandbox at once instead of waiting for it
+	// to stop after Run's ctx ended (the second Ctrl+C).
+	Kill <-chan struct{}
 }
 
 // ErrImageWithoutTasks means the sandbox started a worker for VS Code instead
@@ -467,7 +470,7 @@ func (w Worker) runEngine(ctx context.Context, instanceID string, values map[str
 		return RunDocker(ctx, DockerRun{
 			Name: name, Image: w.Image, State: w.State, Binds: w.Binds, Env: values,
 			Port: port, InspectPort: w.InspectPort, NetDirectory: netDirectory, CPUs: resources.CPUs, Memory: resources.Memory, Stdin: w.Stdin, Stdout: w.Stdout, Stderr: w.Stderr,
-			TTY: w.TUI != "", Seccomp: seccomp,
+			TTY: w.TUI != "", Seccomp: seccomp, Kill: w.Kill,
 		})
 	case EnginePodman:
 		var seccompFile string
@@ -481,7 +484,7 @@ func (w Worker) runEngine(ctx context.Context, instanceID string, values map[str
 		return RunPodman(ctx, w.Engine.Executable, PodmanRun{
 			Name: name, Image: w.Image, State: w.State, Binds: w.Binds, Env: values,
 			Port: port, NetDirectory: netDirectory, CPUs: resources.CPUs, Memory: resources.Memory, Stdin: w.Stdin, Stdout: w.Stdout, Stderr: w.Stderr,
-			TTY: w.TUI != "", SeccompFile: seccompFile,
+			TTY: w.TUI != "", SeccompFile: seccompFile, Kill: w.Kill,
 		})
 	case EngineApptainer:
 		scratch, err := newScratch()
@@ -493,7 +496,7 @@ func (w Worker) runEngine(ctx context.Context, instanceID string, values map[str
 		if err != nil {
 			return 1, err
 		}
-		return RunApptainer(ctx, args, values, w.Stdin, w.Stdout, w.Stderr)
+		return RunApptainer(ctx, w.Kill, args, values, w.Stdin, w.Stdout, w.Stderr)
 	}
 	return 1, fmt.Errorf("unknown engine %q", w.Engine.Name)
 }

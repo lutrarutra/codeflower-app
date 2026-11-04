@@ -74,8 +74,10 @@ func apptainerAllowsIsolation(ctx context.Context, executable, image string) err
 
 // RunApptainer runs the command with values passed as APPTAINERENV_* so they
 // reach the clean container environment without appearing in `ps`.
-// Cancelling ctx sends SIGTERM so the worker can shut down cleanly.
-func RunApptainer(ctx context.Context, args []string, values map[string]string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
+// Cancelling ctx sends SIGTERM to the container's process so the worker can
+// shut down cleanly (see stopContainer), and SIGKILL to Apptainer and all it
+// started when it has not (see runUntilDone).
+func RunApptainer(ctx context.Context, kill <-chan struct{}, args []string, values map[string]string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
 	command := exec.Command(args[0], args[1:]...)
 	command.Env = os.Environ()
 	for name, value := range values {
@@ -83,23 +85,60 @@ func RunApptainer(ctx context.Context, args []string, values map[string]string, 
 	}
 	command.Stdin = stdin
 	command.Stdout, command.Stderr = stdout, stderr
-	return runUntilDone(ctx, command, func() { _ = command.Process.Signal(syscall.SIGTERM) })
+	return runUntilDone(ctx, kill, command,
+		func() error { return stopContainer(command.Process) },
+		func() error { return killTree(command.Process.Pid) })
 }
 
-// runUntilDone runs a command; cancelling ctx calls stop once and waits for
-// the command to exit.
-func runUntilDone(ctx context.Context, command *exec.Cmd, stop func()) (int, error) {
+// killTimeout is how long a stopping sandbox has before runUntilDone kills
+// it: longer than the engines' own stop timeout, which Docker and Podman keep
+// themselves. A variable for tests.
+var killTimeout = (stopTimeoutSeconds + 5) * time.Second
+
+// runUntilDone runs a command until it exits. Cancelling ctx calls stop once;
+// if the command has not exited killTimeout later, or once kill closes, it
+// calls end. One lost signal on the way into the sandbox would otherwise keep
+// it running, and its run waiting, for good.
+func runUntilDone(ctx context.Context, kill <-chan struct{}, command *exec.Cmd, stop, end func() error) (int, error) {
 	if err := command.Start(); err != nil {
 		return 1, fmt.Errorf("could not start %s: %w", command.Args[0], err)
 	}
 	done := make(chan error, 1)
 	go func() { done <- command.Wait() }()
+	report := func(format string, arguments ...any) {
+		if command.Stderr != nil {
+			fmt.Fprintf(command.Stderr, format, arguments...)
+		}
+	}
+	ending := false
+	endNow := func() {
+		if ending {
+			return
+		}
+		ending = true
+		if err := end(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			report("Could not kill the sandbox: %v\n", err)
+		}
+	}
 	stopRequested := ctx.Done()
+	var timedOut <-chan time.Time
 	for {
 		select {
 		case <-stopRequested:
 			stopRequested = nil
-			stop()
+			if err := stop(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+				report("Could not stop the sandbox: %v\n", err)
+			}
+			timeout := time.NewTimer(killTimeout)
+			defer timeout.Stop()
+			timedOut = timeout.C
+		case <-timedOut:
+			timedOut = nil
+			report("The sandbox did not stop within %s; killing it\n", killTimeout)
+			endNow()
+		case <-kill:
+			kill = nil
+			endNow()
 		case err := <-done:
 			return exitCode(err), nil
 		}

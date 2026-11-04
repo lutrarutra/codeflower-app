@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -76,7 +77,7 @@ To start a session with an initial task and continue it in VS Code, see
 			if inspectPort > 0 && engine.Name != sandbox.EngineDocker {
 				return fmt.Errorf("--inspect-port needs --engine docker")
 			}
-			ctx, stop := signal.NotifyContext(command.Context(), os.Interrupt, syscall.SIGTERM)
+			ctx, kill, stop := stopOnSignals(command.Context())
 			defer stop()
 			prepared, err := options.prepare(ctx, engine, "a code flower sandbox")
 			if err != nil {
@@ -89,6 +90,7 @@ To start a session with an initial task and continue it in VS Code, see
 			worker.InspectPort = inspectPort
 			worker.ServePage = servePage
 			worker.NoTunnel = noTunnel
+			worker.Kill = kill
 			var ready func(sandbox.Connection)
 			if !noTunnel {
 				ready = tunnelLinks(config.Directory(options.config), os.Stderr)
@@ -120,4 +122,35 @@ To start a session with an initial task and continue it in VS Code, see
 		"publish the bridge's Node inspector on 127.0.0.1:PORT (development, Docker only)")
 	_ = command.Flags().MarkHidden("inspect-port")
 	return command
+}
+
+// stopOnSignals ends ctx on the first Ctrl+C or SIGTERM, which stops the
+// sandbox, and closes kill on the second, which kills it at once. stop ends
+// the watch.
+func stopOnSignals(parent context.Context) (ctx context.Context, kill <-chan struct{}, stop func()) {
+	ctx, cancel := context.WithCancel(parent)
+	killing := make(chan struct{})
+	signals := make(chan os.Signal, 2)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() {
+		for first := true; ; first = false {
+			select {
+			case <-done:
+				return
+			case <-signals:
+			}
+			if !first {
+				close(killing)
+				return
+			}
+			fmt.Fprintln(os.Stderr, "\nStopping the sandbox; press Ctrl+C again to kill it now.")
+			cancel()
+		}
+	}()
+	return ctx, killing, func() {
+		signal.Stop(signals)
+		close(done)
+		cancel()
+	}
 }

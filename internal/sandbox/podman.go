@@ -51,6 +51,8 @@ type PodmanRun struct {
 	// SeccompFile, when set, holds the container's seccomp profile instead of
 	// Podman's default (UserNamespacesSeccomp).
 	SeccompFile string
+	// Kill, once closed, kills a stopping container at once.
+	Kill <-chan struct{}
 }
 
 // podmanOwnEnv are variables the podman process reads itself (rootless
@@ -143,11 +145,15 @@ func RunPodman(ctx context.Context, executable string, run PodmanRun) (int, erro
 		}
 	}
 	command.Stdout, command.Stderr = run.Stdout, run.Stderr
-	return runUntilDone(ctx, command, func() {
+	return runUntilDone(ctx, run.Kill, command, func() error {
 		go func() {
 			stop := exec.Command(executable, "stop", "--time", strconv.Itoa(stopTimeoutSeconds), run.Name)
 			_ = stop.Run()
 		}()
+		return nil
+	}, func() error {
+		go func() { _ = exec.Command(executable, "kill", run.Name).Run() }()
+		return nil
 	})
 }
 

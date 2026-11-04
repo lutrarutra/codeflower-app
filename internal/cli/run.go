@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -77,7 +75,7 @@ networks.`,
 			if inspectPort > 0 && engine.Name != sandbox.EngineDocker {
 				return fmt.Errorf("--inspect-port needs --engine docker")
 			}
-			ctx, stop := signal.NotifyContext(command.Context(), os.Interrupt, syscall.SIGTERM)
+			ctx, kill, stop := stopOnSignals(command.Context())
 			defer stop()
 			prepared, err := options.prepare(ctx, engine, "a code flower run")
 			if err != nil {
@@ -98,6 +96,7 @@ networks.`,
 			worker.InspectPort = inspectPort
 			worker.ServePage = servePage
 			worker.NoTunnel = noTunnel
+			worker.Kill = kill
 			var ready func(sandbox.Connection)
 			if !noTunnel {
 				ready = tunnelLinks(config.Directory(options.config), os.Stderr)
