@@ -23,10 +23,15 @@ func ContainerEnvironment() map[string]string {
 		"CONDA_PKGS_DIRS":         cache + "/conda-pkgs",
 		"UV_CACHE_DIR":            cache + "/uv",
 		"PIP_CACHE_DIR":           cache + "/pip",
-		"R_LIBS_USER":             env + "/R",
 		"NPM_CONFIG_PREFIX":       env + "/npm",
 		"NPM_CONFIG_CACHE":        cache + "/npm",
 		"CARGO_HOME":              env + "/cargo",
+		// One R library per R version (R expands %v): packages built for
+		// another version do not load. renv's cache holds what renv projects
+		// link to, so it is part of the environment, not a cache.
+		"R_LIBS_USER":      env + "/R/%v",
+		"RENV_PATHS_CACHE": env + "/R/renv-cache",
+		"R_USER_CACHE_DIR": cache + "/R",
 		// No display in the sandbox: figures are written to files.
 		"MPLBACKEND": "Agg",
 		"CODEFLOWER_PREPEND_PATH": strings.Join(
