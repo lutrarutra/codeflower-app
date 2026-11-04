@@ -84,9 +84,14 @@ func PodmanArgs(executable string, run PodmanRun) ([]string, error) {
 		args = append(args, "-t")
 	}
 	// Rootless Podman maps the user to root inside; keep-id keeps their uid,
-	// so the files the sandbox writes stay theirs.
+	// so the files the sandbox writes stay theirs. Without subuid and subgid
+	// ranges (common on clusters) their ids are the only ones mapped, so
+	// Podman's default ping_group_range of "0 0" names an unmapped group and
+	// the runtime refuses it; their own group is mapped either way.
 	if os.Getuid() != 0 {
-		args = append(args, "--userns=keep-id")
+		gid := strconv.Itoa(os.Getgid())
+		args = append(args, "--userns=keep-id",
+			"--sysctl", "net.ipv4.ping_group_range="+gid+" "+gid)
 	}
 	for _, bind := range run.Binds {
 		spec := "type=bind,source=" + bind.Source + ",target=" + bind.Target

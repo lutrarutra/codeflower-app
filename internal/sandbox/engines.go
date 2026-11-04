@@ -63,7 +63,9 @@ func EngineLabel(name string) string {
 func commandOutput(ctx context.Context, name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	// Stdout only: Podman warns on stderr (no systemd session on cluster
+	// nodes), which is not part of the version.
+	output, err := exec.CommandContext(ctx, name, args...).Output()
 	return strings.TrimSpace(string(output)), err
 }
 

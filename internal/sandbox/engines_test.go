@@ -2,8 +2,10 @@ package sandbox
 
 import (
 	"errors"
+	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -147,6 +149,21 @@ func TestPodmanArgsKeepTheTokenOutOfTheCommandLine(t *testing.T) {
 	}
 	if !slices.Contains(args, "-i") {
 		t.Fatalf("Podman did not attach stdin: %v", args)
+	}
+}
+
+func TestRootlessPodmanPingsAsTheUsersGroup(t *testing.T) {
+	if os.Getuid() <= 0 {
+		t.Skip("keep-id is only used rootless")
+	}
+	args, err := PodmanArgs("podman", PodmanRun{Name: "x", Image: "i", State: tempDir(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gid := strconv.Itoa(os.Getgid())
+	line := strings.Join(args, " ")
+	if !strings.Contains(line, "--userns=keep-id --sysctl net.ipv4.ping_group_range="+gid+" "+gid) {
+		t.Fatalf("podman args do not set ping_group_range to the user's group: %s", line)
 	}
 }
 
