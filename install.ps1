@@ -42,10 +42,16 @@ $platform = "windows-amd64"
 $work = Join-Path ([IO.Path]::GetTempPath()) ("codeflower-" + [Guid]::NewGuid())
 New-Item -ItemType Directory -Path $work | Out-Null
 try {
-  # The archives are named after their release, so "latest" is looked up first.
+  # The archives are named after their release, so "latest" is looked up first:
+  # github.com redirects it to the release's page, ending in its tag. (GitHub's
+  # API, which says it too, refuses more than 60 lookups an hour from one address.)
   if ($version -eq "latest") {
-    $version = (Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest").tag_name
-    if (-not $version) { Fail "could not read the latest release's version" }
+    try { $response = Invoke-WebRequest "https://github.com/$repo/releases/latest" -Method Head -UseBasicParsing }
+    catch { Fail "could not look up the latest release" }
+    # Windows PowerShell and PowerShell 7 keep the final address in different places.
+    $page = if ($response.BaseResponse.ResponseUri) { $response.BaseResponse.ResponseUri } else { $response.BaseResponse.RequestMessage.RequestUri }
+    $version = $page.Segments[-1]
+    if ($version -notmatch "^v[0-9]") { Fail "could not read the latest release's version from $page" }
   }
   $base = "https://github.com/$repo/releases/download/$version"
   $archive = "codeflower-$version-$platform.zip"

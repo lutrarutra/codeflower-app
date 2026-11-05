@@ -54,10 +54,13 @@ if [ "$os" = darwin ] && [ "$arch" = amd64 ] && [ "$(sysctl -n hw.optional.arm64
   arch=arm64
 fi
 
+# landing() prints the URL a link redirects to.
 if command -v curl >/dev/null 2>&1; then
   download() { curl -fsSL -o "$2" "$1"; }
+  landing() { curl -fsSL -o /dev/null -w '%{url_effective}' "$1"; }
 elif command -v wget >/dev/null 2>&1; then
   download() { wget -q -O "$2" "$1"; }
+  landing() { wget -q -O /dev/null --server-response "$1" 2>&1 | sed -n 's/^ *[Ll]ocation: *//p' | tail -n 1 | tr -d '\r'; }
 else
   fail "needs curl or wget"
 fi
@@ -65,12 +68,17 @@ fi
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT INT TERM
 
-# The archives are named after their release, so "latest" is looked up first.
+# The archives are named after their release, so "latest" is looked up first:
+# github.com redirects it to the release's page, ending in its tag. (GitHub's
+# API, which says it too, refuses more than 60 lookups an hour from one address,
+# as from a cluster's login nodes.)
 if [ "$version" = latest ]; then
-  download "https://api.github.com/repos/$repo/releases/latest" "$work/latest.json" ||
-    fail "could not look up the latest release"
-  version=$(sed -n 's/^ *"tag_name": *"\([^"]*\)".*/\1/p' "$work/latest.json")
-  [ -n "$version" ] || fail "could not read the latest release's version"
+  page=$(landing "https://github.com/$repo/releases/latest") || fail "could not look up the latest release"
+  version=${page##*/}
+  case $version in
+    v[0-9]*) ;;
+    *) fail "could not read the latest release's version from $page" ;;
+  esac
 fi
 base="https://github.com/$repo/releases/download/$version"
 archive="codeflower-$version-$os-$arch.tar.gz"
