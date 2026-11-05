@@ -7,7 +7,7 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.8.2
-	github.com/ebitengine/purego v0.11.1
+	github.com/ebitengine/purego v0.11.3
 	github.com/flynn/noise v1.1.0
 	github.com/godbus/dbus/v5 v5.1.0
 	github.com/landlock-lsm/go-landlock v0.11.0
