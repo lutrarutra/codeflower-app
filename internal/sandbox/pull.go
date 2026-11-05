@@ -24,7 +24,7 @@ import (
 // --image-tag picks another release (or latest) or a commit's build.
 const (
 	ImageRepository = "ghcr.io/lutrarutra/codeflower-sandbox"
-	DefaultImageTag = "0.23.2"
+	DefaultImageTag = "0.23.3"
 	LatestImageTag  = "latest"
 )
 
