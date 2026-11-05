@@ -7,13 +7,13 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.8.2
-	github.com/ebitengine/purego v0.11.1
+	github.com/ebitengine/purego v0.11.2
 	github.com/flynn/noise v1.1.0
 	github.com/godbus/dbus/v5 v5.1.0
 	github.com/landlock-lsm/go-landlock v0.11.0
 	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/moby/term v0.5.2
-	github.com/shirou/gopsutil/v4 v4.26.9
+	github.com/shirou/gopsutil/v4 v4.26.10
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.9
 	go.yaml.in/yaml/v3 v3.0.5
