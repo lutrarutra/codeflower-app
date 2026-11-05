@@ -9,7 +9,7 @@ require (
 	github.com/docker/go-connections v0.8.2
 	github.com/ebitengine/purego v0.11.1
 	github.com/flynn/noise v1.1.0
-	github.com/godbus/dbus/v5 v5.1.0
+	github.com/godbus/dbus/v5 v5.2.4
 	github.com/landlock-lsm/go-landlock v0.11.0
 	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/moby/term v0.5.2
