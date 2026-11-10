@@ -11,8 +11,6 @@ import (
 	"runtime"
 	"strings"
 	"time"
-
-	"github.com/docker/docker/client"
 )
 
 // Engines the app can run the sandbox with.
@@ -96,7 +94,7 @@ func detectDocker(ctx context.Context) EngineStatus {
 	status := EngineStatus{Name: EngineDocker, Label: "Docker"}
 	executable, lookError := exec.LookPath("docker")
 	status.Executable = executable
-	docker, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	docker, err := newDockerClient()
 	if err != nil {
 		status.Installed = lookError == nil
 		status.Problem = err.Error()
@@ -117,11 +115,10 @@ func detectDocker(ctx context.Context) EngineStatus {
 		}
 		return status
 	}
-	socket := "/var/run/docker.sock"
-	if host := os.Getenv("DOCKER_HOST"); strings.HasPrefix(host, "unix://") {
-		socket = strings.TrimPrefix(host, "unix://")
+	socketError := os.ErrNotExist
+	if socket := dockerSocket(); socket != "" {
+		_, socketError = os.Stat(socket)
 	}
-	_, socketError := os.Stat(socket)
 	status.Installed = lookError == nil || socketError == nil
 	if !status.Installed {
 		return status
@@ -487,7 +484,7 @@ func CheckImage(ctx context.Context, engine EngineStatus, image string) error {
 	}
 	switch engine.Name {
 	case EngineDocker:
-		docker, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+		docker, err := newDockerClient()
 		if err != nil {
 			return err
 		}

@@ -15,7 +15,6 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 )
@@ -144,7 +143,7 @@ func RunDocker(ctx context.Context, run DockerRun) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	docker, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	docker, err := newDockerClient()
 	if err != nil {
 		return 1, fmt.Errorf("could not reach Docker: %w", err)
 	}

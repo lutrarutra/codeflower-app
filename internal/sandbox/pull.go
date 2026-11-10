@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/client"
 )
 
 // The published sandbox image. The app runs the release it was tested with,
@@ -220,7 +219,7 @@ func pullImage(ctx context.Context, engine EngineStatus, image string, refresh b
 }
 
 func pullDocker(ctx context.Context, name string, out io.Writer) error {
-	docker, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	docker, err := newDockerClient()
 	if err != nil {
 		return fmt.Errorf("could not reach Docker: %w", err)
 	}

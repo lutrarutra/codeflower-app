@@ -18,8 +18,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-
-	"github.com/docker/docker/client"
 )
 
 // Claude Code is not in the sandbox image: its license does not allow passing
@@ -84,7 +82,7 @@ func ImageClaudeVersion(ctx context.Context, engine EngineStatus, image string) 
 func imageLabels(ctx context.Context, engine EngineStatus, image string) (map[string]string, error) {
 	switch engine.Name {
 	case EngineDocker:
-		docker, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+		docker, err := newDockerClient()
 		if err != nil {
 			return nil, err
 		}
