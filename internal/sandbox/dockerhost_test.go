@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/docker/docker/client"
 )
 
 func writeDockerContext(t *testing.T, directory, current, name, host string) {
@@ -75,7 +77,7 @@ func TestDockerWithoutContextsUsesTheDefaultSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if docker.DaemonHost() != "unix:///var/run/docker.sock" {
+	if docker.DaemonHost() != client.DefaultDockerHost {
 		t.Fatalf("client host = %q", docker.DaemonHost())
 	}
 }
