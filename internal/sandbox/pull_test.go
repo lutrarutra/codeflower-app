@@ -221,3 +221,26 @@ func TestReportPullSumsLayers(t *testing.T) {
 		t.Fatalf("error not reported: %v", err)
 	}
 }
+
+type progressRecorder struct {
+	strings.Builder
+	last PullProgress
+}
+
+func (p *progressRecorder) PullProgress(progress PullProgress) { p.last = progress }
+
+func TestReportPullGivesItsNumbersToAProgressWriter(t *testing.T) {
+	stream := strings.Join([]string{
+		`{"status":"Pulling fs layer","id":"a"}`,
+		`{"status":"Pulling fs layer","id":"b"}`,
+		`{"status":"Downloading","id":"a","progressDetail":{"current":5,"total":10}}`,
+		`{"status":"Already exists","id":"b"}`,
+	}, "\n")
+	out := &progressRecorder{}
+	if err := reportPull(strings.NewReader(stream), out, time.Now); err != nil {
+		t.Fatal(err)
+	}
+	if out.last != (PullProgress{Current: 5, Total: 10, Layers: 2, Done: 1}) {
+		t.Fatalf("progress: %+v", out.last)
+	}
+}

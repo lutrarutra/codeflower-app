@@ -104,10 +104,13 @@ type Server struct {
 	// detectEngines is sandbox.DetectEngines, replaced in tests.
 	detectEngines func(context.Context) []sandbox.EngineStatus
 
-	mu       sync.Mutex
-	workers  map[string]*worker
-	order    []string
-	lastSeen time.Time
+	mu      sync.Mutex
+	workers map[string]*worker
+	order   []string
+	// pulls are the image downloads the page started, by id and in order.
+	pulls     map[string]*imagePull
+	pullOrder []*imagePull
+	lastSeen  time.Time
 	// quitting is a wrap-up in progress before the client quits.
 	quitting *quitting
 	// quit closes when the client quits and stops its sandboxes.
@@ -218,6 +221,10 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/resources", s.resources)
 	mux.HandleFunc("GET /api/folders", s.folders)
 	mux.HandleFunc("POST /api/folders", s.createFolder)
+	mux.HandleFunc("GET /api/images", s.listImages)
+	mux.HandleFunc("POST /api/images/pull", s.pullImage)
+	mux.HandleFunc("DELETE /api/images/pull/{id}", s.dismissPull)
+	mux.HandleFunc("DELETE /api/images", s.removeImage)
 	mux.HandleFunc("GET /api/workers", s.listWorkers)
 	mux.HandleFunc("POST /api/workers", s.startWorker)
 	mux.HandleFunc("POST /api/workers/connect", s.connectWorker)

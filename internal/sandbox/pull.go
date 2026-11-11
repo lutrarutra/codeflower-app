@@ -254,11 +254,8 @@ func reportPull(stream io.Reader, out io.Writer, now func() time.Time) error {
 	layers := map[string]*layer{}
 	var order []string
 	var last time.Time
+	progress, numbers := out.(ProgressWriter)
 	report := func(force bool) {
-		if !force && now().Sub(last) < 2*time.Second {
-			return
-		}
-		last = now()
 		var current, total int64
 		done := 0
 		for _, id := range order {
@@ -269,6 +266,13 @@ func reportPull(stream io.Reader, out io.Writer, now func() time.Time) error {
 				done++
 			}
 		}
+		if numbers {
+			progress.PullProgress(PullProgress{Current: current, Total: total, Layers: len(order), Done: done})
+		}
+		if !force && now().Sub(last) < 2*time.Second {
+			return
+		}
+		last = now()
 		if total == 0 {
 			return
 		}

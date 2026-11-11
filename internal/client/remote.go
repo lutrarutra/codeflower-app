@@ -26,7 +26,7 @@ import (
 //   - always: the page, chats (sessions and the relay), stopping a sandbox,
 //     and what the page reads to show them
 //   - only with manage (`tunnel: {manage: true}`): the folder browser,
-//     starting sandboxes and forgetting them
+//     starting sandboxes and forgetting them, downloading and removing images
 //   - never: connecting to new addresses (the client would reach any address
 //     inside the network for a remote caller) and quitting
 type remote struct {
@@ -67,6 +67,7 @@ func (h *remote) routes() http.Handler {
 	mux.HandleFunc("GET /api/resources", s.resources)
 	mux.HandleFunc("GET /api/quit", s.quitStatus)
 	mux.HandleFunc("GET /api/workers", h.listWorkers)
+	mux.HandleFunc("GET /api/images", s.listImages)
 	mux.Handle("GET /api/workers/{id}/sessions", h.scoped(s.workerSessions))
 	mux.Handle("GET /api/workers/{id}/acp", h.scoped(s.relayToWorker))
 	mux.Handle("POST /api/workers/{id}/stop", h.scoped(s.stopWorker))
@@ -75,10 +76,15 @@ func (h *remote) routes() http.Handler {
 		mux.HandleFunc("GET /api/folders", s.folders)
 		mux.HandleFunc("POST /api/folders", s.createFolder)
 		mux.HandleFunc("POST /api/workers", s.startWorker)
+		mux.HandleFunc("POST /api/images/pull", s.pullImage)
+		mux.HandleFunc("DELETE /api/images/pull/{id}", s.dismissPull)
+		mux.HandleFunc("DELETE /api/images", s.removeImage)
 		mux.Handle("DELETE /api/workers/{id}", h.scoped(s.forgetWorker))
 	} else {
 		off := refuse(manageOff)
-		for _, pattern := range []string{"GET /api/folders", "POST /api/folders", "POST /api/workers", "DELETE /api/workers/{id}"} {
+		for _, pattern := range []string{"GET /api/folders", "POST /api/folders", "POST /api/workers", "DELETE /api/workers/{id}",
+			"POST /api/images/pull", "DELETE /api/images/pull/{id}", "DELETE /api/images",
+		} {
 			mux.HandleFunc(pattern, off)
 		}
 	}

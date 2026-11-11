@@ -1,7 +1,6 @@
 package client
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -81,6 +80,9 @@ type worker struct {
 	name string
 	// label names the sandbox: its project's name, when the client knows it.
 	label string
+	// engineName and image are what a started sandbox runs, as ListImages names it.
+	engineName string
+	image      string
 	// status of a started worker: starting, ready, stopping, stopped, failed;
 	// of an added one: connecting, ready, unreachable, unauthorized; of a
 	// local one: starting, ready, unreachable, stopping, or task.
@@ -93,10 +95,8 @@ type worker struct {
 	relays   relays
 	err      string
 	code     int
-	log      []string
+	out      console
 	activity *activity
-	// partial holds output up to its next newline.
-	partial bytes.Buffer
 	// fetchPlugins runs the plugin fetch run for a sandbox the client started;
 	// fetching is set while one runs.
 	fetchPlugins func(ctx context.Context, agent string) ([]sandbox.PluginFetchResult, error)
@@ -112,15 +112,19 @@ type worker struct {
 
 type workerView struct {
 	*worker
-	Address  string    `json:"address,omitempty"`
-	Name     string    `json:"name,omitempty"`
-	Label    string    `json:"label"`
-	Status   string    `json:"status"`
-	URL      string    `json:"url,omitempty"`
-	Error    string    `json:"error,omitempty"`
-	ExitCode int       `json:"exitCode"`
-	Log      []string  `json:"log"`
-	Activity *activity `json:"activity,omitempty"`
+	Address  string   `json:"address,omitempty"`
+	Name     string   `json:"name,omitempty"`
+	Label    string   `json:"label"`
+	Status   string   `json:"status"`
+	URL      string   `json:"url,omitempty"`
+	Error    string   `json:"error,omitempty"`
+	ExitCode int      `json:"exitCode"`
+	Log      []string `json:"log"`
+	// LastOutput is when the sandbox last printed anything.
+	LastOutput time.Time `json:"lastOutput,omitzero"`
+	// Progress is the image download's, while the sandbox waits for one.
+	Progress *sandbox.PullProgress `json:"progress,omitempty"`
+	Activity *activity             `json:"activity,omitempty"`
 	// Relays counts the pages connected to the worker through this client.
 	Relays int `json:"relays"`
 	// Quitting: what the worker does while the client quits (asked, done,
@@ -134,7 +138,7 @@ func (w *worker) view() workerView {
 	defer w.mu.Unlock()
 	return workerView{
 		worker: w, Address: w.address, Name: w.name, Label: w.label, Status: w.status, URL: w.url, Error: w.err, ExitCode: w.code,
-		Log: nonNil(slicesClone(w.log)), Activity: w.activity, Relays: relays,
+		Log: w.out.view(w.redact), LastOutput: w.out.last, Progress: w.out.progressView(), Activity: w.activity, Relays: relays,
 	}
 }
 
@@ -377,26 +381,23 @@ func slicesClone(lines []string) []string {
 func (w *worker) Write(data []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.partial.Write(data)
-	for {
-		line, err := w.partial.ReadString('\n')
-		if err != nil {
-			// No newline yet: keep the rest for the next write.
-			rest := line
-			w.partial.Reset()
-			w.partial.WriteString(rest)
-			break
-		}
-		w.appendLine(strings.TrimRight(line, "\r\n"))
-	}
+	w.out.write(data, w.redact)
 	return len(data), nil
 }
 
+// PullProgress takes the image download's progress, for the page's bar.
+func (w *worker) PullProgress(progress sandbox.PullProgress) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.out.setProgress(progress)
+}
+
+func (w *worker) redact(line string) string { return redact(line, w.token) }
+
 func (w *worker) appendLine(line string) {
-	w.log = append(w.log, redact(line, w.token))
-	if len(w.log) > maxLogLines {
-		w.log = w.log[len(w.log)-maxLogLines:]
-	}
+	w.out.flush(w.redact)
+	w.out.add(w.redact(line))
+	w.out.last = time.Now()
 }
 
 func (w *worker) setStatus(status string) {
@@ -591,6 +592,9 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		cancel:  cancel,
 		done:    make(chan struct{}),
 		token:   run.Token,
+
+		engineName: engine.Name,
+		image:      image,
 	}
 	run.Stdout, run.Stderr = item, item
 	// The page's Fetch now, for a sandbox without the network: the same image
@@ -619,9 +623,15 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		code, err := 1, error(nil)
 		if sandbox.IsPublished(named) {
 			err = sandbox.EnsureImage(ctx, engine, named, item)
+			item.mu.Lock()
+			item.out.progress = nil
+			item.mu.Unlock()
 			if err == nil {
 				// The download names an Apptainer file after its release.
 				run.Image, err = sandbox.ResolveImage(named, engine.Name)
+				item.mu.Lock()
+				item.image = run.Image
+				item.mu.Unlock()
 			}
 		}
 		if err == nil {
@@ -639,10 +649,7 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		stopWatching()
 		item.mu.Lock()
 		defer item.mu.Unlock()
-		if rest := item.partial.String(); rest != "" {
-			item.appendLine(rest)
-			item.partial.Reset()
-		}
+		item.out.flush(item.redact)
 		item.url = ""
 		item.connection = nil
 		item.code = code
@@ -844,6 +851,7 @@ func (s *Server) stopAll() {
 		}
 	}
 	s.mu.Unlock()
+	go s.stopPulls()
 	if started > 0 {
 		fmt.Fprintf(s.options.Log, "Stopping %d sandbox(es)…\n", started)
 	}
