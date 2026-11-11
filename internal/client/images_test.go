@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,10 +60,10 @@ func TestThePageListsAndRemovesApptainerImages(t *testing.T) {
 	if defaults != 1 {
 		t.Fatalf("defaults: %v", images)
 	}
-	if response, _ := authorized(t, web, "DELETE", "/api/images", `{"engine":"apptainer","ref":"`+filepath.Join(directory, "other.sif")+`"}`); response.StatusCode != 400 {
+	if response, _ := authorized(t, web, "DELETE", "/api/images", `{"engine":"apptainer","ref":`+jsonString(filepath.Join(directory, "other.sif"))+`}`); response.StatusCode != 400 {
 		t.Fatalf("removing a file that is no sandbox image: %d", response.StatusCode)
 	}
-	if response, data := authorized(t, web, "DELETE", "/api/images", `{"engine":"apptainer","ref":"`+older+`"}`); response.StatusCode != 200 {
+	if response, data := authorized(t, web, "DELETE", "/api/images", `{"engine":"apptainer","ref":`+jsonString(older)+`}`); response.StatusCode != 200 {
 		t.Fatalf("remove %d %v", response.StatusCode, data)
 	}
 	if _, err := os.Stat(older); !os.IsNotExist(err) {
@@ -71,6 +72,12 @@ func TestThePageListsAndRemovesApptainerImages(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(directory, "other.sif")); err != nil {
 		t.Fatal("another file went too")
 	}
+}
+
+// jsonString quotes a path for a request body, also with Windows' backslashes.
+func jsonString(value string) string {
+	data, _ := json.Marshal(value)
+	return string(data)
 }
 
 func TestAPullOfAnUnknownTagIsRefused(t *testing.T) {
