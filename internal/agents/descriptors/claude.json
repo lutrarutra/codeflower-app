@@ -31,7 +31,7 @@
   },
   "costEstimate": true,
   "subagents": {
-    "adapter": "acp-rfd",
+    "adapter": "air-draft",
     "reports": {
       "model": true,
       "effort": true,
