@@ -221,6 +221,9 @@ type chatActivity struct {
 	// State is working or waiting; WaitingFor is plan, permission or question.
 	State      string `json:"state"`
 	WaitingFor string `json:"waitingFor,omitempty"`
+	// Turn is false for a chat working with no turn running, e.g. on a
+	// background command; older bridges leave it out.
+	Turn *bool `json:"turn,omitempty"`
 }
 
 const activityInterval = 3 * time.Second
