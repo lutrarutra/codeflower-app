@@ -64,7 +64,7 @@ var AllowlistPresets = []AllowlistPreset{
 	{Name: "huggingface", Description: "Hugging Face models and datasets",
 		Hosts: []string{"huggingface.co", "*.huggingface.co", "*.hf.co"}, Uploads: true},
 	{Name: "github", Description: "git clone and release downloads from GitHub",
-		Hosts:   []string{"github.com", "codeload.github.com", "objects.githubusercontent.com", "raw.githubusercontent.com"},
+		Hosts:   []string{"github.com", "codeload.github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com", "raw.githubusercontent.com"},
 		Uploads: true},
 	{Name: "ncbi", Description: "NCBI: E-utilities, Datasets, GEO, SRA and the FTP site over HTTPS",
 		Hosts: []string{"*.ncbi.nlm.nih.gov"}},
