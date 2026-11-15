@@ -218,7 +218,8 @@ type usageLimit struct {
 type chatActivity struct {
 	Key   string `json:"key"`
 	Title string `json:"title"`
-	// State is working or waiting; WaitingFor is plan, permission or question.
+	// State is working or waiting; WaitingFor is plan, permission, question or
+	// browser (the agent handed its browser to the user).
 	State      string `json:"state"`
 	WaitingFor string `json:"waitingFor,omitempty"`
 	// Turn is false for a chat working with no turn running, e.g. on a

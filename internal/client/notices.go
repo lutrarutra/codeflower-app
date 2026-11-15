@@ -95,6 +95,8 @@ func waitingLine(chat chatActivity) string {
 		return quoted(chat.Title) + " asks you a question"
 	case "plan":
 		return quoted(chat.Title) + " has a plan for you to approve"
+	case "browser":
+		return quoted(chat.Title) + " needs you in its browser"
 	default:
 		return quoted(chat.Title) + " asks for your permission"
 	}

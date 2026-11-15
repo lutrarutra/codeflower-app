@@ -42,6 +42,11 @@ func TestNoticesForWaitingAndEndedChats(t *testing.T) {
 	if lines := tracker.next(third); !reflect.DeepEqual(lines, []string{"“Plot QC” has a plan for you to approve"}) {
 		t.Fatalf("got %q", lines)
 	}
+	// The agent handed its browser to the user (codeflower-browser handoff).
+	handoff := poll(t, `{"turns":4,"ended":[],"chats":[{"key":"k1","title":"Plot QC","state":"waiting","waitingFor":"browser"}]}`)
+	if lines := tracker.next(handoff); !reflect.DeepEqual(lines, []string{"“Plot QC” needs you in its browser"}) {
+		t.Fatalf("got %q", lines)
+	}
 	// A bridge that did not answer starts over, and a restarted one counts
 	// from 0: its first turn is told once polls resume.
 	tracker.next(nil)
