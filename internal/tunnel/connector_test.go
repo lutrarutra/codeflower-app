@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -143,9 +144,12 @@ func (f *fakeTunnel) online() bool {
 // fakeWorkers is what the fake app's /api/workers lists.
 var fakeWorkers atomic.Value
 
+// fakeCancelled counts the fake app's /wait requests that were cancelled.
+var fakeCancelled atomic.Int32
+
 // fakeApp is the client's remote page: /echo answers with what it saw,
-// /api/workers lists fakeWorkers, and /api/workers/w1/acp echoes WebSocket
-// messages.
+// /big?n=N with N bytes, /wait not until it is cancelled, /api/workers lists
+// fakeWorkers, and /api/workers/w1/acp echoes WebSocket messages.
 func fakeApp(t *testing.T, socket string) {
 	t.Helper()
 	listener, err := net.Listen("unix", socket)
@@ -159,6 +163,14 @@ func fakeApp(t *testing.T, socket string) {
 		json.NewEncoder(w).Encode(map[string]string{
 			"method": r.Method, "body": string(body), "device": r.Header.Get(DeviceHeader), "workers": r.Header.Get(WorkersHeader),
 		})
+	})
+	mux.HandleFunc("GET /big", func(w http.ResponseWriter, r *http.Request) {
+		n, _ := strconv.Atoi(r.URL.Query().Get("n"))
+		io.WriteString(w, strings.Repeat("b", n))
+	})
+	mux.HandleFunc("GET /wait", func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+		fakeCancelled.Add(1)
 	})
 	mux.HandleFunc("GET /api/workers", func(w http.ResponseWriter, r *http.Request) {
 		workers, _ := fakeWorkers.Load().(string)
@@ -581,5 +593,146 @@ func TestOnlyChatSocketsAreReachable(t *testing.T) {
 		if got := acpPath.MatchString(path); got != want {
 			t.Errorf("%s: %v, want %v", path, got, want)
 		}
+	}
+}
+
+// receiveMux reads the next message of a multiplexed stream.
+func (b *browser) receiveMux(t *testing.T) (byte, uint32, []byte) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, data, err := b.ws.Read(ctx)
+	if err != nil {
+		t.Fatalf("receive: %v", err)
+	}
+	plaintext, err := b.channel.Open(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kind, id, payload, err := UnmuxFrame(plaintext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return kind, id, payload
+}
+
+func (b *browser) request(t *testing.T, id uint32, open OpenRequest, body string) {
+	t.Helper()
+	frame, _ := MuxJSONFrame(KindOpen, id, open)
+	b.send(t, frame)
+	if body != "" {
+		b.send(t, MuxFrame(KindData, id, []byte(body)))
+	}
+	b.send(t, MuxFrame(KindEnd, id, nil))
+}
+
+type muxResponse struct {
+	head   Head
+	body   bytes.Buffer
+	closed *CloseFrame
+	done   bool
+}
+
+// responses reads a multiplexed stream until the requests `ids` have ended.
+func (b *browser) responses(t *testing.T, ids ...uint32) map[uint32]*muxResponse {
+	t.Helper()
+	responses := map[uint32]*muxResponse{}
+	for _, id := range ids {
+		responses[id] = &muxResponse{}
+	}
+	for left := len(ids); left > 0; {
+		kind, id, data := b.receiveMux(t)
+		response := responses[id]
+		if response == nil || response.done {
+			t.Fatalf("a message (kind %d) for request %d, not asked for", kind, id)
+		}
+		switch kind {
+		case KindHead:
+			json.Unmarshal(data, &response.head)
+		case KindData:
+			response.body.Write(data)
+		case KindEnd:
+			response.done = true
+			left--
+		case KindClose:
+			response.closed = &CloseFrame{}
+			json.Unmarshal(data, response.closed)
+			response.done = true
+			left--
+		default:
+			t.Fatalf("unexpected kind %d", kind)
+		}
+	}
+	return responses
+}
+
+func TestOneStreamCarriesManyRequestsAnsweredAsTheyFinish(t *testing.T) {
+	r := startRig(t)
+	phone := pairedPhone(t, r)
+	if old := r.open(t, phone, Hello{}); old.welcome.Mux != 0 {
+		t.Fatal("a browser that did not ask got a multiplexed stream")
+	}
+	b := r.open(t, phone, Hello{Mux: Mux})
+	if b.welcome.Mux != Mux {
+		t.Fatal("the connector did not agree to a multiplexed stream")
+	}
+	cancelled := fakeCancelled.Load()
+	// One that does not finish does not hold up the others.
+	b.request(t, 1, OpenRequest{Kind: "http", Method: "GET", Path: "/wait"}, "")
+	b.request(t, 2, OpenRequest{Kind: "http", Method: "GET", Path: "/big?n=200000"}, "")
+	b.request(t, 3, OpenRequest{Kind: "http", Method: "POST", Path: "/echo", Headers: map[string]string{WorkersHeader: "*"}}, `{"n":3}`)
+	responses := b.responses(t, 2, 3)
+	if big := responses[2]; big.head.Status != 200 || big.body.String() != strings.Repeat("b", 200000) {
+		t.Fatalf("/big: %d, %d bytes", big.head.Status, big.body.Len())
+	}
+	var seen map[string]string
+	json.Unmarshal(responses[3].body.Bytes(), &seen)
+	if seen["body"] != `{"n":3}` || seen["device"] != "Phone" || seen["workers"] != "*" {
+		t.Fatalf("the app saw %v", seen)
+	}
+
+	// Cancelling the waiting one cancels it on the app, and nothing more comes for it.
+	b.send(t, MuxFrame(KindClose, 1, []byte(`{"code":1000}`)))
+	waitUntil(t, "the app request is cancelled", func() bool { return fakeCancelled.Load() > cancelled })
+	b.request(t, 4, OpenRequest{Kind: "http", Path: "/big?n=3"}, "")
+	if after := b.responses(t, 4); after[4].body.String() != "bbb" {
+		t.Fatalf("after the cancel: %q", after[4].body.String())
+	}
+}
+
+func TestMultiplexedStreamsCarryOnlyHTTPAndNewRequestIDs(t *testing.T) {
+	r := startRig(t)
+	b := r.open(t, pairedPhone(t, r), Hello{Mux: Mux})
+	b.request(t, 1, OpenRequest{Kind: "ws", Path: "/api/workers/w1/acp"}, "")
+	b.request(t, 2, OpenRequest{Kind: "http", Path: "//elsewhere/"}, "")
+	responses := b.responses(t, 1, 2)
+	if closed := responses[1].closed; closed == nil || closed.Code != 1008 {
+		t.Fatalf("a WebSocket on a multiplexed stream: %+v", closed)
+	}
+	if closed := responses[2].closed; closed == nil || closed.Code != 1002 {
+		t.Fatalf("another host's URL: %+v", closed)
+	}
+	open, _ := MuxJSONFrame(KindOpen, 2, OpenRequest{Kind: "http", Path: "/echo"})
+	b.send(t, open)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, _, err := b.ws.Read(ctx)
+	if status := websocket.CloseStatus(err); status != 1002 {
+		t.Fatalf("a reused request ID: the stream ended with %v (%d), want 1002", err, status)
+	}
+}
+
+func TestRevokingADeviceClosesItsMultiplexedStream(t *testing.T) {
+	r := startRig(t)
+	b := r.open(t, pairedPhone(t, r), Hello{Mux: Mux})
+	b.request(t, 1, OpenRequest{Kind: "http", Path: "/wait"}, "")
+	if err := Update(r.directory, func(state *State) error { state.Devices = nil; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, _, err := b.ws.Read(ctx)
+	if status := websocket.CloseStatus(err); status != 4401 {
+		t.Fatalf("after revoking, the stream ended with %v (%d), want 4401", err, status)
 	}
 }

@@ -63,6 +63,8 @@ type Hello struct {
 	Pair string `json:"pair,omitempty"`
 	// Device names the browser, e.g. "Firefox on Android".
 	Device string `json:"device,omitempty"`
+	// Mux asks for a multiplexed stream (the value Mux) for HTTP requests.
+	Mux int `json:"mux,omitempty"`
 }
 
 // Welcome is the payload of the connector's answer. Error refuses the
@@ -70,6 +72,8 @@ type Hello struct {
 type Welcome struct {
 	V     int    `json:"v"`
 	Error string `json:"error,omitempty"`
+	// Mux: the connector agreed to a multiplexed stream.
+	Mux int `json:"mux,omitempty"`
 }
 
 // Channel encrypts and decrypts transport messages once the handshake is done.

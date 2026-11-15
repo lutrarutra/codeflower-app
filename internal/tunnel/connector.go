@@ -446,18 +446,27 @@ func (s *stream) sendJSON(ctx context.Context, kind byte, value any) error {
 }
 
 func (s *stream) receive(ctx context.Context) (byte, []byte, error) {
-	kind, data, err := s.ws.Read(ctx)
+	plaintext, err := s.receiveMessage(ctx)
 	if err != nil {
 		return 0, nil, err
 	}
+	return Unframe(plaintext)
+}
+
+// receiveMessage reads and decrypts the next message.
+func (s *stream) receiveMessage(ctx context.Context) ([]byte, error) {
+	kind, data, err := s.ws.Read(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if kind != websocket.MessageBinary {
-		return 0, nil, errors.New("a text frame on a stream")
+		return nil, errors.New("a text frame on a stream")
 	}
 	plaintext, err := s.channel.Open(data)
 	if err != nil {
-		return 0, nil, errors.New("a frame failed to decrypt")
+		return nil, errors.New("a frame failed to decrypt")
 	}
-	return Unframe(plaintext)
+	return plaintext, nil
 }
 
 // browserAddress is the address the tunnel reports for a browser, if it is one.
@@ -499,7 +508,12 @@ func (c *connector) serveStream(ctx context.Context, api *API, state *State, id,
 		return
 	}
 	device, refusal := c.authorize(responder)
-	answer, channel, err := responder.Answer(Welcome{Error: refusal})
+	welcome := Welcome{Error: refusal}
+	multiplexed := refusal == "" && responder.Hello.Mux == Mux
+	if multiplexed {
+		welcome.Mux = Mux
+	}
+	answer, channel, err := responder.Answer(welcome)
 	if err != nil {
 		return
 	}
@@ -517,13 +531,18 @@ func (c *connector) serveStream(ctx context.Context, api *API, state *State, id,
 		c.mu.Unlock()
 	}()
 
+	if multiplexed {
+		c.announce(device, ip)
+		c.serveMux(ctx, s)
+		return
+	}
 	kind2, data, err := s.receive(ctx)
 	if err != nil || kind2 != KindOpen {
 		ws.Close(1002, "Expected a request")
 		return
 	}
 	var open OpenRequest
-	if err := json.Unmarshal(data, &open); err != nil || !strings.HasPrefix(open.Path, "/") || strings.HasPrefix(open.Path, "//") {
+	if err := json.Unmarshal(data, &open); err != nil || !validPath(open.Path) {
 		ws.Close(1002, "Bad request")
 		return
 	}
@@ -630,16 +649,33 @@ func (c *connector) serveHTTP(ctx context.Context, s *stream, open OpenRequest) 
 		}
 		body.Write(data)
 	}
+	send := func(kind byte, data []byte) error { return s.send(ctx, Frame(kind, data)) }
+	if c.respond(ctx, s.device, open, &body, send) {
+		s.ws.Close(websocket.StatusNormalClosure, "")
+	}
+}
+
+// respond passes one HTTP request from a device to the client and sends back
+// its response with send: the head, the body's chunks and the end, or a close
+// frame when there is none. It reports whether the whole response was sent.
+func (c *connector) respond(ctx context.Context, device Device, open OpenRequest, body io.Reader, send func(kind byte, data []byte) error) bool {
 	ctx, cancel := context.WithTimeout(ctx, requestLimit)
 	defer cancel()
+	sendJSON := func(kind byte, value any) error {
+		data, err := json.Marshal(value)
+		if err != nil {
+			return err
+		}
+		return send(kind, data)
+	}
 	method := open.Method
 	if method == "" {
 		method = http.MethodGet
 	}
-	request, err := http.NewRequestWithContext(ctx, method, "http://codeflower"+open.Path, &body)
+	request, err := http.NewRequestWithContext(ctx, method, "http://codeflower"+open.Path, body)
 	if err != nil {
-		s.sendJSON(ctx, KindClose, CloseFrame{Code: 1002, Reason: "Bad request"})
-		return
+		sendJSON(KindClose, CloseFrame{Code: 1002, Reason: "Bad request"})
+		return false
 	}
 	for name, value := range open.Headers {
 		canonical := http.CanonicalHeaderKey(name)
@@ -648,13 +684,13 @@ func (c *connector) serveHTTP(ctx context.Context, s *stream, open OpenRequest) 
 		}
 		request.Header.Set(canonical, value)
 	}
-	for name, values := range trusted(s.device) {
+	for name, values := range trusted(device) {
 		request.Header[name] = values
 	}
 	response, err := c.app.Do(request)
 	if err != nil {
-		s.sendJSON(ctx, KindClose, CloseFrame{Code: 1011, Reason: "code flower did not answer"})
-		return
+		sendJSON(KindClose, CloseFrame{Code: 1011, Reason: "code flower did not answer"})
+		return false
 	}
 	defer response.Body.Close()
 	head := Head{Status: response.StatusCode, Headers: map[string]string{}}
@@ -663,24 +699,192 @@ func (c *connector) serveHTTP(ctx context.Context, s *stream, open OpenRequest) 
 			head.Headers[name] = strings.Join(values, ", ")
 		}
 	}
-	if err := s.sendJSON(ctx, KindHead, head); err != nil {
-		return
+	if err := sendJSON(KindHead, head); err != nil {
+		return false
 	}
 	buffer := make([]byte, MaxChunk)
 	for {
 		n, err := response.Body.Read(buffer)
 		if n > 0 {
-			if s.send(ctx, Frame(KindData, buffer[:n])) != nil {
-				return
+			if send(KindData, buffer[:n]) != nil {
+				return false
 			}
 		}
 		if err != nil {
 			break
 		}
 	}
-	if s.send(ctx, Frame(KindEnd, nil)) == nil {
-		s.ws.Close(websocket.StatusNormalClosure, "")
+	return send(KindEnd, nil) == nil
+}
+
+// maxMuxRequests bounds the requests one multiplexed stream has open at once.
+const maxMuxRequests = 32
+
+// exchange is one HTTP request on a multiplexed stream: its body arrives,
+// then its response is sent.
+type exchange struct {
+	open    OpenRequest
+	body    bytes.Buffer
+	started bool
+	cancel  context.CancelFunc
+}
+
+// serveMux serves a multiplexed stream: HTTP requests tagged with their IDs,
+// each answered as soon as its body has arrived, concurrently, until the
+// browser closes the stream or it stays idle for idleLimit. See "Multiplexed
+// streams" in the tunnel's PROTOCOL.md.
+func (c *connector) serveMux(ctx context.Context, s *stream) {
+	ctx, cancel := context.WithCancel(ctx)
+	var running sync.WaitGroup
+	defer func() {
+		cancel()
+		running.Wait()
+	}()
+
+	var mu sync.Mutex
+	exchanges := map[uint32]*exchange{}
+	// pending: the bytes of request bodies not yet passed on, on the whole stream.
+	pending := 0
+	var last uint32
+	refuse := func(id uint32, code int, reason string) {
+		if frame, err := MuxJSONFrame(KindClose, id, CloseFrame{Code: code, Reason: reason}); err == nil {
+			s.send(ctx, frame)
+		}
 	}
+
+	activity := make(chan struct{}, 1)
+	touch := func() {
+		select {
+		case activity <- struct{}{}:
+		default:
+		}
+	}
+	go func() {
+		timer := time.NewTimer(idleLimit)
+		defer timer.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-activity:
+				timer.Reset(idleLimit)
+			case <-timer.C:
+				mu.Lock()
+				busy := len(exchanges) > 0
+				mu.Unlock()
+				if !busy {
+					s.ws.Close(websocket.StatusNormalClosure, "Idle")
+					return
+				}
+				timer.Reset(idleLimit)
+			}
+		}
+	}()
+
+	for {
+		message, err := s.receiveMessage(ctx)
+		if err != nil {
+			return
+		}
+		kind, id, data, err := UnmuxFrame(message)
+		if err != nil {
+			s.ws.Close(1002, "Malformed message")
+			return
+		}
+		touch()
+		mu.Lock()
+		x := exchanges[id]
+		mu.Unlock()
+		switch kind {
+		case KindOpen:
+			if x != nil || id <= last {
+				s.ws.Close(1002, "Request IDs must be new and increasing")
+				return
+			}
+			last = id
+			var open OpenRequest
+			if json.Unmarshal(data, &open) != nil || !validPath(open.Path) {
+				refuse(id, 1002, "Bad request")
+				continue
+			}
+			if open.Kind != "http" {
+				refuse(id, 1008, "Only HTTP requests share a stream")
+				continue
+			}
+			mu.Lock()
+			full := len(exchanges) >= maxMuxRequests
+			if !full {
+				exchanges[id] = &exchange{open: open}
+			}
+			mu.Unlock()
+			if full {
+				refuse(id, 4429, "Too many requests at once")
+			}
+		case KindData:
+			// Data for a request refused or cancelled meanwhile is dropped.
+			if x == nil || x.started {
+				continue
+			}
+			if x.body.Len()+len(data) > maxBody || pending+len(data) > maxBody {
+				mu.Lock()
+				delete(exchanges, id)
+				mu.Unlock()
+				pending -= x.body.Len()
+				refuse(id, 1009, "Request body too large")
+				continue
+			}
+			x.body.Write(data)
+			pending += len(data)
+		case KindEnd:
+			if x == nil || x.started {
+				continue
+			}
+			pending -= x.body.Len()
+			requestCtx, requestCancel := context.WithCancel(ctx)
+			mu.Lock()
+			x.started = true
+			x.cancel = requestCancel
+			mu.Unlock()
+			running.Add(1)
+			go func() {
+				defer running.Done()
+				defer requestCancel()
+				send := func(kind byte, data []byte) error {
+					// A cancelled request sends nothing more, not even its failure.
+					if requestCtx.Err() != nil {
+						return requestCtx.Err()
+					}
+					return s.send(ctx, MuxFrame(kind, id, data))
+				}
+				c.respond(requestCtx, s.device, x.open, &x.body, send)
+				mu.Lock()
+				delete(exchanges, id)
+				mu.Unlock()
+				touch()
+			}()
+		case KindClose:
+			// The browser gave up on the request (its fetch was aborted).
+			if x == nil {
+				continue
+			}
+			mu.Lock()
+			delete(exchanges, id)
+			mu.Unlock()
+			if x.cancel != nil {
+				x.cancel()
+			} else {
+				pending -= x.body.Len()
+			}
+		default:
+			s.ws.Close(1002, "Unexpected frame")
+			return
+		}
+	}
+}
+
+// validPath: a path on the app, not a URL of another host.
+func validPath(path string) bool {
+	return strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "//")
 }
 
 // A sandbox's chat WebSocket: the sandbox's own, or one agent's (?agent=NAME).

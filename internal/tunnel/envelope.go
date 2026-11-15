@@ -1,6 +1,7 @@
 package tunnel
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 )
@@ -88,4 +89,36 @@ func Parts(binary bool, data []byte) [][]byte {
 		data = data[MaxChunk:]
 	}
 	return append(frames, Frame(last, data))
+}
+
+// Mux is the value of Hello.Mux and Welcome.Mux that turns a stream into a
+// multiplexed one: it carries many HTTP exchanges, each of its messages
+// tagged with the exchange's request ID (see MuxFrame).
+const Mux = 1
+
+// MuxFrame is one message on a multiplexed stream: the kind, the request ID
+// (big endian), then data.
+func MuxFrame(kind byte, id uint32, data []byte) []byte {
+	message := make([]byte, 5+len(data))
+	message[0] = kind
+	binary.BigEndian.PutUint32(message[1:5], id)
+	copy(message[5:], data)
+	return message
+}
+
+// MuxJSONFrame is MuxFrame with value as JSON.
+func MuxJSONFrame(kind byte, id uint32, value any) ([]byte, error) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return MuxFrame(kind, id, data), nil
+}
+
+// UnmuxFrame splits a message of a multiplexed stream.
+func UnmuxFrame(message []byte) (byte, uint32, []byte, error) {
+	if len(message) < 5 {
+		return 0, 0, nil, errors.New("message too short for a multiplexed stream")
+	}
+	return message[0], binary.BigEndian.Uint32(message[1:5]), message[5:], nil
 }
