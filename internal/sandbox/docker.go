@@ -36,6 +36,11 @@ type DockerRun struct {
 	// NetDirectory, when set, isolates the sandbox: it gets no network, and
 	// this folder of sockets shared with the app instead of ports.
 	NetDirectory string
+	// NoNetwork gives the container no network and no sockets (codeflower reproduce).
+	NoNetwork bool
+	// Entrypoint, when set, replaces the image's entrypoint (the bridge's):
+	// the program and its arguments.
+	Entrypoint []string
 	// CPUs and Memory (bytes) limit the container when set.
 	CPUs   int
 	Memory int64
@@ -88,6 +93,10 @@ func DockerConfig(run DockerRun) (*container.Config, *container.HostConfig, erro
 		AttachStdin: run.Stdin != nil,
 		Tty:         run.TTY,
 	}
+	if len(run.Entrypoint) > 0 {
+		config.Entrypoint = run.Entrypoint[:1]
+		config.Cmd = run.Entrypoint[1:]
+	}
 	// Mounts rather than "SOURCE:TARGET" strings, which Windows paths break.
 	host := &container.HostConfig{
 		Mounts:     []mount.Mount{{Type: mount.TypeBind, Source: run.State, Target: ContainerState}},
@@ -106,6 +115,10 @@ func DockerConfig(run DockerRun) (*container.Config, *container.HostConfig, erro
 	}
 	config.AttachStdout = true
 	config.AttachStderr = true
+	if run.NoNetwork {
+		host.NetworkMode = network.NetworkNone
+		return config, host, nil
+	}
 	if run.NetDirectory != "" {
 		host.NetworkMode = network.NetworkNone
 		host.Mounts = append(host.Mounts, mount.Mount{Type: mount.TypeBind, Source: run.NetDirectory, Target: ContainerNet})

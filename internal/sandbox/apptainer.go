@@ -19,6 +19,24 @@ import (
 // --containall otherwise makes them a tmpfs of `sessiondir max size` (16 MB
 // by default).
 func ApptainerCommand(executable, image, state, scratch string, binds []Bind, netDirectory string) ([]string, error) {
+	return ApptainerCommandWith(ApptainerOptions{Executable: executable, Image: image, State: state, Scratch: scratch,
+		Binds: binds, NetDirectory: netDirectory})
+}
+
+// ApptainerOptions are ApptainerCommand's, with what codeflower reproduce
+// adds: no network at all, and a command instead of the bridge's entrypoint.
+type ApptainerOptions struct {
+	Executable, Image, State, Scratch string
+	Binds                             []Bind
+	NetDirectory                      string
+	NoNetwork                         bool
+	// Command replaces Entrypoint: the program and its arguments.
+	Command []string
+}
+
+// ApptainerCommandWith builds the command line of ApptainerOptions.
+func ApptainerCommandWith(o ApptainerOptions) ([]string, error) {
+	executable, image, state, scratch, binds, netDirectory := o.Executable, o.Image, o.State, o.Scratch, o.Binds, o.NetDirectory
 	if err := checkTargets(binds); err != nil {
 		return nil, err
 	}
@@ -31,11 +49,16 @@ func ApptainerCommand(executable, image, state, scratch string, binds []Bind, ne
 		"--workdir", scratch,
 		"--bind", state + ":" + ContainerState,
 	}
-	if netDirectory != "" {
+	if o.NoNetwork {
+		args = append(args, "--net", "--network", "none")
+	} else if netDirectory != "" {
 		args = append(args, "--net", "--network", "none", "--bind", netDirectory+":"+ContainerNet)
 	}
 	for _, bind := range binds {
 		args = append(args, "--bind", bind.Spec())
+	}
+	if len(o.Command) > 0 {
+		return append(append(args, image), o.Command...), nil
 	}
 	return append(args, image, Entrypoint), nil
 }

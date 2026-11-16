@@ -39,6 +39,10 @@ type PodmanRun struct {
 	// NetDirectory, when set, isolates the sandbox: it gets no network, and
 	// this folder of sockets shared with the app instead of ports.
 	NetDirectory string
+	// NoNetwork gives the container no network and no sockets (codeflower reproduce).
+	NoNetwork bool
+	// Entrypoint, when set, replaces the image's entrypoint: the program and its arguments.
+	Entrypoint []string
 	// CPUs and Memory (bytes) limit the container when set.
 	CPUs   int
 	Memory int64
@@ -100,7 +104,9 @@ func PodmanArgs(executable string, run PodmanRun) ([]string, error) {
 		}
 		args = append(args, "--mount", spec)
 	}
-	if run.NetDirectory != "" {
+	if run.NoNetwork {
+		args = append(args, "--network", "none")
+	} else if run.NetDirectory != "" {
 		args = append(args, "--network", "none",
 			"--mount", "type=bind,source="+run.NetDirectory+",target="+ContainerNet)
 	} else if run.Port > 0 {
@@ -124,6 +130,10 @@ func PodmanArgs(executable string, run PodmanRun) ([]string, error) {
 		} else {
 			args = append(args, "--env", name)
 		}
+	}
+	if len(run.Entrypoint) > 0 {
+		args = append(args, "--entrypoint", run.Entrypoint[0], run.Image)
+		return append(args, run.Entrypoint[1:]...), nil
 	}
 	return append(args, run.Image), nil
 }

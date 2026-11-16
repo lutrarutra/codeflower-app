@@ -309,6 +309,10 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 		Binds:         w.Binds,
 	})
 	resources.environment(values)
+	// Which image this is, so a reproducible pipeline (codeflower-repro freeze) can record it.
+	if identity, err := IdentifyImage(ctx, w.Engine, w.Image); err == nil {
+		identity.Environment(values)
+	}
 	if keys := w.apiKeys(); len(keys) > 0 {
 		values[APIKeysVariable] = keys
 	}

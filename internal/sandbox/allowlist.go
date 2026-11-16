@@ -260,6 +260,9 @@ type allowlist struct {
 	path     string
 	provider []hostRule
 	log      func(string)
+	// purpose names what a list without a file is for, in refusals:
+	// "is not needed to <purpose>".
+	purpose string
 
 	mutex    sync.Mutex
 	modified time.Time
