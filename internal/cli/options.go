@@ -82,8 +82,10 @@ type sandboxOptions struct {
 	// resources are --cpus, --memory and --time-limit; set by check.
 	resources sandbox.Resources
 
-	// changed says whether the user gave a flag; set by addSandboxFlags.
-	changed func(name string) bool
+	// changed says whether the user gave a flag, or a project's saved
+	// settings (fromSettings) set it; set by addSandboxFlags.
+	changed      func(name string) bool
+	fromSettings map[string]bool
 	// userConfig is the config.yaml, read by check.
 	userConfig *config.Config
 	// configSkills are the sources of the skills folders that come from the config.
@@ -92,7 +94,7 @@ type sandboxOptions struct {
 
 func addSandboxFlags(command *cobra.Command, options *sandboxOptions) {
 	addCommonFlags(command, &options.commonOptions)
-	options.changed = func(name string) bool { return command.Flags().Changed(name) }
+	options.changed = func(name string) bool { return command.Flags().Changed(name) || options.fromSettings[name] }
 	command.Flags().StringArrayVarP(&options.folders.Inputs, "input", "i", nil,
 		"folder with your data, mounted read-only at /data/input/NAME (repeatable)")
 	command.Flags().StringArrayVarP(&options.folders.Outputs, "output", "o", nil,

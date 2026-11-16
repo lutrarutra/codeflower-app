@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"math/big"
 	"net"
 	"net/http"
@@ -71,6 +72,19 @@ func NewCertificate() (Certificate, error) {
 		KeyPEM:      pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}),
 		Fingerprint: CertificateFingerprint(der),
 	}, nil
+}
+
+// LoadCertificate reads a saved certificate and its key (PEM), as
+// NewCertificate made them, and checks that they belong together.
+func LoadCertificate(certPEM, keyPEM []byte) (Certificate, error) {
+	if _, err := tls.X509KeyPair(certPEM, keyPEM); err != nil {
+		return Certificate{}, fmt.Errorf("the TLS certificate and key do not form a pair: %w", err)
+	}
+	block, _ := pem.Decode(certPEM)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return Certificate{}, errors.New("the TLS certificate is not a PEM certificate")
+	}
+	return Certificate{CertPEM: certPEM, KeyPEM: keyPEM, Fingerprint: CertificateFingerprint(block.Bytes)}, nil
 }
 
 // CertificateFingerprint is the fingerprint of a certificate (DER): its

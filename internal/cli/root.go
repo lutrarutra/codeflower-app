@@ -23,6 +23,9 @@ type commonOptions struct {
 	// config's projects_dir and env_dir (useDirectories).
 	projectsDir string
 	envDir      string
+	// envDirSaved says a project's saved settings chose envDir, even none:
+	// the config's env_dir does not replace it.
+	envDirSaved bool
 	image       string
 	// imageTag picks a build of the published image instead of --image.
 	imageTag string
@@ -105,7 +108,7 @@ func (options *commonOptions) useDirectories(loaded *config.Config) {
 	if options.projectsDir == "" {
 		options.projectsDir = loaded.ProjectsDirectory()
 	}
-	if options.envDir == "" {
+	if options.envDir == "" && !options.envDirSaved {
 		options.envDir = loaded.EnvDirectory()
 	}
 }
@@ -185,6 +188,8 @@ func NewRootCommand() *cobra.Command {
 Run "codeflower sandbox" for a sandbox to work with from VS Code,
 "codeflower run TASK" to start an initial task in a session you can continue
 there, or "codeflower task" to let the agent work on a task by itself.
+"codeflower sandbox --continue PROJECT" starts a project again as it last
+started, and "codeflower projects" lists and manages projects.
 
 New to the command line? Run "codeflower client" for a window that starts a
 sandbox with a few clicks, or connects to one running elsewhere. Run
@@ -207,7 +212,7 @@ sandbox with a few clicks, or connects to one running elsewhere. Run
 		return u.run(command.Context())
 	}
 	root.AddCommand(sandboxCommand(), runCommand(), taskCommand(), tuiCommand(), attachCommand(), chatsCommand(), terminalsCommand(),
-		pluginsCommand(), pullCommand(), checkCommand(), reproduceCommand(), clientCommand(), tunnelCommand(), updateCommand())
+		pluginsCommand(), projectsCommand(), pullCommand(), checkCommand(), reproduceCommand(), clientCommand(), tunnelCommand(), updateCommand())
 	return root
 }
 

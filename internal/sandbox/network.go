@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"strconv"
@@ -41,4 +42,17 @@ func FreePort() (int, error) {
 	}
 	defer listener.Close()
 	return listener.Addr().(*net.TCPAddr).Port, nil
+}
+
+// CheckPort says whether the worker can have the port: whether nothing else
+// listens on it on host (the address the port is published or listened on).
+func CheckPort(host string, port int) error {
+	if host == "" {
+		host = "0.0.0.0"
+	}
+	listener, err := net.Listen("tcp", net.JoinHostPort(host, itoa(port)))
+	if err != nil {
+		return fmt.Errorf("port %d is taken (%v)", port, err)
+	}
+	return listener.Close()
 }

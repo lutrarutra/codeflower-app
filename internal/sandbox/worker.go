@@ -88,6 +88,9 @@ type Worker struct {
 	// client sets it up front, so it can keep it out of the log from the
 	// first line.
 	Token string
+	// Certificate is the bridge's TLS certificate; a new one each run when
+	// nil. A project's saved settings keep theirs, so saved links connect.
+	Certificate *Certificate
 	// InspectPort publishes the bridge's Node inspector (development, Docker).
 	InspectPort int
 	// ServePage makes the worker also serve the chat page on its port
@@ -349,6 +352,9 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 		values["CODEFLOWER_PAGE"] = "1"
 	} else if listens {
 		certificate, err := NewCertificate()
+		if w.Certificate != nil {
+			certificate, err = *w.Certificate, nil
+		}
 		if err != nil {
 			return 1, fmt.Errorf("could not make the worker's TLS certificate: %w", err)
 		}
