@@ -24,6 +24,8 @@ const (
 	reproduceInvalid      = 2
 	reproduceRestore      = 4
 	reproducePipelineFail = 5
+	// 128 + SIGINT, as shells report a command stopped with Ctrl-C.
+	reproduceStopped = 130
 )
 
 type reproduceOptions struct {
@@ -71,13 +73,17 @@ throwaway project, it:
 The output folder gets results/, logs/ (one per rule), the run's time and
 memory (run.json), the comparison (reproduce-report.md and .json) and
 everything the sandbox printed (reproduce.log; --verbose also shows it here).
+Nothing else stays on this computer: the unpacked archive, the downloads
+(unless --cache) and the throwaway project are removed when the run ends,
+also after a failure or Ctrl-C. A run that was killed leaves them in the
+temporary folder, and the next run removes them and its containers.
 
 The image is the archive's: pulled by its digest when it was published, or the
 local build it names. --image runs another one, which can change results.
 
 Exit status: 0 reproduced, 1 results differ, 2 the archive is not valid,
 3 no container engine, 4 the environment could not be restored, 5 the
-pipeline failed.`,
+pipeline failed, 130 stopped (Ctrl-C).`,
 		Example: `  codeflower reproduce smith2026.tar.gz --output ~/repro/smith2026
   codeflower reproduce https://zenodo.org/records/123/files/smith2026.tar.gz -o repro
   codeflower reproduce smith2026.tar.gz --snapshot smith2026-env-amd64.tar.gz -o repro
@@ -127,33 +133,40 @@ pipeline failed.`,
 	command.Flags().IntVar(&options.cpus, "cpus", 0, "CPUs the sandbox may use (Docker and Podman)")
 	command.Flags().StringVar(&options.memory, "memory", "", "memory the sandbox may use, e.g. 16g (Docker and Podman)")
 	command.Flags().BoolVar(&options.validate, "validate", false, "only check the archive and its data; do not run it")
-	command.Flags().BoolVar(&options.keepState, "keep-state", false, "keep the throwaway project folder, to look into a failure")
+	command.Flags().BoolVar(&options.keepState, "keep-state", false, "keep the run's temporary folder (the throwaway project, the unpacked archive), to look into a failure")
 	command.Flags().BoolVarP(&options.verbose, "verbose", "v", false,
 		"show the sandbox's output (Snakemake, the package installs) here, not only in reproduce.log")
 	return command
 }
 
 func runReproduce(ctx context.Context, source string, options reproduceOptions, resources sandbox.Resources, stdout, stderr io.Writer) (int, error) {
-	// Downloads go to a temporary folder removed afterwards, unless --cache
-	// names a folder to keep them in for later runs.
+	// What the run needs on this computer (the unpacked archive, the
+	// downloads, the throwaway project) goes in one temporary folder, removed
+	// when it ends, also after a failure or Ctrl-C. A run that is killed
+	// leaves it behind, and the next run removes it.
+	folder, err := sandbox.NewReproduceFolder()
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		if err := folder.Close(); err != nil {
+			fmt.Fprintf(stderr, "Warning: could not remove the temporary folder %s: %v\n", folder.Path, err)
+		}
+	}()
+	if options.keepState {
+		if err := folder.Keep(); err != nil {
+			return 0, err
+		}
+	}
+	// Downloads are removed with it, unless --cache names a folder to keep
+	// them in for later runs.
 	cache := options.cache
 	if cache == "" {
-		temporary, err := os.MkdirTemp("", "codeflower-reproduce-downloads-")
-		if err != nil {
+		if cache, err = folder.Folder("downloads"); err != nil {
 			return 0, err
 		}
-		defer os.RemoveAll(temporary)
-		// Docker Desktop shares /private/var/folders, not the /var/folders link.
-		if resolved, err := filepath.EvalSymlinks(temporary); err == nil {
-			temporary = resolved
-		}
-		cache = temporary
-	} else {
-		absolute, err := filepath.Abs(cache)
-		if err != nil {
-			return 0, err
-		}
-		cache = absolute
+	} else if cache, err = filepath.Abs(cache); err != nil {
+		return 0, err
 	}
 	output, err := filepath.Abs(options.output)
 	if err != nil {
@@ -163,11 +176,14 @@ func runReproduce(ctx context.Context, source string, options reproduceOptions, 
 		return 0, fmt.Errorf("the output folder %s is not empty: give a new one", output)
 	}
 
-	pipeline, cleanup, err := openArchive(ctx, source, cache, stderr)
+	unpacked, err := folder.Folder("archive")
+	if err != nil {
+		return 0, err
+	}
+	pipeline, err := openArchive(ctx, source, cache, unpacked, stderr)
 	if err != nil {
 		return reproduceInvalid, err
 	}
-	defer cleanup()
 	manifest, err := reproduce.ReadManifest(pipeline)
 	if err != nil {
 		return reproduceInvalid, err
@@ -211,6 +227,9 @@ func runReproduce(ctx context.Context, source string, options reproduceOptions, 
 	engine, err := sandbox.ChooseEngine(sandbox.DetectEngines(ctx), options.engine, options.image)
 	if err != nil {
 		return 0, engineMissing(stderr, engine, err)
+	}
+	for _, stale := range sandbox.RemoveStaleReproductions(ctx, engine) {
+		fmt.Fprintf(stderr, "  Removed %s, left by a run that was stopped.\n", stale)
 	}
 	image := options.image
 	identity := sandbox.ImageIdentity{Ref: manifest.Image.Ref, Digest: manifest.Image.Digest, ID: manifest.Image.ID}
@@ -262,9 +281,14 @@ func runReproduce(ctx context.Context, source string, options reproduceOptions, 
 	if options.verbose {
 		sandboxOutput = io.MultiWriter(logFile, stderr)
 	}
+	project, err := folder.Folder("project")
+	if err != nil {
+		return 0, err
+	}
 	run := sandbox.Reproduction{
 		Engine: engine, Image: image, Pipeline: pipeline, Data: dataDir, Snapshot: snapshot, Output: output,
-		Cores: options.cores, Resources: resources, KeepState: options.keepState, Stdout: sandboxOutput, Stderr: sandboxOutput,
+		State: project, Scratch: folder.Path, ID: folder.ID,
+		Cores: options.cores, Resources: resources, Stdout: sandboxOutput, Stderr: sandboxOutput,
 		Log:      func(line string) { fmt.Fprintln(sandboxOutput, line) },
 		Announce: func(phase string) { fmt.Fprintf(stderr, "  %s\n", phaseLabel(phase, snapshot != "")) },
 	}
@@ -273,8 +297,13 @@ func runReproduce(ctx context.Context, source string, options reproduceOptions, 
 	}
 	result, err := run.Run(ctx)
 	warnings = append(warnings, result.Warnings...)
-	if result.State != "" {
-		fmt.Fprintf(stderr, "The throwaway project is kept in %s\n", result.State)
+	if options.keepState {
+		fmt.Fprintf(stderr, "The throwaway project is kept in %s\n", project)
+	}
+	if ctx.Err() != nil {
+		// Ctrl-C or a stop signal: the phase did not fail, it was stopped.
+		fmt.Fprintln(stderr, "Stopped before it finished.")
+		return reproduceStopped, nil
 	}
 	if err != nil {
 		return 0, err
@@ -316,9 +345,8 @@ func printTail(out io.Writer, path string, lines int) {
 }
 
 // openArchive returns the unpacked pipeline: a folder as it is, a .tar.gz
-// unpacked into a temporary folder, a URL downloaded into the cache first.
-func openArchive(ctx context.Context, source, cache string, out io.Writer) (string, func(), error) {
-	nothing := func() {}
+// unpacked into dir, a URL downloaded into the cache first.
+func openArchive(ctx context.Context, source, cache, dir string, out io.Writer) (string, error) {
 	if strings.HasPrefix(source, "https://") || strings.HasPrefix(source, "http://") {
 		name := filepath.Base(strings.SplitN(source, "?", 2)[0])
 		if !strings.HasSuffix(name, ".tar.gz") && !strings.HasSuffix(name, ".tgz") {
@@ -327,32 +355,18 @@ func openArchive(ctx context.Context, source, cache string, out io.Writer) (stri
 		file := filepath.Join(cache, "archives", name)
 		fmt.Fprintf(out, "Downloading %s…\n", source)
 		if _, err := reproduce.Download(ctx, source, file, out); err != nil {
-			return "", nothing, err
+			return "", err
 		}
 		source = file
 	}
 	info, err := os.Stat(source)
 	if err != nil {
-		return "", nothing, err
+		return "", err
 	}
 	if info.IsDir() {
-		absolute, err := filepath.Abs(source)
-		return absolute, nothing, err
+		return filepath.Abs(source)
 	}
-	dir, err := os.MkdirTemp("", "codeflower-archive-")
-	if err != nil {
-		return "", nothing, err
-	}
-	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
-		dir = resolved
-	}
-	cleanup := func() { os.RemoveAll(dir) }
-	pipeline, err := reproduce.Unpack(source, dir)
-	if err != nil {
-		cleanup()
-		return "", nothing, err
-	}
-	return pipeline, cleanup, nil
+	return reproduce.Unpack(source, dir)
 }
 
 // summarizeReproduction prints the outcome and returns the exit status.

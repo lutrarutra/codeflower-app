@@ -71,11 +71,18 @@ type Reproduction struct {
 	Announce func(phase string)
 	// Phases to run, in order; empty: check, prepare and run.
 	Phases []string
-	// KeepState keeps the throwaway project folder, for debugging.
-	KeepState bool
-	Stdout    io.Writer
-	Stderr    io.Writer
-	Log       func(string)
+	// State is the throwaway project folder, which the caller removes; empty:
+	// a temporary one, removed afterwards.
+	State string
+	// Scratch holds the engine's scratch space (Apptainer); empty: the
+	// temporary folder.
+	Scratch string
+	// ID names the containers, ReproduceContainerPrefix + ID + "-" + phase;
+	// empty: a random one.
+	ID     string
+	Stdout io.Writer
+	Stderr io.Writer
+	Log    func(string)
 }
 
 // ReproductionResult says how far a reproduction got.
@@ -85,8 +92,6 @@ type ReproductionResult struct {
 	Code  int
 	// Warnings, such as a restore whose network was not restricted.
 	Warnings []string
-	// State is the throwaway project, when kept.
-	State string
 }
 
 // Run runs the phases in turn and stops at the first that fails.
@@ -101,14 +106,22 @@ func (r Reproduction) Run(ctx context.Context) (ReproductionResult, error) {
 	if r.Log == nil {
 		r.Log = func(string) {}
 	}
-	state, err := privateTemp("codeflower-reproduce-")
-	if err != nil {
-		return result, err
+	if r.ID == "" {
+		r.ID = randomID()
 	}
-	if r.KeepState {
-		result.State = state
-	} else {
-		defer os.RemoveAll(state)
+	state := r.State
+	if state == "" {
+		folder, err := NewReproduceFolder()
+		if err != nil {
+			return result, err
+		}
+		defer folder.Close()
+		if state, err = folder.Folder("project"); err != nil {
+			return result, err
+		}
+		if r.Scratch == "" {
+			r.Scratch = folder.Path
+		}
 	}
 	for _, name := range []string{"env", "cache", "home", "run", "workspace"} {
 		if err := os.MkdirAll(filepath.Join(state, name), 0o700); err != nil {
@@ -181,7 +194,7 @@ func (r Reproduction) runPhase(ctx context.Context, phase, state string, binds [
 		values["CODEFLOWER_REPRO_CORES"] = strconv.Itoa(r.Cores)
 	}
 	r.Resources.environment(values)
-	spec := containerSpec{name: "codeflower-repro-" + randomID(), image: r.Image, state: state, binds: binds, env: values,
+	spec := containerSpec{name: ReproduceContainerPrefix + r.ID + "-" + phase, scratch: r.Scratch, image: r.Image, state: state, binds: binds, env: values,
 		command: []string{ReproduceEntrypoint, phase}, resources: r.Resources, stdout: r.Stdout, stderr: r.Stderr}
 	var warnings []string
 	switch {
@@ -222,13 +235,15 @@ func (r Reproduction) runPhase(ctx context.Context, phase, state string, binds [
 // the bridge.
 type containerSpec struct {
 	name, image, state string
-	binds              []Bind
-	env                map[string]string
-	command            []string
-	netDirectory       string
-	noNetwork          bool
-	resources          Resources
-	stdout, stderr     io.Writer
+	// scratch is where Apptainer's scratch folder goes; empty: the temporary folder.
+	scratch        string
+	binds          []Bind
+	env            map[string]string
+	command        []string
+	netDirectory   string
+	noNetwork      bool
+	resources      Resources
+	stdout, stderr io.Writer
 }
 
 func runContainer(ctx context.Context, engine EngineStatus, spec containerSpec) (int, error) {
@@ -246,11 +261,11 @@ func runContainer(ctx context.Context, engine EngineStatus, spec containerSpec) 
 			CPUs: spec.resources.CPUs, Memory: spec.resources.Memory, Stdout: spec.stdout, Stderr: spec.stderr,
 		})
 	case EngineApptainer:
-		scratch, err := newScratch()
+		scratch, err := os.MkdirTemp(spec.scratch, scratchPrefix)
 		if err != nil {
-			return 1, err
+			return 1, fmt.Errorf("could not create the sandbox's temporary folder: %w", err)
 		}
-		defer os.RemoveAll(scratch)
+		defer removeTree(scratch)
 		args, err := ApptainerCommandWith(ApptainerOptions{Executable: engine.Executable, Image: spec.image,
 			State: spec.state, Scratch: scratch, Binds: spec.binds, NetDirectory: spec.netDirectory,
 			NoNetwork: spec.noNetwork, Command: spec.command})
@@ -421,7 +436,9 @@ func apptainerByDigest(ctx context.Context, executable, digest string, out io.Wr
 	fmt.Fprintf(out, "Downloading the archive's sandbox image %s (a few GB, once)…\n", digest)
 	temporary := file + "." + strconv.Itoa(os.Getpid()) + ".tmp"
 	defer os.Remove(temporary)
-	command := exec.CommandContext(ctx, executable, "pull", "--force", temporary, "docker://"+digest)
+	// --disable-cache: the .sif file is kept, so a second copy of its layers in
+	// ~/.apptainer/cache would only take space.
+	command := exec.CommandContext(ctx, executable, "pull", "--force", "--disable-cache", temporary, "docker://"+digest)
 	command.Stdout, command.Stderr = out, out
 	if err := command.Run(); err != nil {
 		return "", fmt.Errorf("could not download %s: %w", digest, err)

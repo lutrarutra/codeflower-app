@@ -141,4 +141,12 @@ func TestReproductionRunsThePhasesInTurn(t *testing.T) {
 	if strings.Contains(string(calls), "CLAUDE") || strings.Contains(string(calls), "harness") {
 		t.Fatalf("agent state reached the sandbox: %s", calls)
 	}
+	if !strings.Contains(lines[0], filepath.Join(dir, reproduceFolderPrefix)) {
+		t.Fatalf("the scratch folder is not in the run's folder: %s", lines[0])
+	}
+	// The throwaway project and the scratch folders are gone.
+	left, _ := filepath.Glob(filepath.Join(dir, reproduceFolderPrefix+"*"))
+	if len(left) != 0 {
+		t.Fatalf("left behind: %v", left)
+	}
 }
