@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -94,6 +95,9 @@ func TestImageIdentityEnvironment(t *testing.T) {
 // The three phases run the reproduce entrypoint in turn, each with a new
 // container on one throwaway project, and stop at the first that fails.
 func TestReproductionRunsThePhasesInTurn(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake engine is a shell script")
+	}
 	dir := tempDir(t)
 	record := filepath.Join(dir, "calls")
 	script := filepath.Join(dir, "apptainer")
