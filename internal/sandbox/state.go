@@ -139,10 +139,16 @@ func EnvFolder(envDir, state string) string {
 	return filepath.Join(envDir, filepath.Base(state))
 }
 
-// PrepareEnv creates a project's env folder (EnvFolder) with the env/ and
-// cache/ that EnvBinds mount over the project's own, and returns its
-// absolute path. The project's env/exports, the environment's recipe, stays
-// in the project, so a purged env folder can be rebuilt from it.
+// EnvPaths are the project's folders that an env folder (--env-dir) holds
+// instead: what can be installed, downloaded or computed again. Each has the
+// same path in the env folder as in the project.
+var EnvPaths = []string{"env", "cache", "browser", "thumbnails", "home/.cache"}
+
+// PrepareEnv creates a project's env folder (EnvFolder) with the EnvPaths
+// that EnvBinds mount over the project's own, and the mount points in the
+// project, and returns the env folder's absolute path. The project's
+// env/exports, the environment's recipe, stays in the project, so a purged
+// env folder can be rebuilt from it.
 func PrepareEnv(dir, state string) (string, error) {
 	env, err := privateRoot(dir, "env")
 	if err != nil {
@@ -153,27 +159,29 @@ func PrepareEnv(dir, state string) (string, error) {
 		return "", fmt.Errorf("the env folder %s must be outside the project %s", env, state)
 	}
 	// env/exports is the mount point of the project's own.
-	for _, name := range []string{"env/exports", "cache"} {
-		if err := privateDirectories(env, name); err != nil {
-			return "", err
+	for _, base := range []string{env, state} {
+		for _, name := range append([]string{"env/exports"}, EnvPaths...) {
+			if err := privateDirectories(base, name); err != nil {
+				return "", err
+			}
 		}
-	}
-	if err := privateDirectories(state, "env/exports"); err != nil {
-		return "", err
 	}
 	return env, nil
 }
 
-// EnvBinds mount a project's env folder (PrepareEnv) over its env/ and
-// cache/, and its own env/exports back over the env folder's. None when env
-// is empty: the environment is in the project.
+// EnvBinds mount a project's env folder (PrepareEnv) over its EnvPaths, and
+// its own env/exports back over the env folder's. None when env is empty:
+// everything is in the project.
 func EnvBinds(env, state string) []Bind {
 	if env == "" {
 		return nil
 	}
-	return []Bind{
-		{Source: filepath.Join(env, "env"), Target: ContainerState + "/env"},
-		{Source: filepath.Join(state, "env", "exports"), Target: ContainerState + "/env/exports"},
-		{Source: filepath.Join(env, "cache"), Target: ContainerState + "/cache"},
+	var binds []Bind
+	for _, name := range EnvPaths {
+		binds = append(binds, Bind{Source: filepath.Join(env, filepath.FromSlash(name)), Target: ContainerState + "/" + name})
+		if name == "env" {
+			binds = append(binds, Bind{Source: filepath.Join(state, "env", "exports"), Target: ContainerState + "/env/exports"})
+		}
 	}
+	return binds
 }

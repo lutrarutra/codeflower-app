@@ -198,7 +198,11 @@ func TestPrepareEnvMountsOverTheProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{env, filepath.Join(env, "env", "exports"), filepath.Join(env, "cache"), filepath.Join(state, "env", "exports")} {
+	paths := []string{env, filepath.Join(env, "env", "exports"), filepath.Join(state, "env", "exports")}
+	for _, name := range EnvPaths {
+		paths = append(paths, filepath.Join(env, filepath.FromSlash(name)), filepath.Join(state, filepath.FromSlash(name)))
+	}
+	for _, path := range paths {
 		if info, err := os.Stat(path); err != nil || (runtime.GOOS != "windows" && info.Mode().Perm() != 0o700) {
 			t.Errorf("%s: %v %v", path, info, err)
 		}
@@ -207,6 +211,9 @@ func TestPrepareEnvMountsOverTheProject(t *testing.T) {
 		{Source: filepath.Join(env, "env"), Target: ContainerState + "/env"},
 		{Source: filepath.Join(state, "env", "exports"), Target: ContainerState + "/env/exports"},
 		{Source: filepath.Join(env, "cache"), Target: ContainerState + "/cache"},
+		{Source: filepath.Join(env, "browser"), Target: ContainerState + "/browser"},
+		{Source: filepath.Join(env, "thumbnails"), Target: ContainerState + "/thumbnails"},
+		{Source: filepath.Join(env, "home", ".cache"), Target: ContainerState + "/home/.cache"},
 	}
 	if got := EnvBinds(env, state); !slices.Equal(got, want) {
 		t.Fatalf("binds %+v", got)
