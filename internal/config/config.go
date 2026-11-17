@@ -132,9 +132,10 @@ type Config struct {
 	// is not given (default ~/codeflower/projects). ~ and $VARIABLES are
 	// expanded in it and EnvDir, and relative paths are in the config directory.
 	ProjectsDir string `yaml:"projects_dir"`
-	// EnvDir: a folder for the projects' software environments and download
-	// caches, e.g. on scratch, when --env-dir is not given; each project gets
-	// a subfolder. Unset, they stay in the project.
+	// EnvDir: a folder for what the projects can download or rebuild
+	// (software environments, caches, the chats' browsers), e.g. on scratch,
+	// when --env-dir is not given; each project gets a subfolder. Unset, they
+	// stay in the project.
 	EnvDir string `yaml:"env_dir"`
 	// Skills: more folders of skills, mounted read-only in every sandbox
 	// besides <config dir>/skills; relative paths are in the config directory.

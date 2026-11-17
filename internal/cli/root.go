@@ -71,7 +71,7 @@ func projectsDirectory(loaded *config.Config) string {
 func addDirectoryFlags(command *cobra.Command, options *commonOptions) {
 	addProjectsDirFlag(command, options)
 	command.Flags().StringVar(&options.envDir, "env-dir", "",
-		"folder for the projects' software environments and download caches, e.g. on scratch, in a subfolder per project "+
+		"folder for what the projects can download or rebuild (software environments, caches, the chats' browsers), e.g. on scratch, in a subfolder per project "+
 			"(or env_dir in the config; default: in the project)")
 }
 
