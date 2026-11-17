@@ -136,11 +136,17 @@ Commands take a project's name, or the path of a project folder elsewhere.`,
 }
 
 func projectsListCommand(options *projectsOptions) *cobra.Command {
-	return &cobra.Command{
+	var withSize bool
+	command := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List the projects in the projects directory",
-		Args:    cobra.NoArgs,
+		Long: `List the projects in the projects directory.
+
+--size adds the disk space each project takes (its folder, settings,
+allowlist and env folder). It reads every file in them, which can take a
+while for large projects.`,
+		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			if err := options.directories(); err != nil {
 				return err
@@ -155,20 +161,28 @@ func projectsListCommand(options *projectsOptions) *cobra.Command {
 				return nil
 			}
 			table := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(table, "NAME\tSTATUS\tLAST STARTED\tSETTINGS\tSIZE\tPATH")
+			header := "NAME\tSTATUS\tLAST STARTED\tSETTINGS\t"
+			if withSize {
+				header += "SIZE\t"
+			}
+			fmt.Fprintln(table, header+"PATH")
 			for _, project := range projects {
-				// Open it again with its env folder, which its size includes.
-				if withEnv, err := sandbox.OpenProject(project.State, options.envDirOf(project.State)); err == nil {
-					project = withEnv
-				}
 				saved := "saved"
 				if _, err := sandbox.ReadSettings(project.Settings()); errors.Is(err, sandbox.ErrNoSettings) {
 					saved = "-"
 				} else if err != nil {
 					saved = "unreadable"
 				}
-				fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\n", project.Name, projectStatus(project),
-					formatTime(project.LastStarted()), saved, projectSize(project), project.State)
+				fmt.Fprintf(table, "%s\t%s\t%s\t%s\t", project.Name, projectStatus(project),
+					formatTime(project.LastStarted()), saved)
+				if withSize {
+					// Open it again with its env folder, which its size includes.
+					if withEnv, err := sandbox.OpenProject(project.State, options.envDirOf(project.State)); err == nil {
+						project = withEnv
+					}
+					fmt.Fprintf(table, "%s\t", projectSize(project))
+				}
+				fmt.Fprintln(table, project.State)
 			}
 			if err := table.Flush(); err != nil {
 				return err
@@ -177,6 +191,9 @@ func projectsListCommand(options *projectsOptions) *cobra.Command {
 			return nil
 		},
 	}
+	command.Flags().BoolVar(&withSize, "size", false,
+		"also show the disk space each project takes (slow for large projects)")
+	return command
 }
 
 // projectStatus says whether sandboxes use the project on this computer.

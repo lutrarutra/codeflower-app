@@ -160,8 +160,12 @@ func TestProjectsAreCopiedMovedAndRemovedByName(t *testing.T) {
 	if err != nil || !strings.Contains(out, "renamed") || !strings.Contains(out, "study42") || strings.Contains(out, "copy ") {
 		t.Fatalf("list: %q %v", out, err)
 	}
-	if !strings.Contains(out, "SIZE") || !strings.Contains(out, "KiB") || !strings.Contains(out, state+"\n") {
-		t.Fatalf("list without size and path: %q", out)
+	if strings.Contains(out, "SIZE") || !strings.Contains(out, state+"\n") {
+		t.Fatalf("list with size or without path: %q", out)
+	}
+	out, err = run("list", "--size")
+	if err != nil || !strings.Contains(out, "SIZE") || !strings.Contains(out, "KiB") || !strings.Contains(out, state+"\n") {
+		t.Fatalf("list --size without size and path: %q %v", out, err)
 	}
 	out, err = run("show", "study42")
 	if err != nil || !strings.Contains(out, "port       41234") || !strings.Contains(out, "--continue study42") {
