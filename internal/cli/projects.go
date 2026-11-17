@@ -2,12 +2,15 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -339,7 +342,7 @@ folder elsewhere. It keeps its key and port, so its links still connect.`,
 }
 
 func (options *projectsOptions) copyOrMove(command *cobra.Command, args []string, done string,
-	action func(sandbox.Project, string, string) (sandbox.Project, error)) error {
+	action func(context.Context, sandbox.Project, string, string, sandbox.Progress) (sandbox.Project, error)) error {
 	if err := options.directories(); err != nil {
 		return err
 	}
@@ -351,8 +354,23 @@ func (options *projectsOptions) copyOrMove(command *cobra.Command, args []string
 	if err != nil {
 		return err
 	}
-	result, err := action(project, target, "")
+	ctx, stop := interruptible()
+	defer stop()
+	progress, clear := projectProgress(os.Stderr, project.Name)
+	result, err := action(ctx, project, target, "", progress)
+	clear()
 	if err != nil {
+		if result.State != "" {
+			// Moved, but the original is not all removed.
+			if errors.Is(err, context.Canceled) {
+				return fmt.Errorf("stopped: the project is in %s now, but its original is not all removed; "+
+					"run `codeflower projects remove %s` to finish", result.State, project.State)
+			}
+			return fmt.Errorf("%w\nRun `codeflower projects remove %s` to finish", err, project.State)
+		}
+		if errors.Is(err, context.Canceled) {
+			return fmt.Errorf("stopped; the project %s is as it was", project.Name)
+		}
 		return err
 	}
 	fmt.Fprintf(command.OutOrStdout(), "%s %s to %s\nStart it with: codeflower sandbox --continue %s\n",
@@ -367,7 +385,10 @@ func projectsRemoveCommand(options *projectsOptions) *cobra.Command {
 		Short: "Delete a project and everything in it",
 		Long: `Delete a project: its chats, agent logins, workspace and tasks, its settings,
 allowlist and env folder. Your input, output and code folders are not touched.
-It asks first, unless --yes is given.`,
+It asks first, unless --yes is given.
+
+A removal that is stopped (Ctrl+C) or fails leaves the rest hidden next to
+the project (.PROJECT.removing); running the same command again finishes it.`,
 		Aliases: []string{"rm"},
 		Args:    cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
@@ -375,10 +396,19 @@ It asks first, unless --yes is given.`,
 				return err
 			}
 			project, err := options.open(args[0])
+			leftover := false
 			if err != nil {
-				return err
+				// What a stopped removal (or move) left: removed without asking again.
+				var found bool
+				if path, pathErr := options.location(args[0]); pathErr == nil {
+					project, found = sandbox.LeftoverRemoval(path, options.envDirOf(sandbox.RemovingPath(path)))
+				}
+				if !found {
+					return err
+				}
+				leftover = true
 			}
-			if !yes {
+			if !yes && !leftover {
 				if !interactive() {
 					return fmt.Errorf("give --yes to remove the project %s without asking", project.Name)
 				}
@@ -386,8 +416,17 @@ It asks first, unless --yes is given.`,
 					return fmt.Errorf("the project %s was not removed", project.Name)
 				}
 			}
-			if err := sandbox.RemoveProject(project); err != nil {
-				return err
+			ctx, stop := interruptible()
+			defer stop()
+			progress, clear := projectProgress(os.Stderr, project.Name)
+			err = sandbox.RemoveProject(ctx, project, progress)
+			clear()
+			if errors.Is(err, context.Canceled) {
+				return fmt.Errorf("stopped removing the project %s; run `codeflower projects remove %s` again to finish",
+					project.Name, args[0])
+			}
+			if err != nil {
+				return fmt.Errorf("%w\nRun `codeflower projects remove %s` again to finish", err, args[0])
 			}
 			fmt.Fprintf(command.OutOrStdout(), "Removed the project %s\n", project.Name)
 			return nil
@@ -412,4 +451,48 @@ func confirmRemove(in io.Reader, out io.Writer, project sandbox.Project) bool {
 	line, _ := bufio.NewReader(in).ReadString('\n')
 	answer := strings.ToLower(strings.TrimSpace(line))
 	return answer == "y" || answer == "yes"
+}
+
+// interruptible is a context that the first Ctrl+C (or SIGTERM) ends;
+// another one then stops the program at once.
+func interruptible() (context.Context, context.CancelFunc) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+	return ctx, stop
+}
+
+// projectProgress shows on a terminal how a long copy, move or removal of
+// the project name goes; clear erases it again.
+func projectProgress(out *os.File, name string) (progress sandbox.Progress, clear func()) {
+	if !isTerminal(out) {
+		return nil, func() {}
+	}
+	// Only the meter's goroutine writes, and clear runs after it stopped.
+	shown := 0
+	progress = func(doing string, files int64) {
+		line := fmt.Sprintf("%s %s: %s files", doing, name, thousands(files))
+		fmt.Fprintf(out, "\r%-*s", shown, line)
+		shown = max(shown, len(line))
+	}
+	return progress, func() {
+		if shown > 0 {
+			fmt.Fprintf(out, "\r%*s\r", shown, "")
+		}
+	}
+}
+
+// thousands writes a count with commas: 1,234,567.
+func thousands(count int64) string {
+	digits := fmt.Sprint(count)
+	var result strings.Builder
+	for index, digit := range digits {
+		if index > 0 && (len(digits)-index)%3 == 0 {
+			result.WriteByte(',')
+		}
+		result.WriteRune(digit)
+	}
+	return result.String()
 }

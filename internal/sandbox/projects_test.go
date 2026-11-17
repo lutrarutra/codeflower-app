@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -87,7 +88,7 @@ func TestProjectsAreListed(t *testing.T) {
 
 func TestACopyHasItsOwnKeyAndNoRuns(t *testing.T) {
 	project, projects, envDir := testProject(t)
-	copied, err := CopyProject(project, filepath.Join(projects, "study42-v2"), "")
+	copied, err := CopyProject(context.Background(), project, filepath.Join(projects, "study42-v2"), "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,10 +132,10 @@ func TestACopyHasItsOwnKeyAndNoRuns(t *testing.T) {
 		t.Fatalf("copy's certificate: %v", err)
 	}
 
-	if _, err := CopyProject(project, copied.State, ""); err == nil || !strings.Contains(err.Error(), "already exists") {
+	if _, err := CopyProject(context.Background(), project, copied.State, "", nil); err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("copy over a project: %v", err)
 	}
-	if _, err := CopyProject(project, filepath.Join(project.State, "inner"), ""); err == nil {
+	if _, err := CopyProject(context.Background(), project, filepath.Join(project.State, "inner"), "", nil); err == nil {
 		t.Fatal("copied into itself")
 	}
 }
@@ -142,7 +143,7 @@ func TestACopyHasItsOwnKeyAndNoRuns(t *testing.T) {
 func TestAMoveTakesEverythingAlong(t *testing.T) {
 	project, projects, envDir := testProject(t)
 	before, _ := ReadSettings(project.Settings())
-	moved, err := MoveProject(project, filepath.Join(projects, "renamed"), "")
+	moved, err := MoveProject(context.Background(), project, filepath.Join(projects, "renamed"), "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,9 +169,15 @@ func TestARunningProjectIsLeftAlone(t *testing.T) {
 	unregister := register(Running{ID: "now", State: project.State, PID: os.Getpid(), Kind: "worker"})
 	defer unregister()
 	for name, err := range map[string]error{
-		"copy":   func() error { _, err := CopyProject(project, filepath.Join(projects, "c"), ""); return err }(),
-		"move":   func() error { _, err := MoveProject(project, filepath.Join(projects, "m"), ""); return err }(),
-		"remove": RemoveProject(project),
+		"copy": func() error {
+			_, err := CopyProject(context.Background(), project, filepath.Join(projects, "c"), "", nil)
+			return err
+		}(),
+		"move": func() error {
+			_, err := MoveProject(context.Background(), project, filepath.Join(projects, "m"), "", nil)
+			return err
+		}(),
+		"remove": RemoveProject(context.Background(), project, nil),
 	} {
 		if err == nil || !strings.Contains(err.Error(), "while a sandbox uses it") {
 			t.Errorf("%s: %v", name, err)
@@ -183,7 +190,7 @@ func TestARunningProjectIsLeftAlone(t *testing.T) {
 
 func TestRemovingAProjectRemovesItsFiles(t *testing.T) {
 	project, _, _ := testProject(t)
-	if err := RemoveProject(project); err != nil {
+	if err := RemoveProject(context.Background(), project, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, gone := range []string{project.State, project.Settings(), project.Allowlist(), project.Env} {

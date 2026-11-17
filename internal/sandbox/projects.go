@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -168,7 +170,7 @@ func ListProjects(directory, envDir string) ([]Project, error) {
 	var projects []Project
 	for _, entry := range entries {
 		path := filepath.Join(expandHome(directory), entry.Name())
-		if !isDirectory(path) || !IsProject(path) {
+		if isRemoving(path) || !isDirectory(path) || !IsProject(path) {
 			continue
 		}
 		if project, err := OpenProject(path, envDir); err == nil {
@@ -227,7 +229,8 @@ func (p Project) destination(target, envDir string) (string, string, error) {
 // allowlist and env folder. The copy gets a new key and certificate, so
 // links to the original do not open it, and no port, which the original
 // keeps. Runs' connection files and keys (instances/, run/) are left out.
-func CopyProject(p Project, target, envDir string) (copied Project, err error) {
+// A copy that fails, or that ctx stops, is removed again.
+func CopyProject(ctx context.Context, p Project, target, envDir string, progress Progress) (copied Project, err error) {
 	if err := p.checkStopped("copy"); err != nil {
 		return Project{}, err
 	}
@@ -235,17 +238,22 @@ func CopyProject(p Project, target, envDir string) (copied Project, err error) {
 	if err != nil {
 		return Project{}, err
 	}
-	// A failed copy leaves nothing behind.
+	m, stop := newMeter(progress)
+	defer stop()
 	defer func() {
 		if err != nil {
-			for _, path := range []string{target, SettingsFile(target), DefaultAllowlist(target), envTarget} {
+			m.phase("Removing the partial copy of")
+			cleanup := m.work(context.Background())
+			for _, path := range []string{envTarget, target, SettingsFile(target), DefaultAllowlist(target)} {
 				if path != "" {
-					removeTree(path)
+					cleanup.remove(path)
 				}
 			}
 		}
 	}()
-	if err := copyTree(p.State, target, map[string]bool{"instances": true, "run": true}); err != nil {
+	work := m.work(ctx)
+	m.phase("Copying")
+	if err := work.copy(p.State, target, map[string]bool{"instances": true, "run": true}); err != nil {
 		return Project{}, fmt.Errorf("copying the project: %w", err)
 	}
 	if exists(p.Allowlist()) {
@@ -254,7 +262,7 @@ func CopyProject(p Project, target, envDir string) (copied Project, err error) {
 		}
 	}
 	if p.Env != "" {
-		if err := copyTree(p.Env, envTarget, nil); err != nil {
+		if err := work.copy(p.Env, envTarget, nil); err != nil {
 			return Project{}, fmt.Errorf("copying the project's env folder: %w", err)
 		}
 	}
@@ -274,8 +282,12 @@ func CopyProject(p Project, target, envDir string) (copied Project, err error) {
 
 // MoveProject moves (or renames) the project to the folder target, with its
 // settings, allowlist and env folder. Its key and port stay: links to it
-// still open it.
-func MoveProject(p Project, target, envDir string) (Project, error) {
+// still open it. What is on another file system is copied, and its
+// originals are removed only once everything is in its new place: a move
+// that fails, or that ctx stops, before then is undone. One stopped while
+// removing the originals leaves them for LeftoverRemoval, and returns the
+// moved project with the error.
+func MoveProject(ctx context.Context, p Project, target, envDir string, progress Progress) (Project, error) {
 	if err := p.checkStopped("move"); err != nil {
 		return Project{}, err
 	}
@@ -283,130 +295,151 @@ func MoveProject(p Project, target, envDir string) (Project, error) {
 	if err != nil {
 		return Project{}, err
 	}
+	m, stop := newMeter(progress)
+	defer stop()
+	type step struct {
+		from, to string
+		copied   bool
+	}
+	var done []step
+	undo := func(err error) (Project, error) {
+		m.phase("Removing the partial copy of")
+		cleanup := m.work(context.Background())
+		for index := len(done) - 1; index >= 0; index-- {
+			if done[index].copied {
+				cleanup.remove(done[index].to)
+			} else {
+				os.Rename(done[index].to, done[index].from)
+			}
+		}
+		return Project{}, err
+	}
+	work := m.work(ctx)
 	for _, move := range p.files(target, envTarget) {
 		if !exists(move[0]) {
 			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(move[1]), 0o700); err != nil {
-			return Project{}, err
+			return undo(err)
 		}
-		if err := moveTree(move[0], move[1]); err != nil {
-			return Project{}, fmt.Errorf("moving %s: %w", move[0], err)
+		err := os.Rename(move[0], move[1])
+		if err == nil {
+			done = append(done, step{move[0], move[1], false})
+			continue
+		}
+		if !errors.Is(err, syscall.EXDEV) {
+			return undo(fmt.Errorf("moving %s: %w", move[0], err))
+		}
+		// Recorded first, so a partial copy goes too.
+		done = append(done, step{move[0], move[1], true})
+		m.phase("Copying")
+		if info, statErr := os.Lstat(move[0]); statErr == nil && !info.IsDir() {
+			err = copyFile(move[0], move[1])
+		} else {
+			err = work.copy(move[0], move[1], nil)
+		}
+		if err != nil {
+			return undo(fmt.Errorf("moving %s: %w", move[0], err))
 		}
 	}
-	return Project{Name: filepath.Base(target), State: target, Env: envTarget}, nil
+	moved := Project{Name: filepath.Base(target), State: target, Env: envTarget}
+	// What was copied is still in its old place (and only that).
+	m.phase("Removing the original of")
+	for _, path := range p.toRemove() {
+		if err := work.remove(path); err != nil {
+			return moved, fmt.Errorf("the project is in %s now, but removing its original stopped: %w",
+				moved.State, removeError(err))
+		}
+	}
+	return moved, nil
 }
 
 // RemoveProject deletes the project: its folder (chats, logins, workspace,
-// tasks), settings, allowlist and env folder.
-func RemoveProject(p Project) error {
+// tasks), settings, allowlist and env folder. It first renames them to
+// hidden ones next to them (RemovingPath), so the project is gone at once,
+// and a removal that fails, or that ctx stops, leaves only those, for
+// LeftoverRemoval to find and RemoveProject to finish.
+func RemoveProject(ctx context.Context, p Project, progress Progress) error {
 	if err := p.checkStopped("remove"); err != nil {
 		return err
 	}
-	paths := []string{p.Settings(), p.Allowlist()}
-	if p.Env != "" {
-		paths = append(paths, p.Env)
-	}
-	// The folder last, so a failure leaves something to remove again.
-	paths = append(paths, p.State)
-	for _, path := range paths {
-		if err := removeTree(path); err != nil {
-			return err
+	m, stop := newMeter(progress)
+	defer stop()
+	m.phase("Removing")
+	work := m.work(ctx)
+	for _, path := range p.toRemove() {
+		if err := work.remove(path); err != nil {
+			return removeError(err)
 		}
 	}
 	return nil
 }
 
-// moveTree renames a path, or copies and removes it across file systems.
-func moveTree(source, target string) error {
-	err := os.Rename(source, target)
-	if err == nil || !errors.Is(err, syscall.EXDEV) {
-		return err
+// toRemove renames what exists of the project to its RemovingPath (a
+// project LeftoverRemoval found stays where it is), and returns the paths
+// in the order to remove them: the settings, which say where the env
+// folder is, last.
+func (p Project) toRemove() []string {
+	trash := p
+	if !isRemoving(p.State) {
+		trash = Project{Name: p.Name, State: RemovingPath(p.State)}
+		if p.Env != "" {
+			trash.Env = RemovingPath(p.Env)
+		}
 	}
-	if err := copyTree(source, target, nil); err != nil {
-		removeTree(target)
-		return err
+	from := []string{p.Env, p.State, p.Allowlist(), p.Settings()}
+	to := []string{trash.Env, trash.State, trash.Allowlist(), trash.Settings()}
+	var paths []string
+	for index, path := range from {
+		if path == "" || !exists(path) {
+			continue
+		}
+		// A leftover of an earlier removal in the way: removed in place.
+		if to[index] != path && !exists(to[index]) && os.Rename(path, to[index]) == nil {
+			path = to[index]
+		}
+		paths = append(paths, path)
 	}
-	return removeTree(source)
+	return paths
 }
 
-// removeTree removes a path like os.RemoveAll, also below read-only folders
-// (Go's module cache, for one, makes its folders read-only).
-func removeTree(path string) error {
-	err := os.RemoveAll(path)
-	if err == nil {
-		return nil
-	}
-	_ = filepath.WalkDir(path, func(child string, entry fs.DirEntry, walkErr error) error {
-		if walkErr == nil && entry.IsDir() {
-			_ = os.Chmod(child, 0o700)
-		}
-		return nil
-	})
-	if err := os.RemoveAll(path); err != nil {
-		return fmt.Errorf("%w\nFiles the sandbox's engine made as another user (root, or a Podman sub-user) "+
-			"may need that user to remove them", err)
-	}
-	return nil
+// RemovingPath is where a project's folder (or env folder) is while it is
+// removed: a hidden folder next to it, which ListProjects leaves out.
+func RemovingPath(path string) string {
+	return filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+removingSuffix)
 }
 
-// copyTree copies a folder with its permissions and links; skip names
-// top-level folders that are copied empty.
-func copyTree(source, target string, skip map[string]bool) error {
-	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-		return err
-	}
-	type folder struct {
-		path string
-		mode fs.FileMode
-	}
-	var folders []folder
-	err := filepath.WalkDir(source, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(source, path)
-		if err != nil {
-			return err
-		}
-		if parent := filepath.Dir(rel); parent != "." && skip[parent] {
-			if entry.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		destination := filepath.Join(target, rel)
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		switch {
-		case entry.Type()&fs.ModeSymlink != 0:
-			link, err := os.Readlink(path)
-			if err != nil {
-				return err
-			}
-			return os.Symlink(link, destination)
-		case entry.IsDir():
-			// Writable while copying into it; its own mode once its contents are in.
-			folders = append(folders, folder{destination, info.Mode().Perm()})
-			return os.Mkdir(destination, 0o700)
-		case info.Mode().IsRegular():
-			return copyFile(path, destination)
-		default:
-			// Sockets and pipes belong to a run, not the project.
-			return nil
-		}
-	})
+const removingSuffix = ".removing"
+
+func isRemoving(path string) bool {
+	base := filepath.Base(path)
+	return strings.HasPrefix(base, ".") && strings.HasSuffix(base, removingSuffix)
+}
+
+// LeftoverRemoval finds what a removal (or move) of the project in the
+// folder state left when it stopped, for RemoveProject to finish; envDir is
+// the env directory its env folder was in ("" for none). found is false
+// when nothing is left.
+func LeftoverRemoval(state, envDir string) (p Project, found bool) {
+	absolute, err := filepath.Abs(expandHome(state))
 	if err != nil {
-		return err
+		return Project{}, false
 	}
-	for index := len(folders) - 1; index >= 0; index-- {
-		if err := os.Chmod(folders[index].path, folders[index].mode); err != nil {
-			return err
+	if parent, err := filepath.EvalSymlinks(filepath.Dir(absolute)); err == nil {
+		absolute = filepath.Join(parent, filepath.Base(absolute))
+	}
+	p = Project{Name: filepath.Base(absolute), State: RemovingPath(absolute)}
+	if envDir != "" {
+		if env := EnvFolder(expandHome(envDir), p.State); exists(env) {
+			p.Env = env
 		}
 	}
-	return nil
+	for _, path := range []string{p.State, p.Settings(), p.Allowlist(), p.Env} {
+		if path != "" && exists(path) {
+			return p, true
+		}
+	}
+	return p, false
 }
 
 // copyFile copies a regular file with its permissions.
