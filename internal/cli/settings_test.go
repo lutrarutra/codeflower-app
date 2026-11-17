@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"codeflower-app/internal/client"
 	"codeflower-app/internal/sandbox"
 )
 
@@ -244,5 +245,64 @@ func TestAStartWithoutContinueKeepsTheSavedPortIfItIsFree(t *testing.T) {
 	}
 	if port := savedPort(0, "docker", "0.0.0.0"); port != 0 {
 		t.Errorf("no saved port: got %d", port)
+	}
+}
+
+func TestTheVSCodeLinkIsTheBridgesLocalLine(t *testing.T) {
+	connection := sandbox.Connection{URL: "codeflower://10.0.0.5:4100?token=a%2Bb&fp=xyz", Host: "10.0.0.5", Port: 4100, Token: "a+b", Fingerprint: "xyz"}
+	if line := localLine(connection, reachableOnLoopback(sandbox.EngineApptainer, "0.0.0.0", false)); line != "codeflower://127.0.0.1:4100?token=a%2Bb&fp=xyz" {
+		t.Errorf("all interfaces: %s", line)
+	}
+	for _, local := range []bool{
+		reachableOnLoopback(sandbox.EngineApptainer, "10.0.0.5", false),
+		reachableOnLoopback(sandbox.EngineApptainer, "0.0.0.0", true),
+	} {
+		if line := localLine(connection, local); line != connection.URL {
+			t.Errorf("not on loopback: %s", line)
+		}
+	}
+}
+
+func TestTheOpenLinksAreOneTable(t *testing.T) {
+	connection := sandbox.Connection{URL: "codeflower://10.0.0.5:4100?token=k", Host: "10.0.0.5", Port: 4100, Token: "k"}
+	vscode := client.VSCodeLink("codeflower://127.0.0.1:4100?token=k")
+	warning := "In VS Code, Ctrl+click a link, or run \"code flower: Connect to worker\" and paste the codeflower:// line.\n" +
+		"Anyone with these links can control the agents. Keep job logs private,\n" +
+		"e.g. sbatch --output=$HOME/.codeflower-logs/%j.out with that directory chmod 700.\n"
+	cases := map[string]struct {
+		links sandboxLinks
+		want  string
+	}{
+		"tunnel": {
+			sandboxLinks{connection: connection, options: linkOptions{tunnel: true, local: true},
+				remote: "https://tunnel.example/#/chat/x", localPage: "http://127.0.0.1:7720/#/chat/x"},
+			"\nScan the code with a phone, or open a link:\n\n" +
+				"  Paired browsers     https://tunnel.example/#/chat/x\n" +
+				"  This computer       http://127.0.0.1:7720/#/chat/x\n" +
+				"  VS Code here        " + vscode + "\n" +
+				"  VS Code elsewhere   codeflower://10.0.0.5:4100?token=k\n\n" + warning +
+				"No browser is paired yet: run \"codeflower tunnel pair\".\n\n",
+		},
+		"no client": {
+			sandboxLinks{connection: connection, options: linkOptions{local: true}},
+			"\nOpen the sandbox:\n\n" +
+				"  Browser (app running)   http://127.0.0.1:7720/#add=codeflower%3A%2F%2F10.0.0.5%3A4100%3Ftoken%3Dk\n" +
+				"  VS Code here            " + vscode + "\n" +
+				"  VS Code elsewhere       codeflower://10.0.0.5:4100?token=k\n\n" + warning + "\n",
+		},
+	}
+	for name, test := range cases {
+		var out strings.Builder
+		printOpenLinks(&out, test.links)
+		if out.String() != test.want {
+			t.Errorf("%s: got\n%s\nwant\n%s", name, out.String(), test.want)
+		}
+	}
+	var out strings.Builder
+	printOpenLinks(&out, sandboxLinks{connection: connection, options: linkOptions{page: true}})
+	if !strings.Contains(out.String(), "  Browser           http://10.0.0.5:4100/?key=k\n") ||
+		!strings.Contains(out.String(), "  VS Code (paste)   codeflower://10.0.0.5:4100?token=k\n") ||
+		!strings.Contains(out.String(), "plain HTTP") {
+		t.Errorf("with --server:\n%s", out.String())
 	}
 }

@@ -96,6 +96,10 @@ type Worker struct {
 	// ServePage makes the worker also serve the chat page on its port
 	// (CODEFLOWER_PAGE), opened by the link it prints.
 	ServePage bool
+	// AppPrintsLinks: the app prints where to open the worker, so the
+	// bridge prints only that it is ready (CODEFLOWER_APP_LINKS). Without
+	// it the bridge prints its links, as when the image runs on its own.
+	AppPrintsLinks bool
 	// Isolation, when set, cuts the sandbox off the network except for what
 	// the app's proxy allows.
 	Isolation *Isolation
@@ -355,6 +359,9 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 		values["CODEFLOWER_IMAGE_PROVIDER"] = w.Images.Provider
 		values["CODEFLOWER_IMAGE_MODEL"] = w.Images.Model
 		values["CODEFLOWER_IMAGE_KEY_FILE"] = ContainerState + "/run/" + filepath.Base(keyFile)
+	}
+	if w.AppPrintsLinks {
+		values["CODEFLOWER_APP_LINKS"] = "1"
 	}
 	if w.ServePage {
 		// The page is plain HTTP, for a TLS reverse proxy in front.

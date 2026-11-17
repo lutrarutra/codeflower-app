@@ -167,10 +167,12 @@ To start a session with an initial task and continue it in VS Code, see
 			worker.NoTunnel = flags.noTunnel
 			worker.Kill = kill
 			worker.OwnSignals = true
-			var tunnelReady func(sandbox.Connection)
-			if !flags.noTunnel {
-				tunnelReady = tunnelLinks(config.Directory(options.config), os.Stderr)
-			}
+			worker.AppPrintsLinks = true
+			printLinks := openLinks(config.Directory(options.config), os.Stderr, linkOptions{
+				tunnel: !flags.noTunnel,
+				local:  reachableOnLoopback(engine.Name, flags.listenHost, options.isolateNetwork),
+				page:   flags.servePage,
+			})
 			ready := func(connection sandbox.Connection) {
 				// The port the worker took, for its links to connect next time.
 				if connection.Port > 0 && connection.Port != settings.Port {
@@ -180,9 +182,7 @@ To start a session with an initial task and continue it in VS Code, see
 					}
 				}
 				connected(connection)
-				if tunnelReady != nil {
-					tunnelReady(connection)
-				}
+				printLinks(connection)
 			}
 			code, err := worker.Run(ctx, ready)
 			if err != nil {

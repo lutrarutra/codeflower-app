@@ -103,15 +103,15 @@ networks.`,
 			worker.NoTunnel = noTunnel
 			worker.Kill = kill
 			worker.OwnSignals = true
-			var tunnelReady func(sandbox.Connection)
-			if !noTunnel {
-				tunnelReady = tunnelLinks(config.Directory(options.config), os.Stderr)
-			}
+			worker.AppPrintsLinks = true
+			printLinks := openLinks(config.Directory(options.config), os.Stderr, linkOptions{
+				tunnel: !noTunnel,
+				local:  reachableOnLoopback(engine.Name, listenHost, options.isolateNetwork),
+				page:   servePage,
+			})
 			ready := func(connection sandbox.Connection) {
 				connected(connection)
-				if tunnelReady != nil {
-					tunnelReady(connection)
-				}
+				printLinks(connection)
 			}
 			code, err := worker.Run(ctx, ready)
 			if err != nil {

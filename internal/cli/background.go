@@ -4,8 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
+	"strconv"
+	"strings"
 	"time"
 
 	"codeflower-app/internal/client"
@@ -54,50 +58,181 @@ func ensureClient(directory string) (bool, error) {
 	}
 }
 
-// tunnelLinks starts the client in the background when this computer is
-// signed in to the tunnel with remote access on, so paired browsers reach the
-// sandbox that `run` or `sandbox` starts. It returns what to call once the
-// sandbox is ready, which prints where to open it: through the tunnel (with a
-// QR code for phones), on this computer, and in VS Code. It returns nil when
-// the tunnel is not used. With the config directory shared between computers
-// (a cluster's home), it takes the tunnel over from a computer whose hold was
-// released or lapsed, and says so when another still holds it.
-func tunnelLinks(directory string, out io.Writer) func(sandbox.Connection) {
-	state, err := tunnel.LoadState(directory)
-	if err != nil || state.Off {
-		return nil
-	}
-	if !state.MayConnect(time.Now()) {
-		return func(sandbox.Connection) {
-			time.Sleep(time.Second)
-			fmt.Fprintf(out, "\nPaired browsers cannot reach this sandbox: %v.\n\n", &tunnel.ErrHeld{Host: state.Host})
+// linkOptions say how a sandbox is reached, for openLinks.
+type linkOptions struct {
+	// tunnel: paired browsers may reach it (no --no-tunnel).
+	tunnel bool
+	// local: VS Code on this computer reaches it on 127.0.0.1
+	// (reachableOnLoopback).
+	local bool
+	// page: the worker serves its chat page (--server).
+	page bool
+}
+
+// openLinks returns what to call once the sandbox that `run` or `sandbox`
+// starts is ready: it prints where to open it, one link a row (the worker
+// then prints only that it is ready: Worker.AppPrintsLinks).
+//
+// When this computer is signed in to the tunnel with remote access on, it
+// first starts the client in the background, so paired browsers reach the
+// sandbox, and prints a QR code for phones above the links. With the config
+// directory shared between computers (a cluster's home), it takes the tunnel
+// over from a computer whose hold was released or lapsed, and says so when
+// another still holds it.
+func openLinks(directory string, out io.Writer, options linkOptions) func(sandbox.Connection) {
+	var state *tunnel.State
+	var tunnelNote string
+	started := make(chan error, 1)
+	started <- nil
+	if options.tunnel {
+		loaded, err := tunnel.LoadState(directory)
+		switch {
+		case err != nil || loaded.Off:
+		case !loaded.MayConnect(time.Now()):
+			tunnelNote = fmt.Sprintf("Paired browsers cannot reach this sandbox: %v.", &tunnel.ErrHeld{Host: loaded.Host})
+		default:
+			state = loaded
+			<-started
+			go func() {
+				_, err := ensureClient(directory)
+				started <- err
+			}()
 		}
 	}
-	started := make(chan error, 1)
-	go func() {
-		_, err := ensureClient(directory)
-		started <- err
-	}()
 	return func(connection sandbox.Connection) {
 		if err := <-started; err != nil {
-			fmt.Fprintf(out, "Paired browsers cannot reach this sandbox: %v\n", err)
-			return
+			tunnelNote = fmt.Sprintf("Paired browsers cannot reach this sandbox: %v", err)
+			state = nil
 		}
-		// After the bridge's own lines, which reach the terminal through the engine.
-		time.Sleep(time.Second)
+		// After the worker's ready line, which reaches the terminal through the engine.
+		time.Sleep(500 * time.Millisecond)
 		route := "#/chat/" + client.LocalID(connection.ID)
-		remote := tunnel.PageURL(state) + route
-		fmt.Fprintln(out)
-		printQR(out, remote)
-		fmt.Fprintf(out, "Through the tunnel, in paired browsers (scan the code with a phone):\n\n  %s\n\n", remote)
-		if len(state.Devices) == 0 {
-			fmt.Fprintf(out, "No browser is paired yet: run \"codeflower tunnel pair\".\n\n")
+		links := sandboxLinks{connection: connection, options: options}
+		if page, running := client.Running(directory); running {
+			links.localPage = page + route
 		}
-		if local, running := client.Running(directory); running {
-			fmt.Fprintf(out, "On this computer:\n\n  %s\n\n", local+route)
+		if state != nil {
+			links.remote = tunnel.PageURL(state) + route
+			links.paired = len(state.Devices) > 0
 		}
-		fmt.Fprintf(out, "In VS Code:\n\n  %s\n\n", client.VSCodeLink(connection.URL))
+		printOpenLinks(out, links)
+		if tunnelNote != "" {
+			fmt.Fprintf(out, "%s\n\n", tunnelNote)
+		}
 	}
+}
+
+// sandboxLinks are where a ready sandbox opens.
+type sandboxLinks struct {
+	connection sandbox.Connection
+	options    linkOptions
+	// remote is its page through the tunnel; empty without the tunnel.
+	remote string
+	paired bool
+	// localPage is its page in the client running on this computer.
+	localPage string
+}
+
+// printOpenLinks prints where to open a sandbox: the QR code of its tunnel
+// link first, then every link as a table (as the bridge prints its own when
+// it runs without the app: readyMessage in its server.js).
+func printOpenLinks(out io.Writer, links sandboxLinks) {
+	connection := links.connection
+	fmt.Fprintln(out)
+	var rows [][2]string
+	if links.remote != "" {
+		printQR(out, links.remote)
+		fmt.Fprintf(out, "Scan the code with a phone, or open a link:\n\n")
+		rows = append(rows, [2]string{"Paired browsers", links.remote})
+	} else {
+		fmt.Fprintf(out, "Open the sandbox:\n\n")
+	}
+	switch {
+	case links.options.page:
+		rows = append(rows, [2]string{"Browser", pageLink(connection)})
+	case links.localPage != "":
+		rows = append(rows, [2]string{"This computer", links.localPage})
+	default:
+		rows = append(rows, [2]string{"Browser (app running)", fmt.Sprintf("http://127.0.0.1:%d/#add=%s", client.DefaultPort, url.QueryEscape(connection.URL))})
+	}
+	here := localLine(connection, links.options.local)
+	if links.options.local {
+		rows = append(rows, [2]string{"VS Code here", client.VSCodeLink(here)})
+	}
+	label := "VS Code (paste)"
+	if links.options.local && here != connection.URL {
+		label = "VS Code elsewhere"
+	}
+	rows = append(rows, [2]string{label, connection.URL})
+	fmt.Fprintf(out, "%s\n\n", linkRows(rows))
+	fmt.Fprintln(out, `In VS Code, Ctrl+click a link, or run "code flower: Connect to worker" and paste the codeflower:// line.`)
+	if links.options.page {
+		fmt.Fprintln(out, "The page is plain HTTP: its traffic and the key in the link are not encrypted. On a shared\n"+
+			"network, listen on 127.0.0.1 (--host 127.0.0.1) behind a TLS reverse proxy such as nginx,\n"+
+			"or reach it through ssh -L.")
+	}
+	fmt.Fprintln(out, "Anyone with these links can control the agents. Keep job logs private,\n"+
+		"e.g. sbatch --output=$HOME/.codeflower-logs/%j.out with that directory chmod 700.")
+	if links.remote != "" && !links.paired {
+		fmt.Fprintln(out, `No browser is paired yet: run "codeflower tunnel pair".`)
+	}
+	fmt.Fprintln(out)
+}
+
+// pageLink is the chat page a worker serves with --server, with its key
+// (pageLink in the bridge's server.js).
+func pageLink(connection sandbox.Connection) string {
+	return "http://" + net.JoinHostPort(connection.Host, strconv.Itoa(connection.Port)) + "/?key=" + url.QueryEscape(connection.Token)
+}
+
+// linkRows is links as a table: each label padded to the longest, then its
+// link, alone up to the line's end so a terminal's Ctrl+click takes it all.
+func linkRows(rows [][2]string) string {
+	width := 0
+	for _, row := range rows {
+		width = max(width, len(row[0]))
+	}
+	lines := make([]string, len(rows))
+	for index, row := range rows {
+		lines[index] = fmt.Sprintf("  %-*s   %s", width, row[0], row[1])
+	}
+	return strings.Join(lines, "\n")
+}
+
+// reachableOnLoopback says whether VS Code on this computer reaches the
+// worker on 127.0.0.1, as the bridge decides for its own VS Code link:
+// Docker and Podman publish the port there, and Apptainer's worker listens on
+// all interfaces or loopback. An isolated sandbox's port is the app's, which
+// the bridge cannot see, so it keeps the advertised address; so does this.
+func reachableOnLoopback(engine, listenHost string, isolated bool) bool {
+	if isolated {
+		return false
+	}
+	if engine != sandbox.EngineApptainer {
+		return true
+	}
+	switch listenHost {
+	case "", "0.0.0.0", "::", "127.0.0.1", "localhost":
+		return true
+	}
+	return false
+}
+
+// localLine is the worker's codeflower:// line for VS Code on this computer:
+// on 127.0.0.1 when it is reachable there, else the advertised one.
+func localLine(connection sandbox.Connection, local bool) string {
+	if !local || connection.Port == 0 {
+		return connection.URL
+	}
+	switch connection.Host {
+	case "127.0.0.1", "localhost", "::1":
+		return connection.URL
+	}
+	line := "codeflower://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(connection.Port)) + "?token=" + url.QueryEscape(connection.Token)
+	if connection.Fingerprint != "" {
+		line += "&fp=" + connection.Fingerprint
+	}
+	return line
 }
 
 // quitWhenSignedOut quits a background client once this computer is signed
