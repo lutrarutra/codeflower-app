@@ -147,6 +147,11 @@ type Worker struct {
 	// Kill, once closed, kills the sandbox at once instead of waiting for it
 	// to stop after Run's ctx ended (the second Ctrl+C).
 	Kill <-chan struct{}
+	// OwnSignals keeps the terminal's Ctrl+C from Podman and Apptainer, which
+	// would otherwise get it with the app and stop the sandbox at once: the
+	// app decides what it does (wrap up the working chats first). Docker runs
+	// through its API and never gets it.
+	OwnSignals bool
 }
 
 // ErrImageWithoutTasks means the sandbox started a worker for VS Code instead
@@ -572,7 +577,7 @@ func (w Worker) runEngine(ctx context.Context, instanceID string, values map[str
 		return RunPodman(ctx, w.Engine.Executable, PodmanRun{
 			Name: name, Image: w.Image, State: w.State, Binds: binds, Env: values,
 			Port: port, NetDirectory: netDirectory, CPUs: resources.CPUs, Memory: resources.Memory, Stdin: w.Stdin, Stdout: w.Stdout, Stderr: w.Stderr,
-			TTY: w.TUI != "", SeccompFile: seccompFile, Kill: w.Kill, EngineArgs: engineArgs,
+			TTY: w.TUI != "", SeccompFile: seccompFile, Kill: w.Kill, EngineArgs: engineArgs, OwnProcessGroup: w.OwnSignals,
 		})
 	case EngineApptainer:
 		scratch, err := newScratch()
@@ -586,7 +591,7 @@ func (w Worker) runEngine(ctx context.Context, instanceID string, values map[str
 			return 1, err
 		}
 		engineArgs.apptainerGPUs(values)
-		return RunApptainer(ctx, w.Kill, args, values, w.Stdin, w.Stdout, w.Stderr)
+		return RunApptainer(ctx, w.Kill, w.OwnSignals, args, values, w.Stdin, w.Stdout, w.Stderr)
 	}
 	return 1, fmt.Errorf("unknown engine %q", w.Engine.Name)
 }

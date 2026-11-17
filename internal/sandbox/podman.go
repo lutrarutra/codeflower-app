@@ -59,6 +59,9 @@ type PodmanRun struct {
 	Kill <-chan struct{}
 	// EngineArgs are the user's --engine-args, those Podman can apply (forRun).
 	EngineArgs EngineArgs
+	// OwnProcessGroup runs podman in its own process group, out of the
+	// terminal's Ctrl+C (not with TTY, which needs the terminal's group).
+	OwnProcessGroup bool
 }
 
 // podmanOwnEnv are variables the podman process reads itself (rootless
@@ -157,6 +160,9 @@ func RunPodman(ctx context.Context, executable string, run PodmanRun) (int, erro
 	command := exec.Command(args[0], args[1:]...)
 	command.Env = os.Environ()
 	command.Stdin = run.Stdin
+	if run.OwnProcessGroup && !run.TTY {
+		ownProcessGroup(command)
+	}
 	for name, value := range run.Env {
 		if !podmanOwnEnv[name] {
 			command.Env = append(command.Env, name+"="+value)

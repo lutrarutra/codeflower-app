@@ -272,7 +272,7 @@ func runContainer(ctx context.Context, engine EngineStatus, spec containerSpec) 
 		if err != nil {
 			return 1, err
 		}
-		return RunApptainer(ctx, nil, args, spec.env, nil, spec.stdout, spec.stderr)
+		return RunApptainer(ctx, nil, false, args, spec.env, nil, spec.stdout, spec.stderr)
 	}
 	return 1, fmt.Errorf("unknown engine %q", engine.Name)
 }

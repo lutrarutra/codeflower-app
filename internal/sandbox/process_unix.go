@@ -4,6 +4,7 @@ package sandbox
 
 import (
 	"errors"
+	"os/exec"
 	"syscall"
 )
 
@@ -20,4 +21,14 @@ func processAlive(pid int) bool {
 // Ctrl+C in its terminal would.
 func (r Running) Stop() error {
 	return syscall.Kill(r.PID, syscall.SIGTERM)
+}
+
+// ownProcessGroup starts the command in a process group of its own: the
+// terminal's Ctrl+C (and Ctrl+\) go to its foreground group only, so they
+// reach the app, which stops the command itself.
+func ownProcessGroup(command *exec.Cmd) {
+	if command.SysProcAttr == nil {
+		command.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	command.SysProcAttr.Setpgid = true
 }

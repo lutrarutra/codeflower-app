@@ -104,9 +104,13 @@ func apptainerAllowsIsolation(ctx context.Context, executable, image string) err
 // reach the clean container environment without appearing in `ps`.
 // Cancelling ctx sends SIGTERM to the container's process so the worker can
 // shut down cleanly (see stopContainer), and SIGKILL to Apptainer and all it
-// started when it has not (see runUntilDone).
-func RunApptainer(ctx context.Context, kill <-chan struct{}, args []string, values map[string]string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
+// started when it has not (see runUntilDone). With ownGroup, Apptainer runs
+// in its own process group, out of the terminal's Ctrl+C.
+func RunApptainer(ctx context.Context, kill <-chan struct{}, ownGroup bool, args []string, values map[string]string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
 	command := exec.Command(args[0], args[1:]...)
+	if ownGroup {
+		ownProcessGroup(command)
+	}
 	command.Env = os.Environ()
 	for name, value := range values {
 		command.Env = append(command.Env, "APPTAINERENV_"+name+"="+value)

@@ -1,13 +1,10 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -40,7 +37,11 @@ It prints a link to open in the browser while "codeflower client" runs on
 your computer, which adds the sandbox there; or, in VS Code, run "code
 flower: Connect to worker" and paste the codeflower://… line. Sign in to the
 agents from the page's or VS Code's view of the sandbox; logins are kept in
-the project. Press Ctrl+C to stop.
+the project. Press Ctrl+C to stop: with no agent working, the sandbox
+stops at once; otherwise the chats whose agent (or a subagent) works are asked
+to save their work and wrap up first, and the sandbox stops when they are done,
+at most after 10 minutes ("client: {wrap_up_minutes: N}" in the config). Ctrl+C
+twice within 3 seconds stops it at once, and once more while it stops kills it.
 
 Each start saves how the project started in PROJECT.sandbox.yaml next to the
 project folder: its folders, engine, image, network, port and the key and TLS
@@ -121,7 +122,7 @@ To start a session with an initial task and continue it in VS Code, see
 					return fmt.Errorf("%w: %s", err, hint)
 				}
 			}
-			ctx, kill, stop := stopOnSignals(command.Context())
+			ctx, kill, connected, stop := quitOnSignals(command.Context(), options.config)
 			defer stop()
 			prepared, err := options.prepare(ctx, engine, "a code flower sandbox")
 			if err != nil {
@@ -165,6 +166,7 @@ To start a session with an initial task and continue it in VS Code, see
 			worker.ServePage = flags.servePage
 			worker.NoTunnel = flags.noTunnel
 			worker.Kill = kill
+			worker.OwnSignals = true
 			var tunnelReady func(sandbox.Connection)
 			if !flags.noTunnel {
 				tunnelReady = tunnelLinks(config.Directory(options.config), os.Stderr)
@@ -177,6 +179,7 @@ To start a session with an initial task and continue it in VS Code, see
 						fmt.Fprintf(os.Stderr, "Could not save the port in %s: %v\n", settingsFile, err)
 					}
 				}
+				connected(connection)
 				if tunnelReady != nil {
 					tunnelReady(connection)
 				}
@@ -214,37 +217,6 @@ To start a session with an initial task and continue it in VS Code, see
 		"publish the bridge's Node inspector on 127.0.0.1:PORT (development, Docker only)")
 	_ = command.Flags().MarkHidden("inspect-port")
 	return command
-}
-
-// stopOnSignals ends ctx on the first Ctrl+C or SIGTERM, which stops the
-// sandbox, and closes kill on the second, which kills it at once. stop ends
-// the watch.
-func stopOnSignals(parent context.Context) (ctx context.Context, kill <-chan struct{}, stop func()) {
-	ctx, cancel := context.WithCancel(parent)
-	killing := make(chan struct{})
-	signals := make(chan os.Signal, 2)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
-	done := make(chan struct{})
-	go func() {
-		for first := true; ; first = false {
-			select {
-			case <-done:
-				return
-			case <-signals:
-			}
-			if !first {
-				close(killing)
-				return
-			}
-			fmt.Fprintln(os.Stderr, "\nStopping the sandbox; press Ctrl+C again to kill it now.")
-			cancel()
-		}
-	}()
-	return ctx, killing, func() {
-		signal.Stop(signals)
-		close(done)
-		cancel()
-	}
 }
 
 // portHost is the interface the worker's port is opened on: Docker and

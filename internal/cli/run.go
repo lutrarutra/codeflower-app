@@ -35,7 +35,12 @@ and sign in.
 
 It prints a link to open in the browser while "codeflower client" runs on
 your computer, which adds the sandbox there; or, in VS Code, run "code
-flower: Connect to worker" and paste the codeflower://… line. Press Ctrl+C to stop.
+flower: Connect to worker" and paste the codeflower://… line.
+Press Ctrl+C to stop: with no agent working, the sandbox
+stops at once; otherwise the chats whose agent (or a subagent) works are asked
+to save their work and wrap up first, and the sandbox stops when they are done,
+at most after 10 minutes ("client: {wrap_up_minutes: N}" in the config). Ctrl+C
+twice within 3 seconds stops it at once, and once more while it stops kills it.
 
 With --server the sandbox also serves its chat page on the same port and
 prints a link to it (http://HOST:PORT/?key=…), like Jupyter's: open it in any
@@ -75,7 +80,7 @@ networks.`,
 			if inspectPort > 0 && engine.Name != sandbox.EngineDocker {
 				return fmt.Errorf("--inspect-port needs --engine docker")
 			}
-			ctx, kill, stop := stopOnSignals(command.Context())
+			ctx, kill, connected, stop := quitOnSignals(command.Context(), options.config)
 			defer stop()
 			prepared, err := options.prepare(ctx, engine, "a code flower run")
 			if err != nil {
@@ -97,9 +102,16 @@ networks.`,
 			worker.ServePage = servePage
 			worker.NoTunnel = noTunnel
 			worker.Kill = kill
-			var ready func(sandbox.Connection)
+			worker.OwnSignals = true
+			var tunnelReady func(sandbox.Connection)
 			if !noTunnel {
-				ready = tunnelLinks(config.Directory(options.config), os.Stderr)
+				tunnelReady = tunnelLinks(config.Directory(options.config), os.Stderr)
+			}
+			ready := func(connection sandbox.Connection) {
+				connected(connection)
+				if tunnelReady != nil {
+					tunnelReady(connection)
+				}
 			}
 			code, err := worker.Run(ctx, ready)
 			if err != nil {
