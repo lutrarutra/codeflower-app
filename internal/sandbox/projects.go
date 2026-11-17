@@ -115,6 +115,47 @@ func (p Project) LastStarted() time.Time {
 	return time.Time{}
 }
 
+// Size is the disk space the project's files take: its folder, settings,
+// allowlist and env folder. Symbolic links are not followed, hard-linked
+// files count once, and files it cannot read are left out (complete is then
+// false).
+func (p Project) Size() (total int64, complete bool) {
+	complete = true
+	seen := map[[2]uint64]bool{}
+	for _, move := range p.files("", "") {
+		if !exists(move[0]) {
+			continue
+		}
+		err := filepath.WalkDir(move[0], func(_ string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				complete = false
+				if entry != nil && entry.IsDir() {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			info, err := entry.Info()
+			if err != nil {
+				complete = false
+				return nil
+			}
+			bytes, inode, linked := usage(info)
+			if linked {
+				if seen[inode] {
+					return nil
+				}
+				seen[inode] = true
+			}
+			total += bytes
+			return nil
+		})
+		if err != nil {
+			complete = false
+		}
+	}
+	return total, complete
+}
+
 // ListProjects lists the projects in a projects directory, by name.
 func ListProjects(directory, envDir string) ([]Project, error) {
 	entries, err := os.ReadDir(expandHome(directory))

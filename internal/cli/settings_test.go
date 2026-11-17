@@ -160,6 +160,9 @@ func TestProjectsAreCopiedMovedAndRemovedByName(t *testing.T) {
 	if err != nil || !strings.Contains(out, "renamed") || !strings.Contains(out, "study42") || strings.Contains(out, "copy ") {
 		t.Fatalf("list: %q %v", out, err)
 	}
+	if !strings.Contains(out, "SIZE") || !strings.Contains(out, "KiB") || !strings.Contains(out, state+"\n") {
+		t.Fatalf("list without size and path: %q", out)
+	}
 	out, err = run("show", "study42")
 	if err != nil || !strings.Contains(out, "port       41234") || !strings.Contains(out, "--continue study42") {
 		t.Fatalf("show: %q %v", out, err)
@@ -184,6 +187,14 @@ func TestRemovingAProjectAsks(t *testing.T) {
 	for answer, want := range map[string]bool{"y\n": true, "yes\n": true, "\n": false, "no\n": false, "": false} {
 		if got := confirmRemove(strings.NewReader(answer), new(strings.Builder), project); got != want {
 			t.Errorf("%q: %v", answer, got)
+		}
+	}
+}
+
+func TestFormatSize(t *testing.T) {
+	for bytes, want := range map[int64]string{0: "0 B", 1023: "1023 B", 1536: "1.5 KiB", 5 << 30: "5.0 GiB"} {
+		if got := formatSize(bytes); got != want {
+			t.Errorf("formatSize(%d) = %q, want %q", bytes, got, want)
 		}
 	}
 }

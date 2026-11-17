@@ -192,3 +192,28 @@ func TestRemovingAProjectRemovesItsFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestASizeCountsEnvAndHardLinksOnce(t *testing.T) {
+	project, _, _ := testProject(t)
+	before, complete := project.Size()
+	if !complete || before <= 0 {
+		t.Fatalf("size %d, complete %v", before, complete)
+	}
+	big := filepath.Join(project.Env, "env", "big")
+	if err := os.WriteFile(big, make([]byte, 1<<20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withBig, _ := project.Size()
+	if withBig-before < 1<<20 {
+		t.Fatalf("the env folder's file is not counted: %d then %d", before, withBig)
+	}
+	if runtime.GOOS == "windows" {
+		return
+	}
+	if err := os.Link(big, filepath.Join(project.State, "home", "big")); err != nil {
+		t.Fatal(err)
+	}
+	if linked, _ := project.Size(); linked-withBig >= 1<<20 {
+		t.Fatalf("a hard link counts twice: %d then %d", withBig, linked)
+	}
+}

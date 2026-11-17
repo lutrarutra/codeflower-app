@@ -155,16 +155,20 @@ func projectsListCommand(options *projectsOptions) *cobra.Command {
 				return nil
 			}
 			table := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(table, "NAME\tSTATUS\tLAST STARTED\tSETTINGS")
+			fmt.Fprintln(table, "NAME\tSTATUS\tLAST STARTED\tSETTINGS\tSIZE\tPATH")
 			for _, project := range projects {
+				// Open it again with its env folder, which its size includes.
+				if withEnv, err := sandbox.OpenProject(project.State, options.envDirOf(project.State)); err == nil {
+					project = withEnv
+				}
 				saved := "saved"
 				if _, err := sandbox.ReadSettings(project.Settings()); errors.Is(err, sandbox.ErrNoSettings) {
 					saved = "-"
 				} else if err != nil {
 					saved = "unreadable"
 				}
-				fmt.Fprintf(table, "%s\t%s\t%s\t%s\n", project.Name, projectStatus(project),
-					formatTime(project.LastStarted()), saved)
+				fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\n", project.Name, projectStatus(project),
+					formatTime(project.LastStarted()), saved, projectSize(project), project.State)
 			}
 			if err := table.Flush(); err != nil {
 				return err
@@ -185,6 +189,30 @@ func projectStatus(project sandbox.Project) string {
 	default:
 		return fmt.Sprintf("running (%d)", len(running))
 	}
+}
+
+// projectSize is the disk space a project takes, with ">" when some of its
+// files could not be read.
+func projectSize(project sandbox.Project) string {
+	bytes, complete := project.Size()
+	if complete {
+		return formatSize(bytes)
+	}
+	return ">" + formatSize(bytes)
+}
+
+// formatSize writes a size in binary units, with one decimal from KiB up.
+func formatSize(bytes int64) string {
+	if bytes < 1<<10 {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	value := float64(bytes)
+	unit := 0
+	for value >= 1<<10 && unit < 4 {
+		value /= 1 << 10
+		unit++
+	}
+	return fmt.Sprintf("%.1f %s", value, []string{"B", "KiB", "MiB", "GiB", "TiB"}[unit])
 }
 
 func formatTime(moment time.Time) string {
