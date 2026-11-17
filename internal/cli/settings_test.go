@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -225,5 +226,23 @@ func TestContinuingWithCreateStartsAMissingProject(t *testing.T) {
 		if want := filepath.Join(projects, filepath.Base(argument)); options.stateDirectory() != want {
 			t.Errorf("%s: state %s, want %s", argument, options.stateDirectory(), want)
 		}
+	}
+}
+
+func TestAStartWithoutContinueKeepsTheSavedPortIfItIsFree(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	taken := listener.Addr().(*net.TCPAddr).Port
+	if port := savedPort(taken, "docker", "0.0.0.0"); port != 0 {
+		t.Errorf("taken port %d: got %d, want any free port (0)", taken, port)
+	}
+	listener.Close()
+	if port := savedPort(taken, "docker", "0.0.0.0"); port != taken {
+		t.Errorf("free port %d: got %d", taken, port)
+	}
+	if port := savedPort(0, "docker", "0.0.0.0"); port != 0 {
+		t.Errorf("no saved port: got %d", port)
 	}
 }

@@ -50,8 +50,10 @@ and saved page links reconnect; it fails if that port is taken. Flags given
 with --continue replace the saved settings, or add folders to the saved ones,
 and are saved for next time. The file is YAML, readable only by you: edit it
 to change or remove a setting while the sandbox is stopped. --new-key makes
-the links saved before stop working. See "codeflower projects" to list, copy,
-move or remove projects.
+the links saved before stop working. Started without --continue, a project
+still keeps its key and certificate, and its saved port unless --port is
+given or the port is taken, so VS Code's saved connection still works. See
+"codeflower projects" to list, copy, move or remove projects.
 
 With --server the sandbox also serves its chat page on the same port and
 prints a link to it (http://HOST:PORT/?key=…), like Jupyter's: open it in any
@@ -111,12 +113,7 @@ To start a session with an initial task and continue it in VS Code, see
 				return fmt.Errorf("--inspect-port needs --engine docker")
 			}
 			if flags.port > 0 {
-				// Docker and Podman publish the port on 127.0.0.1.
-				host := "127.0.0.1"
-				if engine.Name == sandbox.EngineApptainer {
-					host = flags.listenHost
-				}
-				if err := sandbox.CheckPort(host, flags.port); err != nil {
+				if err := sandbox.CheckPort(portHost(engine.Name, flags.listenHost), flags.port); err != nil {
 					hint := "choose another --port, or --port 0 for any free one"
 					if options.fromSettings["port"] {
 						hint = "the project's saved settings ask for it; stop what uses it, or give --port 0 for any free port (saved for next time)"
@@ -141,6 +138,9 @@ To start a session with an initial task and continue it in VS Code, see
 			certificate, err := projectKey(&settings, flags.newKey)
 			if err != nil {
 				return fmt.Errorf("%s: %w; give --new-key for a new key and certificate", settingsFile, err)
+			}
+			if flags.continueFrom == "" && !given("port") {
+				flags.port = savedPort(settings.Port, engine.Name, flags.listenHost)
 			}
 			settings = options.settingsOf(settings, engine.Name, flags)
 			projectName := filepath.Base(prepared.state)
@@ -245,4 +245,28 @@ func stopOnSignals(parent context.Context) (ctx context.Context, kill <-chan str
 		close(done)
 		cancel()
 	}
+}
+
+// portHost is the interface the worker's port is opened on: Docker and
+// Podman publish it on 127.0.0.1, Apptainer listens on --host.
+func portHost(engine, listenHost string) string {
+	if engine == sandbox.EngineApptainer {
+		return listenHost
+	}
+	return "127.0.0.1"
+}
+
+// savedPort is the port a project started on last time, for a start
+// without --continue or --port, so VS Code's saved connection reconnects:
+// if it is taken, any free port (0) instead, since no one asked for it.
+func savedPort(port int, engine, listenHost string) int {
+	if port <= 0 {
+		return 0
+	}
+	if err := sandbox.CheckPort(portHost(engine, listenHost), port); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: the project's saved %v, so the sandbox takes another port.\n"+
+			"VS Code's saved connection will not reach it: connect with the new link.\n", err)
+		return 0
+	}
+	return port
 }
