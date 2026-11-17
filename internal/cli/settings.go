@@ -22,7 +22,10 @@ type workerFlags struct {
 	noTunnel      bool
 	// continueFrom is --continue: a project name or folder.
 	continueFrom string
-	newKey       bool
+	// create is --create: --continue starts the project new if it does not
+	// exist yet.
+	create bool
+	newKey bool
 }
 
 // projectArgument tells a project name from a project folder: a name has
@@ -35,8 +38,11 @@ func projectArgument(argument string) (name, folder string) {
 }
 
 // continueProject points the options at the project to continue and reads
-// its saved settings.
-func (options *sandboxOptions) continueProject(argument string) (sandbox.Settings, error) {
+// its saved settings. With create, a project that does not exist yet, or
+// has no saved settings, is started from the flags given (found is false);
+// a folder that is not a project is used only if it is empty or missing.
+// Without it, both are errors, so a mistyped name does not make a project.
+func (options *sandboxOptions) continueProject(argument string, create bool) (settings sandbox.Settings, found bool, err error) {
 	name, folder := projectArgument(argument)
 	options.project, options.state = name, folder
 	if name == "" {
@@ -44,22 +50,81 @@ func (options *sandboxOptions) continueProject(argument string) (sandbox.Setting
 	}
 	loaded, err := options.loadConfig()
 	if err != nil {
-		return sandbox.Settings{}, err
+		return settings, false, err
 	}
 	options.useDirectories(loaded)
 	project, err := sandbox.OpenProject(options.stateDirectory(), "")
 	if err != nil {
-		if name != "" {
-			return sandbox.Settings{}, fmt.Errorf("no project %s in %s", name, filepath.Dir(options.stateDirectory()))
+		state := options.stateDirectory()
+		switch {
+		case create && emptyOrMissing(state):
+			fmt.Fprintf(os.Stderr, "codeflower: no project in %s yet: starting a new one\n", state)
+			return settings, false, nil
+		case create:
+			return settings, false, fmt.Errorf("%s is not a project and is not empty, so --create does not use it", state)
+		case name != "":
+			return settings, false, fmt.Errorf("no project %s in %s%s (add --create to start it new)",
+				name, filepath.Dir(state), suggestProject(filepath.Dir(state), name))
 		}
-		return sandbox.Settings{}, err
+		return settings, false, fmt.Errorf("%w (add --create to start it new)", err)
 	}
-	settings, err := sandbox.ReadSettings(project.Settings())
+	settings, err = sandbox.ReadSettings(project.Settings())
 	if errors.Is(err, sandbox.ErrNoSettings) {
-		return settings, fmt.Errorf("the project %s has no saved settings (%s): start it once with "+
-			"`codeflower sandbox %s …`, which saves them", project.Name, project.Settings(), projectFlag(name, project.State))
+		if create {
+			return settings, false, nil
+		}
+		return settings, false, fmt.Errorf("the project %s has no saved settings (%s): start it once with "+
+			"`codeflower sandbox %s …`, which saves them, or add --create", project.Name, project.Settings(),
+			projectFlag(name, project.State))
 	}
-	return settings, err
+	return settings, err == nil, err
+}
+
+// emptyOrMissing says whether a folder does not exist or has nothing in it.
+func emptyOrMissing(folder string) bool {
+	entries, err := os.ReadDir(folder)
+	if errors.Is(err, os.ErrNotExist) {
+		return true
+	}
+	return err == nil && len(entries) == 0
+}
+
+// suggestProject is "; did you mean NAME?" for the project in directory
+// whose name is closest to name, if one is close enough to be a typo.
+func suggestProject(directory, name string) string {
+	projects, _ := sandbox.ListProjects(directory, "")
+	best, bestDistance := "", 3
+	for _, project := range projects {
+		if distance := editDistance(strings.ToLower(name), strings.ToLower(project.Name)); distance < bestDistance {
+			best, bestDistance = project.Name, distance
+		}
+	}
+	if best == "" {
+		return ""
+	}
+	return "; did you mean " + best + "?"
+}
+
+// editDistance is the Levenshtein distance between a and b.
+func editDistance(a, b string) int {
+	x, y := []rune(a), []rune(b)
+	previous := make([]int, len(y)+1)
+	for j := range previous {
+		previous[j] = j
+	}
+	for i := 1; i <= len(x); i++ {
+		current := make([]int, len(y)+1)
+		current[0] = i
+		for j := 1; j <= len(y); j++ {
+			cost := 1
+			if x[i-1] == y[j-1] {
+				cost = 0
+			}
+			current[j] = min(previous[j]+1, current[j-1]+1, previous[j-1]+cost)
+		}
+		previous = current
+	}
+	return previous[len(y)]
 }
 
 // projectFlag is the flag that names a project: --project NAME, or --state

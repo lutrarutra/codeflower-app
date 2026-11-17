@@ -68,22 +68,28 @@ To start a session with an initial task and continue it in VS Code, see
   codeflower sandbox --project study42 --input /data/study42
   codeflower sandbox --continue study42
   codeflower sandbox --continue study42 --input ~/data/study42-batch2
+  codeflower sandbox --continue study42 --create --input ~/data/study42 --output ~/results/study42
   codeflower sandbox --input ~/data/study42 --skills ~/my-skills --isolate-network
   codeflower sandbox --image ./codeflower-sandbox.sif --state ~/cf/study42 --bind /data/ref:/reference`,
 		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			given := command.Flags().Changed
+			if flags.create && flags.continueFrom == "" {
+				return fmt.Errorf("--create needs --continue")
+			}
 			if flags.continueFrom != "" {
 				for _, name := range []string{"project", "state"} {
 					if given(name) {
 						return fmt.Errorf("--%s cannot be used with --continue, which names the project", name)
 					}
 				}
-				saved, err := options.continueProject(flags.continueFrom)
+				saved, found, err := options.continueProject(flags.continueFrom, flags.create)
 				if err != nil {
 					return err
 				}
-				options.applySettings(saved, &flags)
+				if found {
+					options.applySettings(saved, &flags)
+				}
 			}
 			if err := options.check(); err != nil {
 				return err
@@ -199,6 +205,8 @@ To start a session with an initial task and continue it in VS Code, see
 	command.Flags().IntVar(&flags.port, "port", 0, "port of the worker (and its page with --server) (default: any free port); fails if it is taken")
 	command.Flags().StringVar(&flags.continueFrom, "continue", "",
 		"start a project again with its saved settings: a project name, or a project folder (flags given replace settings, or add folders)")
+	command.Flags().BoolVar(&flags.create, "create", false,
+		"with --continue: start the project new from the flags given if it does not exist yet (a script can then always use --continue)")
 	command.Flags().BoolVar(&flags.newKey, "new-key", false,
 		"give the project a new key and TLS certificate: links saved before no longer connect")
 	// Development only: anyone who can reach the inspector can run code in the sandbox.

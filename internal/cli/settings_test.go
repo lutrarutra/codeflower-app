@@ -107,7 +107,14 @@ func TestContinuingASandboxChecksItsProject(t *testing.T) {
 	if _, err := sandbox.PrepareState(filepath.Join(projects, "fresh")); err != nil {
 		t.Fatal(err)
 	}
+	notProject := filepath.Join(projects, "notes")
+	if err := os.MkdirAll(filepath.Join(notProject, "inside"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	cases := map[string][]string{
+		"--create needs --continue":                {"--create", "--project", "fresh"},
+		"did you mean fresh? (add --create":        {"--continue", "frseh"},
+		"is not a project and is not empty":        {"--continue", notProject, "--create"},
 		"--project cannot be used with --continue": {"--continue", "fresh", "--project", "other"},
 		"--state cannot be used with --continue":   {"--continue", "fresh", "--state", projects},
 		"no project missing in":                    {"--continue", "missing"},
@@ -199,6 +206,24 @@ func TestFormatSize(t *testing.T) {
 	for bytes, want := range map[int64]string{0: "0 B", 1023: "1023 B", 1536: "1.5 KiB", 5 << 30: "5.0 GiB"} {
 		if got := formatSize(bytes); got != want {
 			t.Errorf("formatSize(%d) = %q, want %q", bytes, got, want)
+		}
+	}
+}
+
+func TestContinuingWithCreateStartsAMissingProject(t *testing.T) {
+	projects := t.TempDir()
+	if _, err := sandbox.PrepareState(filepath.Join(projects, "fresh")); err != nil {
+		t.Fatal(err)
+	}
+	for _, argument := range []string{"study42", "fresh", filepath.Join(projects, "elsewhere")} {
+		options := sandboxOptions{}
+		options.projectsDir, options.config = projects, t.TempDir()
+		settings, found, err := options.continueProject(argument, true)
+		if err != nil || found || settings.Key != "" {
+			t.Errorf("%s: found %v, err %v", argument, found, err)
+		}
+		if want := filepath.Join(projects, filepath.Base(argument)); options.stateDirectory() != want {
+			t.Errorf("%s: state %s, want %s", argument, options.stateDirectory(), want)
 		}
 	}
 }
