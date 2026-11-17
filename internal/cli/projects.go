@@ -284,6 +284,9 @@ func projectsShowCommand(options *projectsOptions) *cobra.Command {
 			if settings.Image != "" {
 				engine += ", " + settings.Image
 			}
+			if settings.EngineArgs != "" {
+				engine += ", " + settings.EngineArgs
+			}
 			line("engine", engine)
 			for _, folders := range []struct {
 				label string
@@ -293,6 +296,10 @@ func projectsShowCommand(options *projectsOptions) *cobra.Command {
 				for _, path := range folders.paths {
 					line(folders.label, path)
 				}
+			}
+			for _, value := range settings.Env {
+				name, _, _ := strings.Cut(value, "=")
+				line("env", name)
 			}
 			if settings.IsolateNetwork {
 				line("network", "isolated")

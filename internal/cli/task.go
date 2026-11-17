@@ -192,18 +192,20 @@ func startTask(command *cobra.Command, options *sandboxOptions, flags taskFlags,
 
 	id := sandbox.NewInstanceID()
 	task := sandbox.Task{
-		Task:      text,
-		Agent:     options.agent,
-		Output:    output.Target,
-		Report:    !flags.skipReport,
-		MaxRounds: flags.rounds,
-		Model:     strings.TrimSpace(model),
-		Effort:    strings.TrimSpace(effort),
-		Options:   settings,
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
-		Mounts:    sandbox.TaskMounts(prepared.binds),
-		Engine:    options.engine,
-		Image:     options.image,
+		Task:       text,
+		Agent:      options.agent,
+		Output:     output.Target,
+		Report:     !flags.skipReport,
+		MaxRounds:  flags.rounds,
+		Model:      strings.TrimSpace(model),
+		Effort:     strings.TrimSpace(effort),
+		Options:    settings,
+		CreatedAt:  time.Now().UTC().Format(time.RFC3339),
+		Mounts:     sandbox.TaskMounts(prepared.binds),
+		Engine:     options.engine,
+		Image:      options.image,
+		Env:        options.envValues,
+		EngineArgs: options.engineArgsLine(),
 	}
 	if prepared.isolation != nil {
 		task.Allowlist = prepared.isolation.Allowlist
@@ -270,6 +272,12 @@ func continueTask(command *cobra.Command, options *sandboxOptions, flags taskFla
 
 	options.agent = task.Agent
 	options.state = state
+	if !command.Flags().Changed("env") {
+		options.envValues = task.Env
+	}
+	if !command.Flags().Changed("engine-args") && task.EngineArgs != "" {
+		options.engineArgsValues = []string{task.EngineArgs}
+	}
 	if err := options.check(); err != nil {
 		return err
 	}

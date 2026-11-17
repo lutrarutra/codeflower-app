@@ -137,9 +137,13 @@ type Worker struct {
 	PluginsFetch bool
 	// Resources the user gave replace those of the batch job the app runs in.
 	Resources Resources
-	Stdin     io.Reader
-	Stdout    io.Writer
-	Stderr    io.Writer
+	// Variables are the user's --env values, NAME or NAME=VALUE.
+	Variables []string
+	// EngineArgs are the user's --engine-args.
+	EngineArgs EngineArgs
+	Stdin      io.Reader
+	Stdout     io.Writer
+	Stderr     io.Writer
 	// Kill, once closed, kills the sandbox at once instead of waiting for it
 	// to stop after Run's ctx ended (the second Ctrl+C).
 	Kill <-chan struct{}
@@ -384,6 +388,9 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 			values["CODEFLOWER_TUI_AGAIN"] = w.TUIAgain
 		}
 	}
+	if err := addEnvironment(values, w.Variables, w.Stderr); err != nil {
+		return 1, err
+	}
 	connectionFile := filepath.Join(w.State, "instances", instanceID+".json")
 	defer os.Remove(connectionFile)
 	kind := "worker"
@@ -536,6 +543,7 @@ func writeImageKey(state, instanceID, key string) (string, error) {
 func (w Worker) runEngine(ctx context.Context, instanceID string, values map[string]string, port int, netDirectory string, resources Resources) (int, error) {
 	name := "codeflower-" + instanceID[:8]
 	binds := append(EnvBinds(w.Env, w.State), w.Binds...)
+	engineArgs := w.EngineArgs.forRun(w.Engine.Name, netDirectory == "", w.Stderr)
 	// An agent that sandboxes its commands itself needs user namespaces
 	// (Docker's and Podman's default profiles refuse them); Apptainer has none.
 	var seccomp []byte
@@ -550,7 +558,7 @@ func (w Worker) runEngine(ctx context.Context, instanceID string, values map[str
 		return RunDocker(ctx, DockerRun{
 			Name: name, Image: w.Image, State: w.State, Binds: binds, Env: values,
 			Port: port, InspectPort: w.InspectPort, NetDirectory: netDirectory, CPUs: resources.CPUs, Memory: resources.Memory, Stdin: w.Stdin, Stdout: w.Stdout, Stderr: w.Stderr,
-			TTY: w.TUI != "", Seccomp: seccomp, Kill: w.Kill,
+			TTY: w.TUI != "", Seccomp: seccomp, Kill: w.Kill, EngineArgs: engineArgs,
 		})
 	case EnginePodman:
 		var seccompFile string
@@ -564,7 +572,7 @@ func (w Worker) runEngine(ctx context.Context, instanceID string, values map[str
 		return RunPodman(ctx, w.Engine.Executable, PodmanRun{
 			Name: name, Image: w.Image, State: w.State, Binds: binds, Env: values,
 			Port: port, NetDirectory: netDirectory, CPUs: resources.CPUs, Memory: resources.Memory, Stdin: w.Stdin, Stdout: w.Stdout, Stderr: w.Stderr,
-			TTY: w.TUI != "", SeccompFile: seccompFile, Kill: w.Kill,
+			TTY: w.TUI != "", SeccompFile: seccompFile, Kill: w.Kill, EngineArgs: engineArgs,
 		})
 	case EngineApptainer:
 		scratch, err := newScratch()
@@ -572,10 +580,12 @@ func (w Worker) runEngine(ctx context.Context, instanceID string, values map[str
 			return 1, err
 		}
 		defer os.RemoveAll(scratch)
-		args, err := ApptainerCommand(w.Engine.Executable, w.Image, w.State, scratch, binds, netDirectory)
+		args, err := ApptainerCommandWith(ApptainerOptions{Executable: w.Engine.Executable, Image: w.Image, State: w.State,
+			Scratch: scratch, Binds: binds, NetDirectory: netDirectory, GPUs: engineArgs.GPUs != ""})
 		if err != nil {
 			return 1, err
 		}
+		engineArgs.apptainerGPUs(values)
 		return RunApptainer(ctx, w.Kill, args, values, w.Stdin, w.Stdout, w.Stderr)
 	}
 	return 1, fmt.Errorf("unknown engine %q", w.Engine.Name)

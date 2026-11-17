@@ -159,6 +159,13 @@ func (options *sandboxOptions) applySettings(settings sandbox.Settings, flags *w
 	take("cpus", func() { options.cpus = settings.CPUs })
 	take("memory", func() { options.memory = settings.Memory })
 	take("time-limit", func() { options.timeLimit = settings.TimeLimit })
+	take("engine-args", func() {
+		options.engineArgsValues = nil
+		if settings.EngineArgs != "" {
+			options.engineArgsValues = []string{settings.EngineArgs}
+		}
+	})
+	options.envValues = addVariables(settings.Env, options.envValues)
 	take("server", func() { flags.servePage = settings.Server })
 	if settings.Host != "" {
 		take("host", func() { flags.listenHost = settings.Host })
@@ -183,6 +190,27 @@ func (options *sandboxOptions) applySettings(settings sandbox.Settings, flags *w
 			options.bindValues = append(options.bindValues, value)
 		}
 	}
+}
+
+// addVariables are the saved --env values, then those given: one given for
+// a saved name replaces it.
+func addVariables(saved, given []string) []string {
+	names := map[string]int{}
+	result := slices.Clone(saved)
+	for index, value := range result {
+		name, _, _ := strings.Cut(value, "=")
+		names[name] = index
+	}
+	for _, value := range given {
+		name, _, _ := strings.Cut(value, "=")
+		if index, found := names[name]; found {
+			result[index] = value
+			continue
+		}
+		names[name] = len(result)
+		result = append(result, value)
+	}
+	return result
 }
 
 // addFolders are the saved folders, then those given that are not among them.
@@ -233,6 +261,8 @@ func (options sandboxOptions) settingsOf(settings sandbox.Settings, engine strin
 		settings.EnvDir = absolutePath(options.envDir)
 	}
 	settings.CPUs, settings.Memory, settings.TimeLimit = options.cpus, options.memory, options.timeLimit
+	settings.Env = slices.Clone(options.envValues)
+	settings.EngineArgs = options.engineArgsLine()
 	settings.Server = flags.servePage
 	settings.Host = flags.listenHost
 	settings.AdvertiseHost = flags.advertiseHost

@@ -31,6 +31,8 @@ type Settings struct {
 	CPUs           int      `yaml:"cpus"`
 	Memory         string   `yaml:"memory"`
 	TimeLimit      string   `yaml:"time_limit"`
+	Env            []string `yaml:"env"`
+	EngineArgs     string   `yaml:"engine_args"`
 	Server         bool     `yaml:"server"`
 	Host           string   `yaml:"host"`
 	AdvertiseHost  string   `yaml:"advertise_host"`
@@ -64,6 +66,8 @@ var settingsComments = map[string]string{
 	"cpus":            "CPUs the agent may use; 0 for the batch job's allocation.",
 	"memory":          "Memory the agent may use, e.g. 32G; empty for the batch job's allocation.",
 	"time_limit":      "Time the agent has, e.g. 8h; empty for the batch job's time limit.",
+	"env":             "Environment variables: NAME=VALUE, or NAME for its value where the sandbox starts (keeps secrets out of this file).",
+	"engine_args":     "Container engine flags, e.g. --gpus all --shm-size 8g.",
 	"server":          "Also serve the chat page on the worker's port.",
 	"host":            "Interface the worker listens on (Apptainer).",
 	"advertise_host":  "Address printed in the links; empty for this node's address.",

@@ -57,6 +57,8 @@ type PodmanRun struct {
 	SeccompFile string
 	// Kill, once closed, kills a stopping container at once.
 	Kill <-chan struct{}
+	// EngineArgs are the user's --engine-args, those Podman can apply (forRun).
+	EngineArgs EngineArgs
 }
 
 // podmanOwnEnv are variables the podman process reads itself (rootless
@@ -119,6 +121,7 @@ func PodmanArgs(executable string, run PodmanRun) ([]string, error) {
 	if run.Memory > 0 {
 		args = append(args, "--memory", strconv.FormatInt(run.Memory, 10))
 	}
+	args = append(args, run.EngineArgs.podman()...)
 	names := make([]string, 0, len(run.Env))
 	for name := range run.Env {
 		names = append(names, name)

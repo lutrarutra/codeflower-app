@@ -79,6 +79,11 @@ type sandboxOptions struct {
 	cpus           int
 	memory         string
 	timeLimit      string
+	// envValues are --env, NAME or NAME=VALUE; engineArgsValues --engine-args,
+	// read into engineArgs by check.
+	envValues        []string
+	engineArgsValues []string
+	engineArgs       sandbox.EngineArgs
 	// resources are --cpus, --memory and --time-limit; set by check.
 	resources sandbox.Resources
 
@@ -115,6 +120,11 @@ func addSandboxFlags(command *cobra.Command, options *sandboxOptions) {
 		"memory the agent may use, e.g. 32G (default: the batch job's allocation; Docker and Podman also enforce it)")
 	command.Flags().StringVar(&options.timeLimit, "time-limit", "",
 		"time the agent has, e.g. 8h or 1-12:00:00 (default: the batch job's time limit); reported, not enforced")
+	command.Flags().StringArrayVar(&options.envValues, "env", nil,
+		"environment variable for the sandbox: NAME=VALUE, or NAME to take its value from here when the sandbox starts (repeatable)")
+	command.Flags().StringArrayVar(&options.engineArgsValues, "engine-args", nil,
+		"container engine flags, quoted as one value, e.g. '--gpus all --shm-size 8g': "+
+			"--gpus, --device, --shm-size, --ulimit, --cap-add, --cap-drop, --add-host, --dns (repeatable)")
 }
 
 // addAgentFlag adds --agent to a command that names one agent: a task, a
@@ -147,7 +157,20 @@ func (options *sandboxOptions) check() error {
 	if options.allowlist != "" && !options.isolateNetwork {
 		return fmt.Errorf("--allowlist needs --isolate-network")
 	}
+	for _, value := range options.envValues {
+		if _, err := sandbox.ParseEnv(value); err != nil {
+			return err
+		}
+	}
+	if options.engineArgs, err = sandbox.ParseEngineArgs(options.engineArgsLine()); err != nil {
+		return err
+	}
 	return options.checkResources()
+}
+
+// engineArgsLine is --engine-args as one line: the values given, in order.
+func (options sandboxOptions) engineArgsLine() string {
+	return strings.TrimSpace(strings.Join(options.engineArgsValues, " "))
 }
 
 // checkResources reads --cpus, --memory and --time-limit.
@@ -267,6 +290,9 @@ type preparedSandbox struct {
 	// plugins are the config's plugins, by agent.
 	plugins   map[string][]config.PluginEntry
 	resources sandbox.Resources
+	// variables are --env; engineArgs --engine-args.
+	variables  []string
+	engineArgs sandbox.EngineArgs
 }
 
 // prepare mounts the folders, makes sure the image is there and prepares the
@@ -394,8 +420,20 @@ func (options sandboxOptions) prepareWith(ctx context.Context, engine sandbox.En
 	if len(sources) > 0 {
 		fmt.Fprintf(os.Stderr, "  plugins  %s, from the config\n", strings.Join(sources, ", "))
 	}
+	if len(options.envValues) > 0 {
+		// Names only: values may be secrets.
+		names := make([]string, len(options.envValues))
+		for index, value := range options.envValues {
+			names[index], _, _ = strings.Cut(value, "=")
+		}
+		fmt.Fprintf(os.Stderr, "  env vars %s\n", strings.Join(names, ", "))
+	}
+	if !options.engineArgs.IsZero() {
+		fmt.Fprintf(os.Stderr, "  engine   %s\n", options.engineArgs)
+	}
 	return preparedSandbox{engine: engine, image: image, state: state, env: env, binds: binds, isolation: isolation, apiKeys: apiKeys,
-		images: images, mcpServers: mcpServers, plugins: plugins, resources: options.resources}, nil
+		images: images, mcpServers: mcpServers, plugins: plugins, resources: options.resources,
+		variables: options.envValues, engineArgs: options.engineArgs}, nil
 }
 
 // withIcons adds the icon gallery's mount, unless it is off or already there
@@ -432,6 +470,8 @@ func (p preparedSandbox) worker(agent string) sandbox.Worker {
 		MCPServers: p.mcpServers,
 		Plugins:    p.plugins,
 		Resources:  p.resources,
+		Variables:  p.variables,
+		EngineArgs: p.engineArgs,
 	}
 }
 

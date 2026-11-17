@@ -30,6 +30,8 @@ type ApptainerOptions struct {
 	Binds                             []Bind
 	NetDirectory                      string
 	NoNetwork                         bool
+	// GPUs gives the sandbox the host's NVIDIA GPUs (--nv).
+	GPUs bool
 	// Command replaces Entrypoint: the program and its arguments.
 	Command []string
 }
@@ -56,6 +58,9 @@ func ApptainerCommandWith(o ApptainerOptions) ([]string, error) {
 	}
 	for _, bind := range binds {
 		args = append(args, "--bind", bind.Spec())
+	}
+	if o.GPUs {
+		args = append(args, "--nv")
 	}
 	if len(o.Command) > 0 {
 		return append(append(args, image), o.Command...), nil

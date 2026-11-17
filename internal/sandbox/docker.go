@@ -56,6 +56,8 @@ type DockerRun struct {
 	Seccomp []byte
 	// Kill, once closed, kills a stopping container at once.
 	Kill <-chan struct{}
+	// EngineArgs are the user's --engine-args, those Docker can apply (forRun).
+	EngineArgs EngineArgs
 }
 
 // BridgeInspectPort is the bridge's Node inspector port inside the container.
@@ -113,6 +115,7 @@ func DockerConfig(run DockerRun) (*container.Config, *container.HostConfig, erro
 			Type: mount.TypeBind, Source: bind.Source, Target: bind.Target, ReadOnly: bind.ReadOnly,
 		})
 	}
+	run.EngineArgs.docker(host)
 	config.AttachStdout = true
 	config.AttachStderr = true
 	if run.NoNetwork {

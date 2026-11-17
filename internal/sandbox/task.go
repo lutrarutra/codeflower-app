@@ -35,6 +35,10 @@ type Task struct {
 	// uses them unless it is given others.
 	Engine string `json:"engine,omitempty"`
 	Image  string `json:"image,omitempty"`
+	// Env and EngineArgs are its --env and --engine-args, which a continued
+	// task also uses unless it is given others.
+	Env        []string `json:"env,omitempty"`
+	EngineArgs string   `json:"engineArgs,omitempty"`
 }
 
 // TaskMount is a Bind as task.json keeps it.
