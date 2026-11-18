@@ -7,7 +7,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -18,6 +22,11 @@ import (
 type instance struct {
 	PID int    `json:"pid"`
 	URL string `json:"url"`
+	// Version, Background and Args (its command line after "client") are
+	// missing from clients before v0.41.0.
+	Version    string   `json:"version,omitempty"`
+	Background bool     `json:"background,omitempty"`
+	Args       []string `json:"args,omitempty"`
 }
 
 func instancePath(configDirectory string) string {
@@ -59,6 +68,97 @@ func Running(configDirectory string) (string, bool) {
 	return running.URL, true
 }
 
+// Client is the client running for a config directory, as another
+// codeflower sees it, e.g. before restarting it.
+type Client struct {
+	URL string
+	PID int
+	// Version is its release ("v0.40.0", or a development build's).
+	Version string
+	// Background: it runs without a window (`--background`). Args are its
+	// command line after "client"; for clients before v0.41.0 both come
+	// from the process, where the system tells.
+	Background bool
+	Args       []string
+	// Sandboxes it started that still run: quitting it stops them.
+	Sandboxes int
+}
+
+// Describe returns the client running for this config directory, if one
+// answers.
+func Describe(configDirectory string) (Client, bool) {
+	data, err := os.ReadFile(instancePath(configDirectory))
+	if err != nil {
+		return Client{}, false
+	}
+	var record instance
+	if json.Unmarshal(data, &record) != nil || record.URL == "" {
+		return Client{}, false
+	}
+	var plan QuitPlan
+	if apiGet(record.URL, "/api/quit", &plan) != nil {
+		return Client{}, false
+	}
+	found := Client{URL: record.URL, PID: record.PID, Version: record.Version, Background: record.Background,
+		Args: record.Args, Sandboxes: plan.Sandboxes}
+	if found.Version == "" {
+		var system struct {
+			Version string `json:"version"`
+		}
+		if apiGet(record.URL, "/api/system", &system) == nil {
+			found.Version = system.Version
+		}
+	}
+	if record.Args == nil {
+		if args, ok := processClientArgs(record.PID); ok {
+			found.Args = args
+			found.Background = slices.Contains(args, "--background")
+		}
+	}
+	return found, true
+}
+
+// processClientArgs reads a running client's command line after "client"
+// from the system (ps), for clients that did not record it.
+func processClientArgs(pid int) ([]string, bool) {
+	if pid <= 0 || runtime.GOOS == "windows" {
+		return nil, false
+	}
+	output, err := exec.Command("ps", "-o", "args=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return nil, false
+	}
+	fields := strings.Fields(string(output))
+	for i, field := range fields {
+		if field == "client" || field == "gui" {
+			return fields[i+1:], true
+		}
+	}
+	return nil, false
+}
+
+// apiGet asks the client's page API, with the secret in its address.
+func apiGet(page, path string, into any) error {
+	address, err := url.Parse(page)
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequest(http.MethodGet, (&url.URL{Scheme: address.Scheme, Host: address.Host, Path: path}).String(), nil)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Authorization", "Bearer "+address.Query().Get("key"))
+	response, err := (&http.Client{Timeout: 10 * time.Second}).Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("the client answered %s", response.Status)
+	}
+	return json.NewDecoder(response.Body).Decode(into)
+}
+
 // QuitWait is how long Quit waits for the client to be gone.
 const QuitWait = 10 * time.Second
 
@@ -66,6 +166,13 @@ const QuitWait = 10 * time.Second
 // stopping the sandboxes it started without asking their chats to wrap up,
 // and waits until it is gone.
 func Quit(configDirectory string) error {
+	return QuitWith(configDirectory, false, QuitWait)
+}
+
+// QuitWith quits the client as Quit does; with wrapUp, the working chats of
+// the sandboxes it started are asked to wrap up first, and it waits up to
+// wait for it to be gone.
+func QuitWith(configDirectory string, wrapUp bool, wait time.Duration) error {
 	running, ok := Running(configDirectory)
 	if !ok {
 		return nil
@@ -75,7 +182,7 @@ func Quit(configDirectory string) error {
 		return err
 	}
 	request, err := http.NewRequest(http.MethodPost, (&url.URL{Scheme: address.Scheme, Host: address.Host, Path: "/api/quit"}).String(),
-		strings.NewReader(`{"wrapUp":false}`))
+		strings.NewReader(fmt.Sprintf(`{"wrapUp":%t}`, wrapUp)))
 	if err != nil {
 		return err
 	}
@@ -89,22 +196,23 @@ func Quit(configDirectory string) error {
 	if response.StatusCode != http.StatusOK {
 		return fmt.Errorf("the client answered %s", response.Status)
 	}
-	for deadline := time.Now().Add(QuitWait); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
+	for deadline := time.Now().Add(wait); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
 		if _, ok := Running(configDirectory); !ok {
 			return nil
 		}
 	}
-	return fmt.Errorf("the client did not quit within %s", QuitWait)
+	return fmt.Errorf("the client did not quit within %s", wait)
 }
 
 // recordInstance writes the running client's address; the returned function
 // removes it, unless another client replaced it meanwhile.
-func recordInstance(configDirectory, url string) func() {
+func recordInstance(configDirectory string, record instance) func() {
 	if configDirectory == "" {
 		return func() {}
 	}
 	path := instancePath(configDirectory)
-	data, _ := json.Marshal(instance{PID: os.Getpid(), URL: url})
+	record.PID = os.Getpid()
+	data, _ := json.Marshal(record)
 	if err := os.MkdirAll(configDirectory, 0o700); err != nil {
 		return func() {}
 	}

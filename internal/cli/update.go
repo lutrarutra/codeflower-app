@@ -21,6 +21,9 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"codeflower-app/internal/client"
+	"codeflower-app/internal/config"
 )
 
 // releaseRepository publishes the app's builds, as install.sh downloads them.
@@ -38,6 +41,8 @@ type updater struct {
 	current      string
 	executable   string
 	out          io.Writer
+	// installed is the release this program is once run returns.
+	installed string
 }
 
 func newUpdater(out io.Writer) (*updater, error) {
@@ -70,12 +75,20 @@ func (u *updater) archiveName(tag string) string {
 
 func updateCommand() *cobra.Command {
 	var check bool
+	var restart bool
+	var configDirectory string
 	command := &cobra.Command{
 		Use:   "update",
 		Short: "Download the latest release and replace this program with it",
 		Long: `Download the latest release and replace this program with it, after checking
 the download against the release's SHA256SUMS. A "codeflower client" window or
 sandbox that is already running keeps the old version until you start it again.
+
+A client older than the installed release is offered a restart, so its page
+is the new release's ("codeflower client restart"); --restart-client restarts
+it without asking, as in a batch job, unless it runs sandboxes it started from
+its page, which would stop. Sandboxes started in a terminal or a job keep
+running.
 
 With --check, only say whether a newer release is out.`,
 		Args: cobra.NoArgs,
@@ -87,10 +100,18 @@ With --check, only say whether a newer release is out.`,
 			if check {
 				return u.check(command.Context())
 			}
-			return u.run(command.Context())
+			if err := u.run(command.Context()); err != nil {
+				return err
+			}
+			u.offerClientRestart(config.Directory(configDirectory), restart, os.Stdin)
+			return nil
 		},
 	}
 	command.Flags().BoolVar(&check, "check", false, "only check for a newer release, without installing it")
+	command.Flags().BoolVar(&restart, "restart-client", false,
+		"restart a running client older than the installed release without asking (not one running sandboxes it started)")
+	command.Flags().StringVar(&configDirectory, "config", "",
+		"config directory of the client to restart (or set $CODEFLOWER_CONFIG; default ~/.codeflower)")
 	return command
 }
 
@@ -121,6 +142,7 @@ func (u *updater) run(ctx context.Context) error {
 	}
 	if !newer(latest, u.current) {
 		fmt.Fprintf(u.out, "codeflower %s is the latest release.\n", u.current)
+		u.installed = u.current
 		return nil
 	}
 
@@ -146,8 +168,44 @@ func (u *updater) run(ctx context.Context) error {
 		return err
 	}
 	fmt.Fprintf(u.out, "Updated codeflower %s to %s in %s.\n", u.current, latest, u.executable)
-	fmt.Fprintln(u.out, `A "codeflower client" window or sandbox that is already running keeps the old version until you start it again.`)
+	fmt.Fprintln(u.out, `A sandbox that is already running keeps the old version until you start it again.`)
+	u.installed = latest
 	return nil
+}
+
+// offerClientRestart restarts the client running for directory when it is
+// older than the installed release: with restart, else when the user says
+// yes in a terminal; otherwise it says how. A client running sandboxes it
+// started is only pointed to "codeflower client restart", which asks for
+// --force.
+func (u *updater) offerClientRestart(directory string, restart bool, in *os.File) {
+	running, ok := client.Describe(directory)
+	if !ok || u.installed == "" || !olderRelease(running.Version, u.installed) {
+		return
+	}
+	fmt.Fprintf(u.out, "code flower client %s is running; its page stays the old one until it restarts.\n", running.Version)
+	if running.Sandboxes > 0 {
+		fmt.Fprintf(u.out, "It runs %s it started from its page, which a restart stops: \"codeflower client restart --force\" when it suits you.\n",
+			sandboxes(running.Sandboxes))
+		return
+	}
+	if !restart {
+		if !isTerminal(in) || !isTerminal(os.Stdout) {
+			fmt.Fprintln(u.out, `Restart it with "codeflower client restart"; your sandboxes keep running.`)
+			return
+		}
+		fmt.Fprint(u.out, "Restart it now? Your sandboxes keep running. [Y/n] ")
+		answer, _ := bufio.NewReader(in).ReadString('\n')
+		if answer = strings.ToLower(strings.TrimSpace(answer)); answer != "" && answer != "y" && answer != "yes" {
+			return
+		}
+	}
+	pid, err := replaceClient(directory, running, false)
+	if err != nil {
+		fmt.Fprintf(u.out, "Could not restart the client: %v\n", err)
+		return
+	}
+	fmt.Fprintf(u.out, "Restarted code flower client %s → %s (pid %d); open pages reconnect and offer to reload.\n", running.Version, u.installed, pid)
 }
 
 func (u *updater) latestTag(ctx context.Context) (string, error) {

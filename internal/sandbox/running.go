@@ -129,3 +129,8 @@ func (r Running) ReadConnection() (Connection, bool) {
 	}
 	return connection, true
 }
+
+// ProcessAlive reports whether pid runs; a process of another user counts.
+func ProcessAlive(pid int) bool {
+	return processAlive(pid)
+}

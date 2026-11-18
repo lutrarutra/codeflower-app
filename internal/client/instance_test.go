@@ -13,7 +13,7 @@ func TestASecondStartFindsTheRunningClient(t *testing.T) {
 	}
 	_, httpServer := testServer(t)
 	url := httpServer.URL + "/?key=secret-key"
-	forget := recordInstance(directory, url)
+	forget := recordInstance(directory, instance{URL: url})
 	if found, ok := Running(directory); !ok || found != url {
 		t.Fatalf("running: %q %v", found, ok)
 	}
@@ -22,7 +22,7 @@ func TestASecondStartFindsTheRunningClient(t *testing.T) {
 	}
 
 	// A wrong secret, or a client that is gone, is not running.
-	recordInstance(directory, httpServer.URL+"/?key=wrong")
+	recordInstance(directory, instance{URL: httpServer.URL + "/?key=wrong"})
 	if _, ok := Running(directory); ok {
 		t.Fatal("a client that refused the secret counts as running")
 	}
@@ -32,7 +32,7 @@ func TestASecondStartFindsTheRunningClient(t *testing.T) {
 		t.Fatal("removed another client's record")
 	}
 	httpServer.Close()
-	recordInstance(directory, url)
+	recordInstance(directory, instance{URL: url})
 	if _, ok := Running(directory); ok {
 		t.Fatal("a stopped client counts as running")
 	}
@@ -44,7 +44,7 @@ func TestQuitQuitsTheRunningClientAndWaitsUntilItIsGone(t *testing.T) {
 		t.Fatalf("with no client running: %v", err)
 	}
 	server, httpServer := testServer(t)
-	recordInstance(directory, httpServer.URL+"/?key=secret-key")
+	recordInstance(directory, instance{URL: httpServer.URL + "/?key=secret-key"})
 	go func() {
 		// What the client does once it was asked to quit.
 		<-server.quit

@@ -121,6 +121,8 @@ call the quit off. Sandboxes running elsewhere keep running.`,
 				ImageTag:          os.Getenv("CODEFLOWER_IMAGE_TAG"),
 				ConnectOnly:       connectOnly,
 				UIDirectory:       uiDirectory,
+				Background:        background,
+				Args:              clientArgs(os.Args[1:]),
 				WrapUp:            time.Duration(loaded.Client.WrapUpMinutes) * time.Minute,
 				Tunnel:            &client.TunnelOptions{Hardened: loaded.Tunnel.Hardened, Manage: loaded.Tunnel.Manage},
 				Ready: func(address, tunnelURL string) {
@@ -199,6 +201,7 @@ call the quit off. Sandboxes running elsewhere keep running.`,
 	_ = command.Flags().MarkHidden("ui")
 	command.Flags().StringVar(&configDirectory, "config", "",
 		"config directory with config.yaml and skills (or set $CODEFLOWER_CONFIG; default ~/.codeflower)")
+	command.AddCommand(clientRestartCommand())
 	return command
 }
 

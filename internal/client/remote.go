@@ -64,6 +64,7 @@ func (h *remote) routes() http.Handler {
 	mux.Handle("GET /", http.FileServerFS(assets))
 	mux.HandleFunc("GET /frame", func(w http.ResponseWriter, _ *http.Request) { serveFrame(w) })
 	mux.HandleFunc("GET /api/system", h.system)
+	mux.HandleFunc("GET /api/version", s.version)
 	mux.HandleFunc("GET /api/resources", s.resources)
 	mux.HandleFunc("GET /api/quit", s.quitStatus)
 	mux.HandleFunc("GET /api/workers", h.listWorkers)

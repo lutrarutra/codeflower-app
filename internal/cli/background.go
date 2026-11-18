@@ -6,8 +6,6 @@ import (
 	"io"
 	"net"
 	"net/url"
-	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -17,45 +15,30 @@ import (
 	"codeflower-app/internal/tunnel"
 )
 
-// backgroundWait is how long a client started in the background has to come
-// up; it waits for the tunnel (at most 5 s) before it answers.
-const backgroundWait = 20 * time.Second
-
 // ensureClient makes sure a client runs for the config directory, starting
 // `codeflower client --background` when none does. That client keeps the
 // tunnel connected and lists every sandbox on this computer, whoever started
-// it. It says whether it started one.
-func ensureClient(directory string) (bool, error) {
-	if _, running := client.Running(directory); running {
-		return false, nil
+// it. A background client older than this codeflower is restarted first, so
+// an update reaches the page; it says what it did.
+func ensureClient(directory string) (clientStart, error) {
+	if running, ok := client.Describe(directory); ok {
+		if !olderRelease(running.Version, Version) {
+			return clientStart{}, nil
+		}
+		if !running.Background || running.Sandboxes > 0 {
+			return clientStart{stale: &running}, nil
+		}
+		pid, err := replaceClient(directory, running, false)
+		if err != nil {
+			return clientStart{stale: &running}, fmt.Errorf("could not restart code flower client %s: %w", running.Version, err)
+		}
+		return clientStart{pid: pid, replaced: running.Version}, nil
 	}
-	executable, err := os.Executable()
+	pid, err := startClient(directory, nil)
 	if err != nil {
-		return false, err
+		return clientStart{}, err
 	}
-	command := exec.Command(executable, "client", "--background", "--config", directory)
-	detach(command)
-	if err := command.Start(); err != nil {
-		return false, err
-	}
-	exited := make(chan error, 1)
-	go func() { exited <- command.Wait() }()
-	deadline := time.After(backgroundWait)
-	for {
-		if _, running := client.Running(directory); running {
-			return true, nil
-		}
-		select {
-		case err := <-exited:
-			if err == nil {
-				err = errors.New("it exited")
-			}
-			return false, fmt.Errorf("the client did not start (%v); see %s", err, clientLogPath(directory))
-		case <-deadline:
-			return false, fmt.Errorf("the client did not start within %s; see %s", backgroundWait, clientLogPath(directory))
-		case <-time.After(200 * time.Millisecond):
-		}
-	}
+	return clientStart{pid: pid, started: true}, nil
 }
 
 // linkOptions say how a sandbox is reached, for openLinks.
@@ -85,8 +68,12 @@ type linkOptions struct {
 func openLinks(directory string, out io.Writer, options linkOptions) func(sandbox.Connection) {
 	var state *tunnel.State
 	var tunnelNote string
-	started := make(chan error, 1)
-	started <- nil
+	type outcome struct {
+		start clientStart
+		err   error
+	}
+	started := make(chan outcome, 1)
+	started <- outcome{}
 	if options.tunnel {
 		loaded, err := tunnel.LoadState(directory)
 		switch {
@@ -97,14 +84,16 @@ func openLinks(directory string, out io.Writer, options linkOptions) func(sandbo
 			state = loaded
 			<-started
 			go func() {
-				_, err := ensureClient(directory)
-				started <- err
+				start, err := ensureClient(directory)
+				started <- outcome{start, err}
 			}()
 		}
 	}
 	return func(connection sandbox.Connection) {
-		if err := <-started; err != nil {
-			tunnelNote = fmt.Sprintf("Paired browsers cannot reach this sandbox: %v", err)
+		result := <-started
+		clientNote := result.start.note()
+		if result.err != nil {
+			tunnelNote = fmt.Sprintf("Paired browsers cannot reach this sandbox: %v", result.err)
 			state = nil
 		}
 		// After the worker's ready line, which reaches the terminal through the engine.
@@ -119,6 +108,9 @@ func openLinks(directory string, out io.Writer, options linkOptions) func(sandbo
 			links.paired = len(state.Devices) > 0
 		}
 		printOpenLinks(out, links)
+		if clientNote != "" {
+			fmt.Fprintf(out, "%s\n\n", clientNote)
+		}
 		if tunnelNote != "" {
 			fmt.Fprintf(out, "%s\n\n", tunnelNote)
 		}

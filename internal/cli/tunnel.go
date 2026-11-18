@@ -249,9 +249,13 @@ With "tunnel: {hardened: true}" name the sandboxes (by name or ID, as
 				}
 				fmt.Println("Remote access was off: it is on again.")
 			}
-			started, err := ensureClient(dir)
+			start, err := ensureClient(dir)
 			if err != nil {
 				return fmt.Errorf("could not start code flower client, which answers the pairing: %w", err)
+			}
+			started := start.started
+			if start.replaced != "" || start.stale != nil {
+				fmt.Println(start.note())
 			}
 			stopClient := started && !keepRunning && !noWait
 			switch {
@@ -618,8 +622,12 @@ func tunnelSwitchCommand(directory func() string, use, short string, off bool) *
 				return nil
 			}
 			if state, err := tunnel.LoadState(dir); err == nil && state.MayConnect(time.Now()) {
-				if _, err := ensureClient(dir); err != nil {
+				start, err := ensureClient(dir)
+				if err != nil {
 					return fmt.Errorf("remote access is on, but %w", err)
+				}
+				if note := start.note(); note != "" {
+					fmt.Println(note)
 				}
 			}
 			fmt.Println("Remote access is on.")

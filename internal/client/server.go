@@ -69,6 +69,11 @@ type Options struct {
 	// UIDirectory serves the page from a folder instead of the built-in one
 	// (development).
 	UIDirectory string
+	// Background: started without a window (`--background`), so a newer
+	// codeflower may restart it; Args are its command line after
+	// "client", which a restart runs again. Both go in client.json.
+	Background bool
+	Args       []string
 	// WrapUp is how long quitting waits at most for the chats in the
 	// sandboxes to wrap up; DefaultWrapUp when zero.
 	WrapUp time.Duration
@@ -129,9 +134,29 @@ func randomSecret() string {
 	return base64.RawURLEncoding.EncodeToString(bytes)
 }
 
+// SecretVariable hands a restarted client its predecessor's secret, so pages
+// opened with the old link keep working (the environment, unlike the command
+// line, is private to the user). The client takes it out of its environment
+// at once, so the sandboxes it starts do not inherit it.
+const SecretVariable = "CODEFLOWER_CLIENT_SECRET"
+
+// inheritedSecret is the secret a restart handed over, if it is one.
+func inheritedSecret() string {
+	value := os.Getenv(SecretVariable)
+	_ = os.Unsetenv(SecretVariable)
+	if decoded, err := base64.RawURLEncoding.DecodeString(value); err != nil || len(decoded) < 24 {
+		return ""
+	}
+	return value
+}
+
 // Run serves the window until the user quits or ctx ends, then stops every
 // sandbox it started.
 func Run(ctx context.Context, options Options) error {
+	secret := inheritedSecret()
+	if secret == "" {
+		secret = randomSecret()
+	}
 	if options.Log == nil {
 		options.Log = io.Discard
 	}
@@ -153,7 +178,7 @@ func Run(ctx context.Context, options Options) error {
 	}
 	server := &Server{
 		options:       options,
-		secret:        randomSecret(),
+		secret:        secret,
 		host:          listener.Addr().String(),
 		settings:      newSettingsStore(),
 		added:         newWorkerStore(),
@@ -176,7 +201,9 @@ func Run(ctx context.Context, options Options) error {
 	go func() { _ = httpServer.Serve(listener) }()
 
 	url := fmt.Sprintf("http://%s/?key=%s", server.host, server.secret)
-	forget := recordInstance(options.ConfigDirectory, url)
+	forget := recordInstance(options.ConfigDirectory, instance{
+		URL: url, Version: options.Version, Background: options.Background, Args: options.Args,
+	})
 	defer forget()
 	if options.Ready != nil {
 		options.Ready(url, tunnelURL())
@@ -217,6 +244,7 @@ func (s *Server) routes() http.Handler {
 	}
 	mux.Handle("GET /", http.FileServerFS(assets))
 	mux.HandleFunc("GET /api/system", s.system)
+	mux.HandleFunc("GET /api/version", s.version)
 	mux.HandleFunc("POST /api/ticket", s.ticket)
 	mux.HandleFunc("GET /api/resources", s.resources)
 	mux.HandleFunc("GET /api/folders", s.folders)
@@ -435,6 +463,13 @@ type capabilities struct {
 	StartDisabledReason string `json:"startDisabledReason,omitempty"`
 	// ConnectOnly: starting is turned off, and the page hides it.
 	ConnectOnly bool `json:"connectOnly"`
+}
+
+// version is the client's release alone, which open pages ask now and then:
+// once it is not the one their page came with, the client was restarted from
+// a newer codeflower, and they offer to reload.
+func (s *Server) version(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"version": s.options.Version})
 }
 
 func (s *Server) system(w http.ResponseWriter, r *http.Request) {
