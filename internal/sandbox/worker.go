@@ -329,6 +329,11 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	if identity, err := IdentifyImage(ctx, w.Engine, w.Image); err == nil {
 		identity.Environment(values)
 	}
+	// Which versions these are, for the windows to show beside their own.
+	values["CODEFLOWER_APP_VERSION"] = AppVersion
+	if release := ImageRelease(ctx, w.Engine, w.Image); release != "" {
+		values["CODEFLOWER_IMAGE_VERSION"] = release
+	}
 	if keys := w.apiKeys(); len(keys) > 0 {
 		values[APIKeysVariable] = keys
 	}

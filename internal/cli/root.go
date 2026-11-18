@@ -180,6 +180,7 @@ func startedFromDesktop(args []string) bool {
 // NewRootCommand builds the command tree; cmd/gendocs writes the docs' CLI
 // reference from it.
 func NewRootCommand() *cobra.Command {
+	sandbox.AppVersion = Version
 	root := &cobra.Command{
 		Use:   "codeflower",
 		Short: "Start code flower sandboxes for Claude Code, Codex, DeepSeek Harness, or OpenCode",

@@ -396,8 +396,11 @@ type imageStatus struct {
 const pageAPI = 1
 
 type systemInfo struct {
-	Version  string                 `json:"version"`
-	PageAPI  int                    `json:"pageApi"`
+	Version string `json:"version"`
+	PageAPI int    `json:"pageApi"`
+	// Hostname is the computer's name, which the page shows as where it is
+	// served from.
+	Hostname string                 `json:"hostname,omitempty"`
 	System   string                 `json:"system"`
 	Home     string                 `json:"home"`
 	Projects string                 `json:"projects"`
@@ -436,10 +439,11 @@ type capabilities struct {
 
 func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 	settings := s.settings.load()
+	hostname, _ := os.Hostname()
 	if s.options.ConnectOnly {
 		// Engines are never looked for: nothing starts here.
 		writeJSON(w, http.StatusOK, systemInfo{
-			Version: s.options.Version, PageAPI: pageAPI, Engines: []sandbox.EngineStatus{}, Agents: []agentInfo{}, Settings: settings,
+			Version: s.options.Version, PageAPI: pageAPI, Hostname: hostname, Engines: []sandbox.EngineStatus{}, Agents: []agentInfo{}, Settings: settings,
 			ConfigSkills: []string{}, Isolation: map[string]string{},
 			Capabilities: capabilities{
 				Connect: true, ConnectOnly: true,
@@ -453,6 +457,7 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 	info := systemInfo{
 		Version:         s.options.Version,
 		PageAPI:         pageAPI,
+		Hostname:        hostname,
 		Home:            home,
 		Projects:        s.options.ProjectsDirectory,
 		Engines:         statuses,

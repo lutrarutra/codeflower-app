@@ -163,6 +163,25 @@ type activity struct {
 	// all that ended (both missing from older bridges).
 	Ended []endedTurn `json:"ended,omitempty"`
 	Turns *int        `json:"turns,omitempty"`
+	// Versions are those of the sandbox's parts (missing from older bridges).
+	Versions *sandboxVersions `json:"versions,omitempty"`
+}
+
+// sandboxVersions are the versions of a sandbox's parts, as its bridge
+// reports them: the app that started it, its image, and what the image has.
+type sandboxVersions struct {
+	// App is the release of the app that started the sandbox, which may be
+	// another computer's (a batch job's) than the client's.
+	App string `json:"app,omitempty"`
+	// Image is the image's release, and ImageRef what it was started as.
+	Image    string `json:"image,omitempty"`
+	ImageRef string `json:"imageRef,omitempty"`
+	// Page is the codeflower-ui release of the page the image serves
+	// (--server), and Storyteller the report library's.
+	Page        string `json:"page,omitempty"`
+	Storyteller string `json:"storyteller,omitempty"`
+	// Agents are the agents' own releases, by agent (claude: Claude Code).
+	Agents map[string]string `json:"agents,omitempty"`
 }
 
 // wrapUpActivity is the bridge's latest wrap-up: why (time, quit), whether

@@ -223,3 +223,29 @@ func RemoveImage(ctx context.Context, engine EngineStatus, ref string) error {
 	}
 	return nil
 }
+
+// releaseTag matches a full release tag (0.32.0), not a minor (0.32), latest
+// or a commit's build.
+var releaseTag = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
+
+// ImageRelease is the release of the sandbox image a worker runs, for the
+// windows to show (CODEFLOWER_IMAGE_VERSION): the tag of a published release
+// it was started as, else the release label the image was built with, with
+// its commit. Empty for an image without them, such as a local build.
+func ImageRelease(ctx context.Context, engine EngineStatus, image string) string {
+	if tag, ok := publishedTag(image); ok && releaseTag.MatchString(tag) {
+		return tag
+	}
+	labels, err := imageLabels(ctx, engine, image)
+	if err != nil {
+		return ""
+	}
+	version := strings.TrimPrefix(labels[versionLabel], "v")
+	if version == "" {
+		return ""
+	}
+	if revision := shortRevision(labels[revisionLabel]); revision != "" {
+		return version + " (" + revision + ")"
+	}
+	return version
+}

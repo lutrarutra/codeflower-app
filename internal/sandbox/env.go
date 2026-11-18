@@ -7,6 +7,10 @@ import (
 	"codeflower-app/internal/agents"
 )
 
+// AppVersion is the app's release, which it gives the sandboxes it starts
+// (CODEFLOWER_APP_VERSION); the command line sets it.
+var AppVersion = "dev"
+
 // ContainerEnvironment keeps every tool's state, logins, and installs in the
 // project, so they survive restarts and every worker of the project sees them.
 func ContainerEnvironment() map[string]string {
