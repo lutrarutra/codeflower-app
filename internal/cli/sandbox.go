@@ -63,6 +63,15 @@ controls the agent, and plain HTTP carries the key and the chats unencrypted,
 so keep job logs private and prefer --host 127.0.0.1 with a tunnel on shared
 networks.
 
+With --forward-to HOST the app also opens the worker's port on HOST's
+127.0.0.1 through a reverse SSH tunnel (ssh -R) while the sandbox runs, so
+VS Code or the client on HOST connects with the 127.0.0.1 link: for a sandbox
+on a compute node whose port the login node cannot reach (Docker and Podman
+publish it on the compute node's 127.0.0.1 only). This node must log in to
+HOST without a password (an SSH key), and the port must be free there. In a
+batch job, --forward-to "$SLURM_SUBMIT_HOST" names the node it was submitted
+from. The tunnel connects again when it drops and stops with the sandbox.
+
 To start a session with an initial task and continue it in VS Code, see
 "codeflower run". To let the agent work on a task by itself instead, see
 "codeflower task".`,
@@ -73,6 +82,7 @@ To start a session with an initial task and continue it in VS Code, see
   codeflower sandbox --continue study42 --input ~/data/study42-batch2
   codeflower sandbox --continue study42 --create --input ~/data/study42 --output ~/results/study42
   codeflower sandbox --input ~/data/study42 --skills ~/my-skills --isolate-network
+  codeflower sandbox --project study42 --input /data/study42 --forward-to "$SLURM_SUBMIT_HOST"
   codeflower sandbox --image ./codeflower-sandbox.sif --state ~/cf/study42 --bind /data/ref:/reference`,
 		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
@@ -105,6 +115,9 @@ To start a session with an initial task and continue it in VS Code, see
 			}
 			if options.isolateNetwork && flags.inspectPort > 0 {
 				return fmt.Errorf("--inspect-port cannot be used with --isolate-network")
+			}
+			if err := sandbox.CheckForwardHost(flags.forwardTo); err != nil {
+				return err
 			}
 			engine, err := options.chooseEngine(command.Context())
 			if err != nil {
@@ -169,11 +182,12 @@ To start a session with an initial task and continue it in VS Code, see
 			worker.OwnSignals = true
 			worker.AppPrintsLinks = true
 			printLinks := openLinks(config.Directory(options.config), os.Stderr, linkOptions{
-				tunnel: !flags.noTunnel,
-				local:  reachableOnLoopback(engine.Name, flags.listenHost, options.isolateNetwork),
-				page:   flags.servePage,
+				tunnel:    !flags.noTunnel,
+				local:     reachableOnLoopback(engine.Name, flags.listenHost, options.isolateNetwork),
+				page:      flags.servePage,
+				forwardTo: flags.forwardTo,
 			})
-			ready := func(connection sandbox.Connection) {
+			ready, stopForward := forwardWhenReady(flags.forwardTo, engine.Name, flags.listenHost, func(connection sandbox.Connection) {
 				// The port the worker took, for its links to connect next time.
 				if connection.Port > 0 && connection.Port != settings.Port {
 					settings.Port = connection.Port
@@ -183,7 +197,8 @@ To start a session with an initial task and continue it in VS Code, see
 				}
 				connected(connection)
 				printLinks(connection)
-			}
+			})
+			defer stopForward()
 			code, err := worker.Run(ctx, ready)
 			if err != nil {
 				if errors.Is(err, sandbox.ErrNoImage) {
@@ -205,6 +220,7 @@ To start a session with an initial task and continue it in VS Code, see
 		"address printed for VS Code and the page link (default: this node's IPv4 address; 127.0.0.1 with Docker or Podman)")
 	command.Flags().BoolVar(&flags.noTunnel, "no-tunnel", false,
 		"keep this sandbox from browsers paired through the tunnel (it does not start the client for the tunnel either)")
+	command.Flags().StringVar(&flags.forwardTo, "forward-to", "", forwardFlagHelp)
 	command.Flags().IntVar(&flags.port, "port", 0, "port of the worker (and its page with --server) (default: any free port); fails if it is taken")
 	command.Flags().StringVar(&flags.continueFrom, "continue", "",
 		"start a project again with its saved settings: a project name, or a project folder (flags given replace settings, or add folders)")

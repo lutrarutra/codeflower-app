@@ -17,6 +17,7 @@ func runCommand() *cobra.Command {
 	var port, inspectPort int
 	var servePage bool
 	var noTunnel bool
+	var forwardTo string
 	var promptFile string
 
 	command := &cobra.Command{
@@ -47,7 +48,11 @@ prints a link to it (http://HOST:PORT/?key=…), like Jupyter's: open it in any
 browser that reaches this machine, e.g. through ssh -L. Anyone with the link
 controls the agent, and plain HTTP carries the key and the chats unencrypted,
 so keep job logs private and prefer --host 127.0.0.1 with a tunnel on shared
-networks.`,
+networks.
+
+With --forward-to HOST the app also opens the worker's port on HOST's
+127.0.0.1 through a reverse SSH tunnel (ssh -R) while the sandbox runs, as
+"codeflower sandbox" does: see its help.`,
 		Example: `  codeflower run --agent claude --input ~/data/study42 --output ~/results/study42 \
     "Cluster the cells and annotate the cell types"
   codeflower run --agent codex --project study42 --input /data/study42 \
@@ -72,6 +77,9 @@ networks.`,
 			}
 			if options.isolateNetwork && inspectPort > 0 {
 				return fmt.Errorf("--inspect-port cannot be used with --isolate-network")
+			}
+			if err := sandbox.CheckForwardHost(forwardTo); err != nil {
+				return err
 			}
 			engine, err := options.chooseEngine(command.Context())
 			if err != nil {
@@ -105,14 +113,16 @@ networks.`,
 			worker.OwnSignals = true
 			worker.AppPrintsLinks = true
 			printLinks := openLinks(config.Directory(options.config), os.Stderr, linkOptions{
-				tunnel: !noTunnel,
-				local:  reachableOnLoopback(engine.Name, listenHost, options.isolateNetwork),
-				page:   servePage,
+				tunnel:    !noTunnel,
+				local:     reachableOnLoopback(engine.Name, listenHost, options.isolateNetwork),
+				page:      servePage,
+				forwardTo: forwardTo,
 			})
-			ready := func(connection sandbox.Connection) {
+			ready, stopForward := forwardWhenReady(forwardTo, engine.Name, listenHost, func(connection sandbox.Connection) {
 				connected(connection)
 				printLinks(connection)
-			}
+			})
+			defer stopForward()
 			code, err := worker.Run(ctx, ready)
 			if err != nil {
 				if errors.Is(err, sandbox.ErrNoImage) {
@@ -136,6 +146,7 @@ networks.`,
 		"address printed for VS Code and the page link (default: this node's IPv4 address; 127.0.0.1 with Docker or Podman)")
 	command.Flags().BoolVar(&noTunnel, "no-tunnel", false,
 		"keep this sandbox from browsers paired through the tunnel (it does not start the client for the tunnel either)")
+	command.Flags().StringVar(&forwardTo, "forward-to", "", forwardFlagHelp)
 	command.Flags().IntVar(&port, "port", 0, "port of the worker (and its page with --server) (default: any free port)")
 	// Development only: anyone who can reach the inspector can run code in the sandbox.
 	command.Flags().IntVar(&inspectPort, "inspect-port", 0,

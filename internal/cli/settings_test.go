@@ -34,7 +34,8 @@ func TestSavedSettingsGiveWhatNoFlagGives(t *testing.T) {
 	saved := t.TempDir()
 	added := t.TempDir()
 	settings := sandbox.Settings{Engine: "apptainer", Image: "/images/cf.sif", Inputs: []string{saved}, Outputs: []string{"/results"},
-		Binds: []string{"/ref:/reference:ro"}, IsolateNetwork: true, CPUs: 4, Server: true, Host: "127.0.0.1", Port: 41234, NoTunnel: true}
+		Binds: []string{"/ref:/reference:ro"}, IsolateNetwork: true, CPUs: 4, Server: true, Host: "127.0.0.1", Port: 41234, NoTunnel: true,
+		ForwardTo: "login1"}
 
 	flagsGiven := map[string]bool{"cpus": true, "input": true, "bind": true}
 	var options sandboxOptions
@@ -60,7 +61,7 @@ func TestSavedSettingsGiveWhatNoFlagGives(t *testing.T) {
 	if !slices.Equal(options.bindValues, []string{"/ref:/reference:ro", "/more"}) {
 		t.Errorf("binds %v", options.bindValues)
 	}
-	if !flags.servePage || flags.listenHost != "127.0.0.1" || flags.port != 41234 || !flags.noTunnel {
+	if !flags.servePage || flags.listenHost != "127.0.0.1" || flags.port != 41234 || !flags.noTunnel || flags.forwardTo != "login1" {
 		t.Errorf("worker flags %+v", flags)
 	}
 	// The config does not replace what the settings chose.
@@ -290,6 +291,20 @@ func TestTheOpenLinksAreOneTable(t *testing.T) {
 				"  VS Code here            " + vscode + "\n" +
 				"  VS Code elsewhere       codeflower://10.0.0.5:4100?token=k\n\n" + warning + "\n",
 		},
+		"forwarded": {
+			sandboxLinks{connection: connection, options: linkOptions{local: true, forwardTo: "d015"}},
+			"\nOpen the sandbox:\n\n" +
+				"  Browser (app running)     http://127.0.0.1:7720/#add=codeflower%3A%2F%2F127.0.0.1%3A4100%3Ftoken%3Dk\n" +
+				"  VS Code here or on d015   " + vscode + "\n" +
+				"  VS Code elsewhere         codeflower://10.0.0.5:4100?token=k\n\n" + warning + "\n",
+		},
+		"forwarded from one interface": {
+			sandboxLinks{connection: connection, options: linkOptions{forwardTo: "d015"}},
+			"\nOpen the sandbox:\n\n" +
+				"  Browser (app running)   http://127.0.0.1:7720/#add=codeflower%3A%2F%2F127.0.0.1%3A4100%3Ftoken%3Dk\n" +
+				"  VS Code on d015         " + vscode + "\n" +
+				"  VS Code (paste)         codeflower://10.0.0.5:4100?token=k\n\n" + warning + "\n",
+		},
 	}
 	for name, test := range cases {
 		var out strings.Builder
@@ -304,5 +319,10 @@ func TestTheOpenLinksAreOneTable(t *testing.T) {
 		!strings.Contains(out.String(), "  VS Code (paste)   codeflower://10.0.0.5:4100?token=k\n") ||
 		!strings.Contains(out.String(), "plain HTTP") {
 		t.Errorf("with --server:\n%s", out.String())
+	}
+	out.Reset()
+	printOpenLinks(&out, sandboxLinks{connection: connection, options: linkOptions{page: true, forwardTo: "d015"}})
+	if !strings.Contains(out.String(), "  Browser on d015   http://127.0.0.1:4100/?key=k\n") {
+		t.Errorf("with --server and --forward-to:\n%s", out.String())
 	}
 }

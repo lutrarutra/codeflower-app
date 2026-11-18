@@ -67,6 +67,9 @@ type linkOptions struct {
 	local bool
 	// page: the worker serves its chat page (--server).
 	page bool
+	// forwardTo is the SSH host whose 127.0.0.1 reaches the worker
+	// (--forward-to); empty for none.
+	forwardTo string
 }
 
 // openLinks returns what to call once the sandbox that `run` or `sandbox`
@@ -147,17 +150,36 @@ func printOpenLinks(out io.Writer, links sandboxLinks) {
 	} else {
 		fmt.Fprintf(out, "Open the sandbox:\n\n")
 	}
+	// The line on the forwarding host's 127.0.0.1 (--forward-to).
+	forwarded, host := "", links.options.forwardTo
+	if host != "" {
+		forwarded = localLine(connection, true)
+	}
 	switch {
 	case links.options.page:
 		rows = append(rows, [2]string{"Browser", pageLink(connection)})
+		if forwarded != "" && !isLoopback(connection.Host) {
+			onHost := connection
+			onHost.Host = "127.0.0.1"
+			rows = append(rows, [2]string{"Browser on " + host, pageLink(onHost)})
+		}
 	case links.localPage != "":
 		rows = append(rows, [2]string{"This computer", links.localPage})
 	default:
-		rows = append(rows, [2]string{"Browser (app running)", fmt.Sprintf("http://127.0.0.1:%d/#add=%s", client.DefaultPort, url.QueryEscape(connection.URL))})
+		line := connection.URL
+		if forwarded != "" {
+			line = forwarded
+		}
+		rows = append(rows, [2]string{"Browser (app running)", fmt.Sprintf("http://127.0.0.1:%d/#add=%s", client.DefaultPort, url.QueryEscape(line))})
 	}
 	here := localLine(connection, links.options.local)
-	if links.options.local {
+	switch {
+	case links.options.local && forwarded != "":
+		rows = append(rows, [2]string{"VS Code here or on " + host, client.VSCodeLink(here)})
+	case links.options.local:
 		rows = append(rows, [2]string{"VS Code here", client.VSCodeLink(here)})
+	case forwarded != "":
+		rows = append(rows, [2]string{"VS Code on " + host, client.VSCodeLink(forwarded)})
 	}
 	label := "VS Code (paste)"
 	if links.options.local && here != connection.URL {
@@ -224,8 +246,7 @@ func localLine(connection sandbox.Connection, local bool) string {
 	if !local || connection.Port == 0 {
 		return connection.URL
 	}
-	switch connection.Host {
-	case "127.0.0.1", "localhost", "::1":
+	if isLoopback(connection.Host) {
 		return connection.URL
 	}
 	line := "codeflower://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(connection.Port)) + "?token=" + url.QueryEscape(connection.Token)
@@ -233,6 +254,15 @@ func localLine(connection sandbox.Connection, local bool) string {
 		line += "&fp=" + connection.Fingerprint
 	}
 	return line
+}
+
+// isLoopback says whether host names this computer's loopback.
+func isLoopback(host string) bool {
+	switch host {
+	case "127.0.0.1", "localhost", "::1":
+		return true
+	}
+	return false
 }
 
 // quitWhenSignedOut quits a background client once this computer is signed

@@ -20,6 +20,9 @@ type workerFlags struct {
 	inspectPort   int
 	servePage     bool
 	noTunnel      bool
+	// forwardTo is --forward-to: the SSH host the worker's port is
+	// forwarded to.
+	forwardTo string
 	// continueFrom is --continue: a project name or folder.
 	continueFrom string
 	// create is --create: --continue starts the project new if it does not
@@ -173,6 +176,7 @@ func (options *sandboxOptions) applySettings(settings sandbox.Settings, flags *w
 	take("advertise-host", func() { flags.advertiseHost = settings.AdvertiseHost })
 	take("port", func() { flags.port = settings.Port })
 	take("no-tunnel", func() { flags.noTunnel = settings.NoTunnel })
+	take("forward-to", func() { flags.forwardTo = settings.ForwardTo })
 
 	options.folders.Inputs = addFolders(settings.Inputs, options.folders.Inputs)
 	options.folders.Outputs = addFolders(settings.Outputs, options.folders.Outputs)
@@ -268,6 +272,7 @@ func (options sandboxOptions) settingsOf(settings sandbox.Settings, engine strin
 	settings.AdvertiseHost = flags.advertiseHost
 	settings.Port = flags.port
 	settings.NoTunnel = flags.noTunnel
+	settings.ForwardTo = flags.forwardTo
 	return settings
 }
 

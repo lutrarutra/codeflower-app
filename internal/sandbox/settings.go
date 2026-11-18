@@ -38,6 +38,7 @@ type Settings struct {
 	AdvertiseHost  string   `yaml:"advertise_host"`
 	Port           int      `yaml:"port"`
 	NoTunnel       bool     `yaml:"no_tunnel"`
+	ForwardTo      string   `yaml:"forward_to"`
 	// Key is the worker's token (NewToken), and Certificate its TLS
 	// certificate and key: kept, so the links VS Code and browsers saved
 	// still connect after a restart.
@@ -73,6 +74,7 @@ var settingsComments = map[string]string{
 	"advertise_host":  "Address printed in the links; empty for this node's address.",
 	"port":            "Port of the worker; 0 for any free port. Starting fails if it is taken.",
 	"no_tunnel":       "Keep the sandbox from browsers paired through the tunnel.",
+	"forward_to":      "SSH host whose 127.0.0.1:PORT reaches the worker through ssh -R while it runs; empty for none.",
 	"key":             "Secret that VS Code and the page connect with. Anyone who has it controls the agent.",
 	"tls":             "The worker's TLS certificate; links name its fingerprint.",
 }
