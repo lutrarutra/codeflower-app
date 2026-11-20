@@ -42,15 +42,22 @@ type sandboxQuit struct {
 	killOnce   sync.Once
 }
 
+// clientWrapUp is how long quitting waits at most for the working chats to
+// wrap up: "client: {wrap_up_minutes: N}" in the config directory, else
+// client.DefaultWrapUp.
+func clientWrapUp(directory string) time.Duration {
+	if loaded, err := config.Load(directory); err == nil && loaded.Client.WrapUpMinutes > 0 {
+		return time.Duration(loaded.Client.WrapUpMinutes) * time.Minute
+	}
+	return client.DefaultWrapUp
+}
+
 // quitOnSignals watches the signals for a sandbox the terminal runs (see
 // sandboxQuit). ctx ends when the sandbox should stop, kill closes when it
 // should be killed, connected gives the worker's connection once it listens
 // (before, Ctrl+C stops it at once), and stop ends the watch.
 func quitOnSignals(parent context.Context, configDirectory string) (ctx context.Context, kill <-chan struct{}, connected func(sandbox.Connection), stop func()) {
-	wrapUp := client.DefaultWrapUp
-	if loaded, err := config.Load(config.Directory(configDirectory)); err == nil && loaded.Client.WrapUpMinutes > 0 {
-		wrapUp = time.Duration(loaded.Client.WrapUpMinutes) * time.Minute
-	}
+	wrapUp := clientWrapUp(config.Directory(configDirectory))
 	signals := make(chan os.Signal, 4)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	ctx, quit, done := watchQuit(parent, signals, os.Stderr, wrapUp, time.Second)

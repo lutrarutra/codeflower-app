@@ -34,7 +34,7 @@ type clientStart struct {
 func (c clientStart) note() string {
 	switch {
 	case c.started:
-		return fmt.Sprintf("Started code flower client %s in the background (pid %d): it keeps the tunnel connected.", Version, c.pid)
+		return fmt.Sprintf("Started code flower client %s in the background (pid %d): it keeps the tunnel connected; \"codeflower client stop\" stops it.", Version, c.pid)
 	case c.replaced != "":
 		return fmt.Sprintf("Restarted code flower client in the background, %s → %s (pid %d), so its page is this release's.", c.replaced, Version, c.pid)
 	case c.stale != nil:
@@ -154,14 +154,21 @@ func replaceClient(directory string, running client.Client, wrapUp bool) (int, e
 	if err := client.QuitWith(directory, wrapUp, wait); err != nil {
 		return 0, err
 	}
-	// Its API is gone; it still releases the tunnel and stops what it
-	// started before it exits.
-	for deadline := time.Now().Add(client.QuitWait); running.PID > 0 && sandbox.ProcessAlive(running.PID); time.Sleep(100 * time.Millisecond) {
-		if time.Now().After(deadline) {
-			return 0, fmt.Errorf("the client (pid %d) did not exit within %s", running.PID, client.QuitWait)
-		}
+	if err := waitForClientExit(running.PID); err != nil {
+		return 0, err
 	}
 	return startClient(directory, running.Args, running.URL)
+}
+
+// waitForClientExit waits for a client whose API is gone to exit: it still
+// releases the tunnel and stops what it started before it does.
+func waitForClientExit(pid int) error {
+	for deadline := time.Now().Add(client.QuitWait); pid > 0 && sandbox.ProcessAlive(pid); time.Sleep(100 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the client (pid %d) did not exit within %s", pid, client.QuitWait)
+		}
+	}
+	return nil
 }
 
 // clientArgs are this process's arguments after the "client" command (or

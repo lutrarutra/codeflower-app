@@ -202,6 +202,7 @@ call the quit off. Sandboxes running elsewhere keep running.`,
 	command.Flags().StringVar(&configDirectory, "config", "",
 		"config directory with config.yaml and skills (or set $CODEFLOWER_CONFIG; default ~/.codeflower)")
 	command.AddCommand(clientRestartCommand())
+	command.AddCommand(clientStopCommand())
 	return command
 }
 

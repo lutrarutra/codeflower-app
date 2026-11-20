@@ -40,6 +40,7 @@ starts code flower client in the background, which keeps the tunnel connected
 and lists every sandbox on this computer: those it starts, and those
 "codeflower run" and "codeflower sandbox" start in a terminal (they start the
 client themselves while this computer is signed in and remote access is on).
+"codeflower client stop" stops it.
 
 Everything between a paired browser and this computer is end-to-end encrypted;
 the tunnel cannot read it. Signing in to the tunnel alone does not give access:
@@ -213,8 +214,9 @@ browser paired: "codeflower run" and "codeflower sandbox" start one themselves
 while their sandbox runs, and on a cluster that shares the config directory
 between nodes, a client left running would hold the tunnel (only one computer
 connects it at a time). --keep-running keeps it, so paired browsers reach this
-computer until you quit it ("codeflower client" opens it here) or sign out; so
-does --no-wait, as the link needs it.
+computer until you quit it ("codeflower client stop", or from its page, which
+"codeflower client" opens here) or sign out; so does --no-wait, as the link
+needs it.
 
 With "tunnel: {hardened: true}" name the sandboxes (by name or ID, as
 "codeflower tunnel status" lists them) the browser may use; it sees no others.`,
@@ -272,7 +274,7 @@ With "tunnel: {hardened: true}" name the sandboxes (by name or ID, as
 				}()
 			case started:
 				fmt.Println(`Started code flower client in the background: it keeps the tunnel connected.
-Open it here with "codeflower client".`)
+Open it here with "codeflower client"; "codeflower client stop" stops it.`)
 			}
 			var workers []string
 			if loaded.Tunnel.Hardened {
