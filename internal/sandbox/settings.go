@@ -33,12 +33,14 @@ type Settings struct {
 	TimeLimit      string   `yaml:"time_limit"`
 	Env            []string `yaml:"env"`
 	EngineArgs     string   `yaml:"engine_args"`
-	Server         bool     `yaml:"server"`
-	Host           string   `yaml:"host"`
-	AdvertiseHost  string   `yaml:"advertise_host"`
-	Port           int      `yaml:"port"`
-	NoTunnel       bool     `yaml:"no_tunnel"`
-	ForwardTo      string   `yaml:"forward_to"`
+	// Jobs is --jobs: a scheduler, or off; empty follows the config.
+	Jobs          string `yaml:"jobs,omitempty"`
+	Server        bool   `yaml:"server"`
+	Host          string `yaml:"host"`
+	AdvertiseHost string `yaml:"advertise_host"`
+	Port          int    `yaml:"port"`
+	NoTunnel      bool   `yaml:"no_tunnel"`
+	ForwardTo     string `yaml:"forward_to"`
 	// Key is the worker's token (NewToken), and Certificate its TLS
 	// certificate and key: kept, so the links VS Code and browsers saved
 	// still connect after a restart.

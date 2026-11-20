@@ -150,6 +150,9 @@ type Config struct {
 	MCP map[string]MCPServer `yaml:"mcp_servers"`
 	// Plugins are the agents' own plugins every sandbox gets, by agent id.
 	Plugins map[string][]PluginEntry `yaml:"plugins"`
+	// Jobs lets the agents ask the app to submit batch jobs, each run in a
+	// sandbox of its own.
+	Jobs Jobs `yaml:"jobs"`
 
 	// Directory is the config directory; Path is the file, whether or not it exists.
 	Directory string `yaml:"-"`
@@ -209,6 +212,9 @@ func Load(directory string) (*Config, error) {
 		return nil, err
 	}
 	if err := config.checkPlugins(); err != nil {
+		return nil, err
+	}
+	if err := config.checkJobs(); err != nil {
 		return nil, err
 	}
 	if config.hasInlineKey() || config.hasMCPSecrets() {

@@ -1,0 +1,44 @@
+# IBM Spectrum LSF (example, not tested on a cluster). bsub reads the script
+# on its standard input; memory is in MB (LSF_UNIT_FOR_LIMITS=MB).
+detect: [bsub, bjobs]
+script: |
+  #!/bin/bash
+  #BSUB -J {{.Name}}{{with .Array}}[{{.Spec}}]{{if .Limit}}%{{.Limit}}{{end}}{{end}}
+  #BSUB -o {{.LogDir}}/scheduler{{if .Array}}-%I{{end}}.log
+  #BSUB -n {{.CPUs}}
+  #BSUB -R "span[hosts=1] rusage[mem={{mb .Memory}}]"
+  #BSUB -W {{minutes .Time}}
+  {{- with .Queue}}
+  #BSUB -q {{.}}
+  {{- end}}
+  {{- with .Account}}
+  #BSUB -P {{.}}
+  {{- end}}
+  {{- if .GPUs}}
+  #BSUB -gpu "num={{.GPUs}}"
+  {{- end}}
+  {{- with .After}}
+  #BSUB -w "{{range $index, $id := .}}{{if $index}} && {{end}}done({{$id}}){{end}}"
+  {{- end}}
+  {{- range .Extra}}
+  #BSUB {{.}}
+  {{- end}}
+  {{with .Setup}}{{.}}
+  {{end}}exec {{.Run}}
+submit:
+  command: [bsub]
+  stdin: true
+  id: '<(\d+)>'
+status:
+  command: [bjobs, -noheader, -o, "jobid stat"]
+  line: '^(?P<id>\d+)\s+(?P<state>\S+)'
+cancel:
+  command: [bkill, "{{.ID}}"]
+states:
+  queued: [PEND, PSUSP, USUSP, SSUSP, WAIT]
+  running: [RUN, PROV]
+  done: [DONE]
+  failed: ["*"]
+array_index_env: LSB_JOBINDEX
+pass_env: [LSB_JOBID, LSB_JOBNAME, LSB_JOBINDEX, LSB_QUEUE, LSB_DJOB_NUMPROC]
+supports: [queue, account, gpus, array, after]

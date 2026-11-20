@@ -262,3 +262,49 @@ func TestMCPSecretsNeedPrivateFile(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestJobsConfig(t *testing.T) {
+	write := func(content string) (*Config, error) {
+		directory := t.TempDir()
+		if err := os.WriteFile(filepath.Join(directory, FileName), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return Load(directory)
+	}
+	loaded, err := write(`jobs:
+  scheduler: cluster
+  approve: never
+  queues:
+    - {name: shortq, time: 12h, description: ordinary jobs}
+  schedulers:
+    cluster:
+      extends: slurm
+      pass_env: [SLURM_JOB_ID]
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, found, err := loaded.SchedulerProfile("cluster")
+	if err != nil || !found || profile.Extends != "slurm" || loaded.Jobs.Queues[0].Time != "12h" {
+		t.Fatalf("%+v %v %v", profile, found, err)
+	}
+	for _, bad := range []string{
+		"jobs:\n  approve: sometimes\n",
+		"jobs:\n  on_stop: pause\n",
+		"jobs:\n  schedulers:\n    auto: {}\n",
+		"jobs:\n  queues:\n    - {name: a}\n    - {name: a}\n",
+		"jobs:\n  extra: [\"a\\nb\"]\n",
+		"jobs:\n  schedulers:\n    x: {script: a, unknown: b}\n",
+	} {
+		if _, err := write(bad); err == nil {
+			t.Errorf("%q should fail", bad)
+		}
+	}
+	directory := t.TempDir()
+	os.MkdirAll(filepath.Join(directory, SchedulersFolder), 0o755)
+	os.WriteFile(filepath.Join(directory, SchedulersFolder, "mine.yaml"), []byte("extends: pbs\n"), 0o644)
+	loaded, _ = Load(directory)
+	if profile, found, err := loaded.SchedulerProfile("mine"); !found || err != nil || profile.Extends != "pbs" {
+		t.Fatalf("a profile file: %+v %v %v", profile, found, err)
+	}
+}

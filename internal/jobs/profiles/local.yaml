@@ -1,0 +1,13 @@
+# Background jobs on this computer: the app starts the script itself, and an
+# array's tasks run a few at a time (the array's %LIMIT, else one).
+script: |
+  #!/bin/sh
+  {{with .Setup}}{{.}}
+  {{end}}{{if .Array}}printf '%s\n'{{range .Array.Indices}} {{.}}{{end}} | xargs -P {{or .Array.Limit 1}} -I {} env CODEFLOWER_JOB_INDEX={} {{.Run}}
+  {{else}}exec {{.Run}}
+  {{end}}
+states:
+  running: [running]
+  done: [done]
+  failed: ["*"]
+supports: [gpus, array]

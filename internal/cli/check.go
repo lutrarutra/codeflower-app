@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"codeflower-app/internal/config"
+	"codeflower-app/internal/jobs"
 	"codeflower-app/internal/sandbox"
 )
 
@@ -61,7 +64,7 @@ func engineMissing(out io.Writer, engine sandbox.EngineStatus, err error) error 
 }
 
 func checkCommand() *cobra.Command {
-	var image, imageTag, engineName string
+	var image, imageTag, engineName, configDirectory string
 	command := &cobra.Command{
 		Use:   "check",
 		Short: "Check that this machine can run sandboxes, and how to set it up",
@@ -105,6 +108,7 @@ func checkCommand() *cobra.Command {
 			}
 			resolved, _ := sandbox.ResolveImage(image, engine.Name)
 			fmt.Fprintf(out, "The sandbox image %s is ready.\n", resolved)
+			printJobsCheck(out, configDirectory)
 			fmt.Fprintln(out, "\nStart one with:  codeflower sandbox --input DATA_FOLDER  (or: codeflower gui)")
 			return nil
 		},
@@ -116,5 +120,37 @@ func checkCommand() *cobra.Command {
 	command.Flags().StringVar(&image, "image", os.Getenv("CODEFLOWER_IMAGE"), "sandbox image to look for")
 	addImageTagFlag(command, &imageTag)
 	command.Flags().StringVar(&engineName, "engine", defaultEngine, "engine to check: auto, docker, podman, or apptainer")
+	command.Flags().StringVar(&configDirectory, "config", "", "config directory whose jobs: settings to check (or set $CODEFLOWER_CONFIG; default ~/.codeflower)")
 	return command
+}
+
+// printJobsCheck says whether the agents can ask for batch jobs here, and
+// what the config's scheduler needs.
+func printJobsCheck(out io.Writer, directory string) {
+	loaded, err := config.Load(config.Directory(directory))
+	if err != nil {
+		fmt.Fprintf(out, "\nBatch jobs: the config cannot be read: %v\n", err)
+		return
+	}
+	settings, err := jobs.Setup(loaded, "")
+	switch {
+	case err != nil:
+		fmt.Fprintf(out, "\nBatch jobs: %v\n", err)
+		return
+	case settings == nil:
+		fmt.Fprintln(out, "\nBatch jobs: off (set jobs.scheduler in config.yaml to let the agents ask for them).")
+		return
+	}
+	fmt.Fprintf(out, "\nBatch jobs: %s.\n", settings.Summary())
+	if settings.Profile.Example {
+		fmt.Fprintf(out, "  The %s profile is an example that was not tested on a real cluster: check its scripts (codeflower jobs show).\n", settings.Scheduler)
+	}
+	for _, program := range settings.Profile.Programs() {
+		if path, err := exec.LookPath(program); err == nil {
+			fmt.Fprintf(out, "  %-14s %s\n", program, path)
+		} else {
+			fmt.Fprintf(out, "  %-14s not found: jobs cannot be submitted from here\n", program)
+		}
+	}
+	fmt.Fprintf(out, "  %-14s %s (must be on a folder the jobs' nodes share)\n", "job scripts run", settings.Codeflower)
 }

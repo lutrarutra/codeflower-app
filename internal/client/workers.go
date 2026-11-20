@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"codeflower-app/internal/config"
+	"codeflower-app/internal/jobs"
 	"codeflower-app/internal/sandbox"
 )
 
@@ -586,6 +587,11 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		}
 		isolation = &sandbox.Isolation{Allowlist: allowlist}
 	}
+	jobSettings, err := jobs.Setup(loaded, "")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	s.settings.save(Settings{
 		Inputs: request.Inputs, Outputs: request.Outputs, Code: request.Code,
 		Skills: request.Skills, Project: request.Project, Engine: request.Engine, Image: request.Image, ImageTag: request.ImageTag,
@@ -597,7 +603,7 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		Token:  sandbox.NewToken(),
 		Engine: engine, Image: image, State: state, Env: env, Binds: binds,
 		Isolation: isolation, APIKeys: apiKeys, Images: images, MCPServers: loaded.MCPServers(),
-		Plugins: loaded.AllPlugins(),
+		Plugins: loaded.AllPlugins(), Jobs: jobSettings,
 	}
 	item := &worker{
 		ID:      sandbox.NewInstanceID()[:8],

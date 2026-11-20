@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"codeflower-app/internal/config"
+	"codeflower-app/internal/jobs"
 	"codeflower-app/internal/sandbox"
 )
 
@@ -84,6 +85,8 @@ type sandboxOptions struct {
 	envValues        []string
 	engineArgsValues []string
 	engineArgs       sandbox.EngineArgs
+	// jobs is --jobs: a scheduler, or off; empty follows the config.
+	jobs string
 	// resources are --cpus, --memory and --time-limit; set by check.
 	resources sandbox.Resources
 
@@ -125,6 +128,9 @@ func addSandboxFlags(command *cobra.Command, options *sandboxOptions) {
 	command.Flags().StringArrayVar(&options.engineArgsValues, "engine-args", nil,
 		"container engine flags, quoted as one value, e.g. '--gpus all --shm-size 8g': "+
 			"--gpus, --device, --shm-size, --ulimit, --cap-add, --cap-drop, --add-host, --dns (repeatable)")
+	command.Flags().StringVar(&options.jobs, "jobs", "",
+		"let the agent ask for batch jobs, each run in a sandbox like this one: slurm, local, auto, a scheduler profile of the config, or off "+
+			"(default: the config's jobs.scheduler)")
 }
 
 // addAgentFlag adds --agent to a command that names one agent: a task, a
@@ -293,6 +299,8 @@ type preparedSandbox struct {
 	// variables are --env; engineArgs --engine-args.
 	variables  []string
 	engineArgs sandbox.EngineArgs
+	// jobs are the batch jobs the agent may ask for, or nil.
+	jobs *jobs.Settings
 }
 
 // prepare mounts the folders, makes sure the image is there and prepares the
@@ -363,6 +371,10 @@ func (options sandboxOptions) prepareWith(ctx context.Context, engine sandbox.En
 		isolation = &sandbox.Isolation{Allowlist: path}
 	}
 
+	jobSettings, err := jobs.Setup(options.userConfig, options.jobs)
+	if err != nil {
+		return preparedSandbox{}, err
+	}
 	mcpServers := options.userConfig.MCPServers()
 	fmt.Fprintf(os.Stderr, "Starting %s for %s with %s (%s)\n", what, strings.Join(labels, ", "), engine.Label, image)
 	fmt.Fprintf(os.Stderr, "  project  %s\n", state)
@@ -433,7 +445,7 @@ func (options sandboxOptions) prepareWith(ctx context.Context, engine sandbox.En
 	}
 	return preparedSandbox{engine: engine, image: image, state: state, env: env, binds: binds, isolation: isolation, apiKeys: apiKeys,
 		images: images, mcpServers: mcpServers, plugins: plugins, resources: options.resources,
-		variables: options.envValues, engineArgs: options.engineArgs}, nil
+		variables: options.envValues, engineArgs: options.engineArgs, jobs: jobSettings}, nil
 }
 
 // withIcons adds the icon gallery's mount, unless it is off or already there
@@ -472,6 +484,7 @@ func (p preparedSandbox) worker(agent string) sandbox.Worker {
 		Resources:  p.resources,
 		Variables:  p.variables,
 		EngineArgs: p.engineArgs,
+		Jobs:       p.jobs,
 	}
 }
 

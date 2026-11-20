@@ -1,0 +1,53 @@
+# Slurm. Each job is a batch script with #SBATCH directives; squeue lists the
+# user's queued and running jobs, sacct looks up the finished ones.
+detect: [sbatch]
+script: |
+  #!/bin/bash
+  #SBATCH --job-name={{.Name}}
+  #SBATCH --output={{.LogDir}}/scheduler{{if .Array}}-%a{{end}}.log
+  #SBATCH --nodes=1
+  #SBATCH --ntasks=1
+  #SBATCH --cpus-per-task={{.CPUs}}
+  #SBATCH --mem={{mb .Memory}}M
+  #SBATCH --time={{dhms .Time}}
+  {{- with .Queue}}
+  #SBATCH --partition={{.}}
+  {{- end}}
+  {{- with .Account}}
+  #SBATCH --account={{.}}
+  {{- end}}
+  {{- if .GPUs}}
+  #SBATCH --gres=gpu:{{with .GPUType}}{{.}}:{{end}}{{.GPUs}}
+  {{- end}}
+  {{- with .Array}}
+  #SBATCH --array={{.Spec}}{{if .Limit}}%{{.Limit}}{{end}}
+  {{- end}}
+  {{- with .After}}
+  #SBATCH --dependency=afterok:{{join . ":"}}
+  {{- end}}
+  {{- range .Extra}}
+  #SBATCH {{.}}
+  {{- end}}
+  {{with .Setup}}{{.}}
+  {{end}}exec {{.Run}}
+submit:
+  command: [sbatch, --parsable, "{{.Script}}"]
+  id: '^(\d+)'
+status:
+  command: [squeue, --me, --noheader, "--format=%i|%T"]
+  line: '^(?P<id>\d+)(?:_\S+)?\|(?P<state>\S+)'
+history:
+  command: [sacct, --noheader, --parsable2, --allocations, "--format=JobID,State,ExitCode", "--jobs={{join .IDs \",\"}}"]
+  line: '^(?P<id>\d+)(?:_(?P<index>\d+))?\|(?P<state>[A-Z_]+)[^|]*\|(?P<exit>\d+)'
+cancel:
+  command: [scancel, "{{.ID}}"]
+states:
+  queued: [PENDING, CONFIGURING, "REQUEUE*", RESV_DEL_HOLD, SUSPENDED, STOPPED]
+  running: [RUNNING, COMPLETING, STAGE_OUT, SIGNALING]
+  done: [COMPLETED]
+  cancelled: ["CANCELLED*"]
+  failed: ["*"]
+array_index_env: SLURM_ARRAY_TASK_ID
+pass_env: [SLURM_JOB_ID, SLURM_JOB_NAME, SLURM_JOB_PARTITION, SLURM_ARRAY_JOB_ID, SLURM_ARRAY_TASK_ID,
+  SLURM_ARRAY_TASK_COUNT, SLURM_CPUS_PER_TASK, SLURM_CPUS_ON_NODE, SLURM_MEM_PER_NODE, SLURM_JOB_GPUS]
+supports: [queue, account, gpus, array, after]

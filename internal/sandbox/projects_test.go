@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"codeflower-app/internal/jobs"
 )
 
 // testProject makes a project with saved settings, an allowlist, an env
@@ -222,5 +224,49 @@ func TestASizeCountsEnvAndHardLinksOnce(t *testing.T) {
 	}
 	if linked, _ := project.Size(); linked-withBig >= 1<<20 {
 		t.Fatalf("a hard link counts twice: %d then %d", withBig, linked)
+	}
+}
+
+func TestBatchJobsGoWithTheProject(t *testing.T) {
+	project, projects, _ := testProject(t)
+	ledger, err := jobs.OpenLedger(project.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := ledger.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := &jobs.Record{ID: id, Name: "align", State: jobs.StateRunning}
+	if err := ledger.Save(record); err != nil {
+		t.Fatal(err)
+	}
+	for name, err := range map[string]error{
+		"move": func() error {
+			_, err := MoveProject(context.Background(), project, filepath.Join(projects, "m"), "", nil)
+			return err
+		}(),
+		"remove": RemoveProject(context.Background(), project, nil),
+	} {
+		if err == nil || !strings.Contains(err.Error(), "batch jobs are queued or running") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	record.State = jobs.StateDone
+	if err := ledger.Save(record); err != nil {
+		t.Fatal(err)
+	}
+	moved, err := MoveProject(context.Background(), project, filepath.Join(projects, "moved"), "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(jobs.LedgerDir(moved.State), id, jobs.RecordFile)); err != nil {
+		t.Fatalf("the jobs did not move along: %v", err)
+	}
+	if err := RemoveProject(context.Background(), moved, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(jobs.LedgerDir(moved.State)); !os.IsNotExist(err) {
+		t.Fatalf("the jobs folder is still there: %v", err)
 	}
 }

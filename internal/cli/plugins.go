@@ -323,5 +323,7 @@ installer needs. A running agent picks the plugins up when it restarts.`,
 	}
 	addSandboxFlags(command, &options)
 	addAgentFlag(command, &options, "agent whose plugins are fetched", true)
+	// Without the bridge, the agent cannot ask for jobs.
+	_ = command.Flags().MarkHidden("jobs")
 	return command
 }

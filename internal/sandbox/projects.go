@@ -12,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"codeflower-app/internal/jobs"
 )
 
 // Project is a project folder and the files that belong to it: its saved
@@ -68,6 +70,26 @@ func (p Project) Settings() string { return SettingsFile(p.State) }
 // Allowlist is the project's default allowlist file.
 func (p Project) Allowlist() string { return DefaultAllowlist(p.State) }
 
+// Jobs is the project's jobs folder (its batch jobs' ledger).
+func (p Project) Jobs() string { return jobs.LedgerDir(p.State) }
+
+// checkNoActiveJobs refuses to move or remove a project whose batch jobs
+// still run: they write into its folders.
+func (p Project) checkNoActiveJobs(what string) error {
+	records, _ := jobs.Ledger{Dir: p.Jobs(), Project: p.State}.Records()
+	active := 0
+	for _, record := range records {
+		if jobs.Active(record.State) {
+			active++
+		}
+	}
+	if active > 0 {
+		return fmt.Errorf("cannot %s the project %s while %d of its batch jobs are queued or running; "+
+			"cancel them (codeflower jobs cancel) or wait for them, then check with codeflower jobs list", what, p.Name, active)
+	}
+	return nil
+}
+
 // files are the project's paths and where each goes when the project's
 // folder becomes target (and its env folder envTarget).
 func (p Project) files(target, envTarget string) [][2]string {
@@ -75,6 +97,7 @@ func (p Project) files(target, envTarget string) [][2]string {
 		{p.State, target},
 		{p.Settings(), SettingsFile(target)},
 		{p.Allowlist(), DefaultAllowlist(target)},
+		{p.Jobs(), jobs.LedgerDir(target)},
 	}
 	if p.Env != "" {
 		moves = append(moves, [2]string{p.Env, envTarget})
@@ -291,6 +314,9 @@ func MoveProject(ctx context.Context, p Project, target, envDir string, progress
 	if err := p.checkStopped("move"); err != nil {
 		return Project{}, err
 	}
+	if err := p.checkNoActiveJobs("move"); err != nil {
+		return Project{}, err
+	}
 	target, envTarget, err := p.destination(target, envDir)
 	if err != nil {
 		return Project{}, err
@@ -363,6 +389,9 @@ func RemoveProject(ctx context.Context, p Project, progress Progress) error {
 	if err := p.checkStopped("remove"); err != nil {
 		return err
 	}
+	if err := p.checkNoActiveJobs("remove"); err != nil {
+		return err
+	}
 	m, stop := newMeter(progress)
 	defer stop()
 	m.phase("Removing")
@@ -387,8 +416,8 @@ func (p Project) toRemove() []string {
 			trash.Env = RemovingPath(p.Env)
 		}
 	}
-	from := []string{p.Env, p.State, p.Allowlist(), p.Settings()}
-	to := []string{trash.Env, trash.State, trash.Allowlist(), trash.Settings()}
+	from := []string{p.Env, p.State, p.Jobs(), p.Allowlist(), p.Settings()}
+	to := []string{trash.Env, trash.State, trash.Jobs(), trash.Allowlist(), trash.Settings()}
 	var paths []string
 	for index, path := range from {
 		if path == "" || !exists(path) {
@@ -434,7 +463,7 @@ func LeftoverRemoval(state, envDir string) (p Project, found bool) {
 			p.Env = env
 		}
 	}
-	for _, path := range []string{p.State, p.Settings(), p.Allowlist(), p.Env} {
+	for _, path := range []string{p.State, p.Settings(), p.Allowlist(), p.Jobs(), p.Env} {
 		if path != "" && exists(path) {
 			return p, true
 		}

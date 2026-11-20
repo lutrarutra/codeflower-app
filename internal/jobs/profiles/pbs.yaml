@@ -1,0 +1,43 @@
+# PBS Pro, OpenPBS and Torque (example, not tested on a cluster). Arrays must
+# be one range (first-last[:step]).
+detect: [qsub, qstat, pbsnodes]
+script: |
+  #!/bin/bash
+  #PBS -N {{.Name}}
+  #PBS -j oe
+  #PBS -o {{.LogDir}}/scheduler.log
+  #PBS -l select=1:ncpus={{.CPUs}}:mem={{mb .Memory}}mb{{if .GPUs}}:ngpus={{.GPUs}}{{end}}
+  #PBS -l walltime={{hms .Time}}
+  {{- with .Queue}}
+  #PBS -q {{.}}
+  {{- end}}
+  {{- with .Account}}
+  #PBS -A {{.}}
+  {{- end}}
+  {{- with .Array}}{{if not .Simple}}{{fail "PBS arrays must be one range, e.g. 1-100 or 1-100:2"}}{{end}}
+  #PBS -J {{.First}}-{{.Last}}{{if gt .Step 1}}:{{.Step}}{{end}}
+  {{- end}}
+  {{- with .After}}
+  #PBS -W depend=afterok:{{join . ":"}}
+  {{- end}}
+  {{- range .Extra}}
+  #PBS {{.}}
+  {{- end}}
+  {{with .Setup}}{{.}}
+  {{end}}exec {{.Run}}
+submit:
+  command: [qsub, "{{.Script}}"]
+  id: '^(\d+)'
+status:
+  command: [qstat]
+  line: '^(?P<id>\d+)(?:\[\d*\])?\.\S*\s+\S+\s+\S+\s+\S+\s+(?P<state>[A-Z])\s'
+cancel:
+  command: [qdel, "{{.ID}}"]
+states:
+  queued: [Q, H, W, T, S]
+  running: [R, E, B, X]
+  done: [F]
+  failed: ["*"]
+array_index_env: PBS_ARRAY_INDEX
+pass_env: [PBS_JOBID, PBS_JOBNAME, PBS_QUEUE, PBS_ARRAY_INDEX, NCPUS, OMP_NUM_THREADS]
+supports: [queue, account, gpus, array, after]

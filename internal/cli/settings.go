@@ -168,6 +168,9 @@ func (options *sandboxOptions) applySettings(settings sandbox.Settings, flags *w
 			options.engineArgsValues = []string{settings.EngineArgs}
 		}
 	})
+	if settings.Jobs != "" {
+		take("jobs", func() { options.jobs = settings.Jobs })
+	}
 	options.envValues = addVariables(settings.Env, options.envValues)
 	take("server", func() { flags.servePage = settings.Server })
 	if settings.Host != "" {
@@ -267,6 +270,7 @@ func (options sandboxOptions) settingsOf(settings sandbox.Settings, engine strin
 	settings.CPUs, settings.Memory, settings.TimeLimit = options.cpus, options.memory, options.timeLimit
 	settings.Env = slices.Clone(options.envValues)
 	settings.EngineArgs = options.engineArgsLine()
+	settings.Jobs = options.jobs
 	settings.Server = flags.servePage
 	settings.Host = flags.listenHost
 	settings.AdvertiseHost = flags.advertiseHost

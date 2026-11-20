@@ -1,0 +1,50 @@
+# Grid Engine: Son of Grid Engine, Univa/Altair (example, not tested on a
+# cluster). CPUs come from the parallel environment smp, and h_vmem is per
+# CPU there; change both with extends: sge and your own script if your site
+# differs. Arrays must be one range.
+detect: [qsub, qacct]
+script: |
+  #!/bin/bash
+  #$ -N {{.Name}}
+  #$ -cwd
+  #$ -j y
+  #$ -o {{.LogDir}}/scheduler.log
+  #$ -pe smp {{.CPUs}}
+  #$ -l h_vmem={{mb (div .Memory .CPUs)}}M
+  #$ -l h_rt={{hms .Time}}
+  {{- with .Queue}}
+  #$ -q {{.}}
+  {{- end}}
+  {{- with .Account}}
+  #$ -P {{.}}
+  {{- end}}
+  {{- with .Array}}{{if not .Simple}}{{fail "Grid Engine arrays must be one range, e.g. 1-100 or 1-100:2"}}{{end}}
+  #$ -t {{.First}}-{{.Last}}:{{.Step}}
+  {{- if .Limit}}
+  #$ -tc {{.Limit}}
+  {{- end}}
+  {{- end}}
+  {{- with .After}}
+  #$ -hold_jid {{join . ","}}
+  {{- end}}
+  {{- range .Extra}}
+  #$ {{.}}
+  {{- end}}
+  {{with .Setup}}{{.}}
+  {{end}}exec {{.Run}}
+submit:
+  command: [qsub, -terse, "{{.Script}}"]
+  id: '^(\d+)'
+status:
+  command: [qstat, -u, "{{.User}}"]
+  line: '^\s*(?P<id>\d+)\s+\S+\s+\S+\s+\S+\s+(?P<state>\S+)'
+cancel:
+  command: [qdel, "{{.ID}}"]
+states:
+  queued: [qw, hqw, hRwq, Rq, s, S, T]
+  running: [r, t, Rr, Rt]
+  cancelled: [dr, dt, dqw, d]
+  failed: ["*"]
+array_index_env: SGE_TASK_ID
+pass_env: [JOB_ID, JOB_NAME, SGE_TASK_ID, NSLOTS, QUEUE]
+supports: [queue, account, array, after]

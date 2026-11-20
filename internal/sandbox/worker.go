@@ -17,6 +17,7 @@ import (
 
 	"codeflower-app/internal/agents"
 	"codeflower-app/internal/config"
+	"codeflower-app/internal/jobs"
 )
 
 // Agents a worker can run, the default first, from their descriptors.
@@ -145,9 +146,11 @@ type Worker struct {
 	Variables []string
 	// EngineArgs are the user's --engine-args.
 	EngineArgs EngineArgs
-	Stdin      io.Reader
-	Stdout     io.Writer
-	Stderr     io.Writer
+	// Jobs, when set, lets the agent ask for batch jobs (docs/jobs.md).
+	Jobs   *jobs.Settings
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
 	// Kill, once closed, kills the sandbox at once instead of waiting for it
 	// to stop after Run's ctx ended (the second Ctrl+C).
 	Kill <-chan struct{}
@@ -407,6 +410,16 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	}
 	if err := addEnvironment(values, w.Variables, w.Stderr); err != nil {
 		return 1, err
+	}
+	// Tasks and windows' workers have a bridge to ask through.
+	if w.Jobs != nil && !w.PluginsFetch && w.TUI == "" {
+		stopJobs, err := w.startJobs(ctx, instanceID, values)
+		if err != nil {
+			fmt.Fprintf(w.Stderr, "  jobs     off: %v\n", err)
+		} else {
+			fmt.Fprintf(w.Stderr, "  jobs     %s\n", w.Jobs.Summary())
+			defer stopJobs()
+		}
 	}
 	connectionFile := filepath.Join(w.State, "instances", instanceID+".json")
 	defer os.Remove(connectionFile)

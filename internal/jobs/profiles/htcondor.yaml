@@ -1,0 +1,49 @@
+# HTCondor (example, not tested on a pool). The job is a submit description
+# that runs the script on a shared filesystem; an array is one cluster with a
+# process per index.
+detect: [condor_submit, condor_q]
+script: |
+  #!/bin/bash
+  {{with .Setup}}{{.}}
+  {{end}}exec {{.Run}}
+submit_file: |
+  universe = vanilla
+  executable = {{.Script}}
+  should_transfer_files = NO
+  output = {{.LogDir}}/scheduler{{if .Array}}-$(Item){{end}}.log
+  error = {{.LogDir}}/scheduler{{if .Array}}-$(Item){{end}}.log
+  log = {{.Directory}}/condor.log
+  request_cpus = {{.CPUs}}
+  request_memory = {{mb .Memory}}M
+  {{- if .GPUs}}
+  request_gpus = {{.GPUs}}
+  {{- end}}
+  +MaxRuntime = {{seconds .Time}}
+  {{- with .Account}}
+  accounting_group = {{.}}
+  {{- end}}
+  {{- range .Extra}}
+  {{.}}
+  {{- end}}
+  {{- if .Array}}
+  environment = "CODEFLOWER_JOB_INDEX=$(Item)"
+  queue Item in ({{range $index, $item := .Array.Indices}}{{if $index}} {{end}}{{$item}}{{end}})
+  {{- else}}
+  queue
+  {{- end}}
+submit:
+  command: [condor_submit, -terse, "{{.SubmitFile}}"]
+  id: '^(\d+)\.'
+status:
+  command: [condor_q, -nobatch, -af, ClusterId, JobStatus]
+  line: '^(?P<id>\d+)\s+(?P<state>\d+)'
+cancel:
+  command: [condor_rm, "{{.ID}}"]
+states:
+  queued: ["1", "5", "7"]
+  running: ["2", "6"]
+  done: ["4"]
+  cancelled: ["3"]
+  failed: ["*"]
+pass_env: [_CONDOR_SCRATCH_DIR]
+supports: [account, gpus, array]

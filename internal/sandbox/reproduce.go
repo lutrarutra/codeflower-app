@@ -236,13 +236,15 @@ func (r Reproduction) runPhase(ctx context.Context, phase, state string, binds [
 type containerSpec struct {
 	name, image, state string
 	// scratch is where Apptainer's scratch folder goes; empty: the temporary folder.
-	scratch        string
-	binds          []Bind
-	env            map[string]string
-	command        []string
-	netDirectory   string
-	noNetwork      bool
-	resources      Resources
+	scratch      string
+	binds        []Bind
+	env          map[string]string
+	command      []string
+	netDirectory string
+	noNetwork    bool
+	resources    Resources
+	// engineArgs are the user's engine flags (jobs); reproductions have none.
+	engineArgs     EngineArgs
 	stdout, stderr io.Writer
 }
 
@@ -253,12 +255,14 @@ func runContainer(ctx context.Context, engine EngineStatus, spec containerSpec) 
 			Name: spec.name, Image: spec.image, State: spec.state, Binds: spec.binds, Env: spec.env,
 			NetDirectory: spec.netDirectory, NoNetwork: spec.noNetwork, Entrypoint: spec.command,
 			CPUs: spec.resources.CPUs, Memory: spec.resources.Memory, Stdout: spec.stdout, Stderr: spec.stderr,
+			EngineArgs: spec.engineArgs,
 		})
 	case EnginePodman:
 		return RunPodman(ctx, engine.Executable, PodmanRun{
 			Name: spec.name, Image: spec.image, State: spec.state, Binds: spec.binds, Env: spec.env,
 			NetDirectory: spec.netDirectory, NoNetwork: spec.noNetwork, Entrypoint: spec.command,
 			CPUs: spec.resources.CPUs, Memory: spec.resources.Memory, Stdout: spec.stdout, Stderr: spec.stderr,
+			EngineArgs: spec.engineArgs,
 		})
 	case EngineApptainer:
 		scratch, err := os.MkdirTemp(spec.scratch, scratchPrefix)
@@ -268,10 +272,11 @@ func runContainer(ctx context.Context, engine EngineStatus, spec containerSpec) 
 		defer removeTree(scratch)
 		args, err := ApptainerCommandWith(ApptainerOptions{Executable: engine.Executable, Image: spec.image,
 			State: spec.state, Scratch: scratch, Binds: spec.binds, NetDirectory: spec.netDirectory,
-			NoNetwork: spec.noNetwork, Command: spec.command})
+			NoNetwork: spec.noNetwork, Command: spec.command, GPUs: spec.engineArgs.GPUs != ""})
 		if err != nil {
 			return 1, err
 		}
+		spec.engineArgs.apptainerGPUs(spec.env)
 		return RunApptainer(ctx, nil, false, args, spec.env, nil, spec.stdout, spec.stderr)
 	}
 	return 1, fmt.Errorf("unknown engine %q", engine.Name)
