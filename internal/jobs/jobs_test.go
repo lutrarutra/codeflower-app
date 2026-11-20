@@ -357,6 +357,9 @@ func newTestBroker(t *testing.T, cfg config.Jobs) (*Broker, *fakeScheduler, stri
 }
 
 func TestBrokerSubmitPollFinish(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("batch jobs need Linux or macOS")
+	}
 	broker, fake, state := newTestBroker(t, config.Jobs{Extra: []string{"--export=NONE"}, Setup: "module load apptainer"})
 	ctx := context.Background()
 	record, err := broker.Submit(ctx, Request{Command: []string{"/data/output/out/run.sh"}, Workdir: "/data/output/out", Agent: "claude", SessionID: "s1", Memory: "8G"})
@@ -401,6 +404,9 @@ func TestBrokerSubmitPollFinish(t *testing.T) {
 }
 
 func TestBrokerArrayHistoryAndLost(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("batch jobs need Linux or macOS")
+	}
 	broker, fake, _ := newTestBroker(t, config.Jobs{})
 	ctx := context.Background()
 	array, err := broker.Submit(ctx, Request{Command: []string{"python"}, Workdir: "/data/output/out", Array: "1-3"})
@@ -442,6 +448,9 @@ func TestBrokerArrayHistoryAndLost(t *testing.T) {
 }
 
 func TestBrokerSpoolAndCancel(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("batch jobs need Linux or macOS")
+	}
 	broker, fake, _ := newTestBroker(t, config.Jobs{Limits: config.JobLimits{Active: 1}})
 	ctx := context.Background()
 	requests := filepath.Join(broker.spool, spoolRequests)
@@ -492,6 +501,9 @@ func TestBrokerSpoolAndCancel(t *testing.T) {
 }
 
 func TestBrokerRefusesUnsafeProject(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("batch jobs need Linux or macOS")
+	}
 	settings, err := Setup(&config.Config{Jobs: config.Jobs{Scheduler: "local", Codeflower: "/x"}}, "")
 	if err != nil {
 		t.Fatal(err)
@@ -502,6 +514,9 @@ func TestBrokerRefusesUnsafeProject(t *testing.T) {
 }
 
 func TestSetupDetect(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("batch jobs need Linux or macOS")
+	}
 	previous := lookPath
 	t.Cleanup(func() { lookPath = previous })
 	lookPath = func(name string) (string, error) {
