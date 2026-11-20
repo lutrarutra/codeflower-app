@@ -21,3 +21,4 @@ func (localBackend) history(context.Context, []*Record) (map[string]map[int]task
 	return nil, errNoLocal
 }
 func (localBackend) cancel(context.Context, *Record) error { return errNoLocal }
+func (localBackend) running(*Record) bool                  { return false }
