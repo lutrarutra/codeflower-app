@@ -105,6 +105,21 @@ func TestExampleProfilesRender(t *testing.T) {
 			}
 		}
 	}
+	// An array's tasks each write the scheduler's log of their own (scheduler-INDEX.log), which the
+	// windows open beside each task's output.
+	for name, want := range map[string]string{
+		"lsf": "/p/jobs/j-abc123/scheduler-%I.log", "pbs": "/p/jobs/j-abc123/scheduler-^array_index^.log",
+		"sge": "/p/jobs/j-abc123/scheduler-$TASK_ID.log", "htcondor": "/p/jobs/j-abc123/scheduler-$(Item).log",
+	} {
+		profile, _ := LoadProfile(nil, name)
+		text, _ := render(profile.script, sampleData())
+		if profile.submitFile != nil {
+			text, _ = render(profile.submitFile, sampleData())
+		}
+		if !strings.Contains(text, want) {
+			t.Fatalf("%s array log, want %s:\n%s", name, want, text)
+		}
+	}
 	pbs, _ := LoadProfile(nil, "pbs")
 	data := sampleData()
 	data.Array, _ = ParseArray("1,5", 0)

@@ -5,7 +5,7 @@ script: |
   #!/bin/bash
   #PBS -N {{.Name}}
   #PBS -j oe
-  #PBS -o {{.LogDir}}/scheduler.log
+  #PBS -o {{.LogDir}}/scheduler{{if .Array}}-^array_index^{{end}}.log
   #PBS -l select=1:ncpus={{.CPUs}}:mem={{mb .Memory}}mb{{if .GPUs}}:ngpus={{.GPUs}}{{end}}
   #PBS -l walltime={{hms .Time}}
   {{- with .Queue}}

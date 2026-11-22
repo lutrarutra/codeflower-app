@@ -8,7 +8,7 @@ script: |
   #$ -N {{.Name}}
   #$ -cwd
   #$ -j y
-  #$ -o {{.LogDir}}/scheduler.log
+  #$ -o {{.LogDir}}/scheduler{{if .Array}}-$TASK_ID{{end}}.log
   #$ -pe smp {{.CPUs}}
   #$ -l h_vmem={{mb (div .Memory .CPUs)}}M
   #$ -l h_rt={{hms .Time}}
