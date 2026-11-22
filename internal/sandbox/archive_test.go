@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -12,6 +13,9 @@ import (
 // fakePodman has the image once pulled or loaded, and logs its commands.
 func fakePodman(t *testing.T) (EngineStatus, string, string) {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake podman is a shell script")
+	}
 	folder := t.TempDir()
 	have, log := filepath.Join(folder, "have"), filepath.Join(folder, "log")
 	script := "#!/bin/sh\necho \"$1\" >> " + log + "\n" +
