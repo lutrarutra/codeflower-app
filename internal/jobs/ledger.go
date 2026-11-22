@@ -106,7 +106,10 @@ type Record struct {
 	ExitCode  *int       `json:"exitCode,omitempty"`
 	// Outcome counts an array's tasks by how they ended.
 	Outcome *Outcome `json:"outcome,omitempty"`
-	Error   string   `json:"error,omitempty"`
+	// TaskStates are an array's tasks' states by index: queued, running, then
+	// how each ended (FollowTasks while it runs, finish once it ended).
+	TaskStates map[int]string `json:"taskStates,omitempty"`
+	Error      string         `json:"error,omitempty"`
 
 	// Host and PID are where a local job runs.
 	Host string `json:"host,omitempty"`

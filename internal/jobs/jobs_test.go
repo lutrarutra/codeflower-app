@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -445,6 +446,9 @@ func TestBrokerArrayHistoryAndLost(t *testing.T) {
 	if loaded.State != StateFailed || loaded.Outcome == nil || loaded.Outcome.Done != 2 || loaded.Outcome.Failed != 1 {
 		t.Fatalf("array: %+v %+v", loaded, loaded.Outcome)
 	}
+	if want := map[int]string{1: StateDone, 2: StateDone, 3: StateFailed}; !maps.Equal(loaded.TaskStates, want) {
+		t.Fatalf("tasks: %v, want %v", loaded.TaskStates, want)
+	}
 	// The single job left no result and the history does not know it: lost,
 	// after a few polls.
 	for range missingPolls - 1 {
@@ -459,6 +463,55 @@ func TestBrokerArrayHistoryAndLost(t *testing.T) {
 	}
 	if _, err := broker.Submit(ctx, Request{Command: []string{"python"}, Workdir: "/data/output/out", After: []string{single.ID}}); err == nil {
 		t.Fatal("waiting for a lost job must be refused")
+	}
+}
+
+func TestBrokerArrayTaskStates(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("batch jobs need Linux or macOS")
+	}
+	broker, _, state := newTestBroker(t, config.Jobs{})
+	ctx := context.Background()
+	array, err := broker.Submit(ctx, Request{Command: []string{"python"}, Workdir: "/data/output/out", Array: "1-4"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[int]string{1: StateQueued, 2: StateQueued, 3: StateQueued, 4: StateQueued}
+	if !maps.Equal(array.TaskStates, want) {
+		t.Fatalf("submitted: %v", array.TaskStates)
+	}
+	// Two tasks started (their sandboxes opened their output) and one of them
+	// ended: the tasks show it before the scheduler's next poll, and so does the job.
+	logs := filepath.Join(state, "jobs", array.ID)
+	for _, name := range []string{"output-1.log", "output-2.log"} {
+		if err := os.WriteFile(filepath.Join(logs, name), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	one := 1
+	WriteResult(broker.Ledger.JobDir(array.ID), Result{Index: &one, ExitCode: 0})
+	broker.FollowTasks()
+	loaded, _ := broker.Ledger.Load(array.ID)
+	want = map[int]string{1: StateDone, 2: StateRunning, 3: StateQueued, 4: StateQueued}
+	if !maps.Equal(loaded.TaskStates, want) || loaded.State != StateRunning || loaded.Started == nil {
+		t.Fatalf("following: %+v", loaded)
+	}
+	public, _ := os.ReadFile(filepath.Join(logs, RecordFile))
+	if !strings.Contains(string(public), `"taskStates": {`) {
+		t.Fatalf("the project's copy has no task states: %s", public)
+	}
+	// Cancelled: the task that ended keeps how it did, the others were cancelled.
+	cancelled, err := broker.Cancel(ctx, array.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = map[int]string{1: StateDone, 2: StateCancelled, 3: StateCancelled, 4: StateCancelled}
+	if !maps.Equal(cancelled.TaskStates, want) {
+		t.Fatalf("cancelled: %v", cancelled.TaskStates)
+	}
+	broker.FollowTasks()
+	if loaded, _ := broker.Ledger.Load(array.ID); !maps.Equal(loaded.TaskStates, want) || len(broker.arrays) != 0 {
+		t.Fatalf("an ended array is not followed: %v %v", loaded.TaskStates, broker.arrays)
 	}
 }
 

@@ -69,6 +69,8 @@ type Tracker struct {
 	// a result after missingPolls is lost.
 	missing   map[string]int
 	lastError string
+	// arrays are the active arrays whose tasks FollowTasks reads.
+	arrays map[string]bool
 }
 
 const missingPolls = 2
@@ -123,6 +125,7 @@ func (b *Broker) Run(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	nextPoll := time.Now()
+	nextTasks := time.Now()
 	for {
 		select {
 		case <-ctx.Done():
@@ -140,6 +143,10 @@ func (b *Broker) Run(ctx context.Context) {
 		if !time.Now().Before(nextPoll) {
 			b.Poll(ctx)
 			nextPoll = time.Now().Add(b.Settings.Poll)
+		}
+		if !time.Now().Before(nextTasks) {
+			b.FollowTasks()
+			nextTasks = time.Now().Add(tasksEvery)
 		}
 	}
 }
@@ -342,6 +349,8 @@ func (b *Broker) Submit(ctx context.Context, request Request) (*Record, error) {
 		return fail(fmt.Errorf("the scheduler refused the job: %w", err))
 	}
 	record.SchedulerID, record.State = schedulerID, StateQueued
+	record.TaskStates = b.taskStates(record, "")
+	b.followArray(record)
 	if err := b.Ledger.Save(record); err != nil {
 		return record, err
 	}
@@ -381,6 +390,8 @@ func (t *Tracker) Cancel(ctx context.Context, id string) (*Record, error) {
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	record.State, record.Ended = StateCancelled, &now
+	// Its tasks that ended keep how they did; the others were cancelled.
+	record.TaskStates = t.taskStates(record, StateCancelled)
 	if err := t.Ledger.Save(record); err != nil {
 		return record, err
 	}
@@ -412,6 +423,7 @@ func (t *Tracker) Poll(ctx context.Context) {
 			continue
 		}
 		active = append(active, record)
+		t.followArray(record)
 	}
 	if len(active) == 0 {
 		return
@@ -501,6 +513,7 @@ func (t *Tracker) finish(ctx context.Context, records []*Record, hints map[strin
 	for _, item := range waiting {
 		record := item.record
 		outcome := Outcome{}
+		tasks := map[int]string{}
 		var exit *int
 		complete := true
 		var started, ended time.Time
@@ -508,8 +521,10 @@ func (t *Tracker) finish(ctx context.Context, records []*Record, hints map[strin
 			if result, ok := item.results[index]; ok {
 				if result.ExitCode == 0 {
 					outcome.Done++
+					tasks[index] = StateDone
 				} else {
 					outcome.Failed++
+					tasks[index] = StateFailed
 				}
 				code := result.ExitCode
 				exit = &code
@@ -544,7 +559,9 @@ func (t *Tracker) finish(ctx context.Context, records []*Record, hints map[strin
 				complete = false
 			default:
 				outcome.Lost++
+				category = StateLost
 			}
+			tasks[index] = category
 		}
 		if outcome.Lost > 0 && t.missing[record.ID] < missingPolls {
 			// Results written on another node may take a moment to show here.
@@ -568,6 +585,7 @@ func (t *Tracker) finish(ctx context.Context, records []*Record, hints map[strin
 		}
 		if record.Array != "" {
 			record.Outcome = &outcome
+			record.TaskStates = tasks
 		} else {
 			record.ExitCode = exit
 		}
