@@ -218,6 +218,7 @@ func (options *sandboxOptions) applyConfig() error {
 	}
 	options.userConfig = loaded
 	options.useDirectories(loaded)
+	sandbox.SetImageDir(loaded.ImageDirectory())
 	if !options.changed("engine") && os.Getenv("CODEFLOWER_ENGINE") == "" && loaded.Engine != "" {
 		options.engine = loaded.Engine
 	}

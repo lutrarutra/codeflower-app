@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"codeflower-app/internal/config"
 	"codeflower-app/internal/reproduce"
 	"codeflower-app/internal/sandbox"
 )
@@ -92,6 +93,9 @@ pipeline failed, 130 stopped (Ctrl-C).`,
 		RunE: func(command *cobra.Command, args []string) error {
 			if options.output == "" {
 				return fmt.Errorf("--output is required: the folder for the results and the report")
+			}
+			if loaded, err := config.Load(config.Directory("")); err == nil {
+				sandbox.SetImageDir(loaded.ImageDirectory())
 			}
 			if options.engine != "auto" && sandbox.EngineLabel(options.engine) == options.engine {
 				return fmt.Errorf("--engine must be auto, %s", strings.Join(sandbox.EngineNames, ", "))

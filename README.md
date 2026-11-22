@@ -258,6 +258,7 @@ image: ""                  # --image
 isolate_network: false     # --isolate-network
 projects_dir: ~/codeflower/projects   # --projects-dir
 env_dir: /scratch/$USER/codeflower    # --env-dir (default: unset, in the project)
+image_dir: /shared/$USER/images   # $CODEFLOWER_IMAGE_DIR (default ~/codeflower/images); set, Podman also keeps a .tar copy here
 skills: [~/more-skills]    # more skills folders to mount in every sandbox
 agents:                    # claude, codex, dsh or opencode
   claude:

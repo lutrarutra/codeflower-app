@@ -71,6 +71,9 @@ func checkCommand() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			out := os.Stdout
+			if loaded, err := config.Load(config.Directory(configDirectory)); err == nil {
+				sandbox.SetImageDir(loaded.ImageDirectory())
+			}
 			image, err := imageName(image, imageTag)
 			if err != nil {
 				return err

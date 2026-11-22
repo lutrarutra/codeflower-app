@@ -70,11 +70,12 @@ func IsPublished(image string) bool {
 	return ok
 }
 
-// ImageDirectory holds the Apptainer image files the app downloads:
-// $CODEFLOWER_IMAGE_DIR, or ~/codeflower/images next to the projects.
+// ImageDirectory holds the Apptainer image files the app downloads, and
+// Podman's saved copies: $CODEFLOWER_IMAGE_DIR, else the config's image_dir,
+// else ~/codeflower/images next to the projects.
 func ImageDirectory() string {
-	if directory := os.Getenv("CODEFLOWER_IMAGE_DIR"); directory != "" {
-		return expandHome(directory)
+	if directory := chosenImageDirectory(); directory != "" {
+		return directory
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -175,7 +176,9 @@ func EnsureImage(ctx context.Context, engine EngineStatus, image string, out io.
 	if !errors.Is(err, ErrNoImage) {
 		return err
 	}
-	fmt.Fprintf(out, "Downloading the sandbox image %s (a few GB, once)…\n", PublishedName(image))
+	if savedArchive(engine, image) == "" {
+		fmt.Fprintf(out, "Downloading the sandbox image %s (a few GB, once)…\n", PublishedName(image))
+	}
 	return pullImage(ctx, engine, image, false, out)
 }
 
@@ -206,16 +209,40 @@ func pullImage(ctx context.Context, engine EngineStatus, image string, refresh b
 	case EngineDocker:
 		return pullDocker(ctx, name, out)
 	case EnginePodman:
-		command := exec.CommandContext(ctx, engine.Executable, "pull", name)
-		command.Stdout, command.Stderr = out, out
-		if err := command.Run(); err != nil {
-			return fmt.Errorf("podman could not download %s: %w", name, err)
-		}
-		return nil
+		return pullPodman(ctx, engine, name, tag, refresh, out)
 	case EngineApptainer:
 		return pullApptainer(ctx, engine.Executable, name, tag, refresh, out)
 	}
 	return fmt.Errorf("unknown engine %q", engine.Name)
+}
+
+// pullPodman downloads the image with Podman. With the image folder chosen, it
+// loads the saved copy instead (unless refreshing), and saves one after
+// downloading, for machines whose Podman storage does not last.
+func pullPodman(ctx context.Context, engine EngineStatus, name, tag string, refresh bool, out io.Writer) error {
+	archive := publishedArchive(tag)
+	if archive != "" && !refresh {
+		if _, err := os.Stat(archive); err == nil {
+			fmt.Fprintf(out, "Loading the sandbox image %s from %s…\n", name, archive)
+			err := loadArchive(ctx, engine, archive, name)
+			if err == nil {
+				return nil
+			}
+			fmt.Fprintf(out, "Could not load it (%v); downloading it instead\n", err)
+		}
+	}
+	command := exec.CommandContext(ctx, engine.Executable, "pull", name)
+	command.Stdout, command.Stderr = out, out
+	if err := command.Run(); err != nil {
+		return fmt.Errorf("podman could not download %s: %w", name, err)
+	}
+	if archive != "" {
+		fmt.Fprintf(out, "Saving a copy in %s, to load instead of downloading it again…\n", archive)
+		if err := saveArchive(ctx, engine, name, archive); err != nil && ctx.Err() == nil {
+			fmt.Fprintf(out, "Could not save it: %v\n", err)
+		}
+	}
+	return nil
 }
 
 func pullDocker(ctx context.Context, name string, out io.Writer) error {

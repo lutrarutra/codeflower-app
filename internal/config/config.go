@@ -137,6 +137,14 @@ type Config struct {
 	// when --env-dir is not given; each project gets a subfolder. Unset, they
 	// stay in the project.
 	EnvDir string `yaml:"env_dir"`
+	// ImageDir: the folder of the images the app downloads, when
+	// $CODEFLOWER_IMAGE_DIR is not set (default ~/codeflower/images):
+	// Apptainer's .sif files, and the copy (.tar) batch jobs' nodes load.
+	// Set (here or in the variable), Podman also saves a copy of each build
+	// of the published image it downloads there, and loads it instead of
+	// downloading again, for machines whose Podman storage does not last
+	// (per job on clusters).
+	ImageDir string `yaml:"image_dir"`
 	// Skills: more folders of skills, mounted read-only in every sandbox
 	// besides <config dir>/skills; relative paths are in the config directory.
 	Skills []string `yaml:"skills"`
@@ -395,6 +403,11 @@ func (c *Config) ProjectsDirectory() string {
 // EnvDirectory is env_dir, or "".
 func (c *Config) EnvDirectory() string {
 	return c.path(c.EnvDir)
+}
+
+// ImageDirectory is image_dir, or "".
+func (c *Config) ImageDirectory() string {
+	return c.path(c.ImageDir)
 }
 
 // path expands ~ and $VARIABLES in a folder of the config; a relative one is

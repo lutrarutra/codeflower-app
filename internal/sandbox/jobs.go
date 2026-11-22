@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -160,21 +159,8 @@ func saveImageArchive(ctx context.Context, engine EngineStatus, image, archive s
 	if _, err := os.Stat(archive); err == nil {
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(archive), 0o755); err != nil {
-		log(fmt.Sprintf("jobs: could not save the image for the jobs' nodes: %v", err))
-		return
-	}
-	temporary := archive + ".part-" + randomID()[:6]
-	defer os.Remove(temporary)
 	log(fmt.Sprintf("jobs: saving the image to %s for the jobs' nodes (once)…", archive))
-	output, err := exec.CommandContext(ctx, engine.Executable, "save", "--format", "oci-archive", "-o", temporary, image).CombinedOutput()
-	if err != nil {
-		if ctx.Err() == nil {
-			log(fmt.Sprintf("jobs: could not save the image: %v: %s", err, strings.TrimSpace(string(output))))
-		}
-		return
-	}
-	if err := os.Rename(temporary, archive); err != nil {
+	if err := saveArchive(ctx, engine, image, archive); err != nil && ctx.Err() == nil {
 		log(fmt.Sprintf("jobs: could not save the image: %v", err))
 	}
 }
@@ -342,7 +328,7 @@ func runJob(ctx context.Context, spec jobs.Spec, index *int, stderr io.Writer) (
 func jobImage(ctx context.Context, engine EngineStatus, spec jobs.Spec, log func(string)) error {
 	if engine.Name == EngineApptainer {
 		if _, err := os.Stat(spec.Image); err != nil {
-			return fmt.Errorf("the image %s is not on this node: put CODEFLOWER_IMAGE_DIR on a filesystem every node shares", spec.Image)
+			return fmt.Errorf("the image %s is not on this node: put the image folder (image_dir in the config, or CODEFLOWER_IMAGE_DIR) on a filesystem every node shares", spec.Image)
 		}
 		return nil
 	}
@@ -353,20 +339,11 @@ func jobImage(ctx context.Context, engine EngineStatus, spec jobs.Spec, log func
 	if spec.ImageArchive != "" {
 		if _, statErr := os.Stat(spec.ImageArchive); statErr == nil {
 			log("loading the image from " + spec.ImageArchive)
-			output, loadErr := exec.CommandContext(ctx, engine.Executable, "load", "-i", spec.ImageArchive).CombinedOutput()
+			loadErr := loadArchive(ctx, engine, spec.ImageArchive, spec.Image)
 			if loadErr == nil {
-				// An OCI archive loads without its name: give it back.
-				if CheckImage(ctx, engine, spec.Image) != nil {
-					if id := loadedImage(string(output)); id != "" {
-						_ = exec.CommandContext(ctx, engine.Executable, "tag", id, spec.Image).Run()
-					}
-				}
-				if CheckImage(ctx, engine, spec.Image) == nil {
-					return nil
-				}
-			} else {
-				log(fmt.Sprintf("could not load it: %v: %s", loadErr, strings.TrimSpace(string(output))))
+				return nil
 			}
+			log(fmt.Sprintf("could not load it: %v", loadErr))
 		}
 	}
 	if IsPublished(spec.Image) {

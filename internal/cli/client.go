@@ -19,6 +19,7 @@ import (
 	"codeflower-app/internal/client"
 	"codeflower-app/internal/config"
 	"codeflower-app/internal/notify"
+	"codeflower-app/internal/sandbox"
 	"codeflower-app/internal/tray"
 )
 
@@ -78,6 +79,7 @@ call the quit off. Sandboxes running elsewhere keep running.`,
 			if err != nil {
 				loaded = &config.Config{}
 			}
+			sandbox.SetImageDir(loaded.ImageDirectory())
 			if loaded.Client.ConnectOnly {
 				connectOnly = true
 			}

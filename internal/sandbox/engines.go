@@ -524,7 +524,7 @@ func ImageHelp(engine, image string) []Step {
 	case engine == EngineApptainer:
 		return []Step{
 			{Text: "Download it once, on a node with internet access (on a cluster, the login node; compute nodes often have none):", Command: pull},
-			{Text: "It is saved in " + ImageDirectory() + " as " + SIFName + " (set CODEFLOWER_IMAGE_DIR to keep it elsewhere). Or convert it yourself and pass --image FILE.sif:", Command: "apptainer pull codeflower-sandbox.sif docker://" + name},
+			{Text: "It is saved in " + ImageDirectory() + " as " + SIFName + " (image_dir in the config or CODEFLOWER_IMAGE_DIR keeps it elsewhere). Or convert it yourself and pass --image FILE.sif:", Command: "apptainer pull codeflower-sandbox.sif docker://" + name},
 		}
 	}
 	return []Step{{Text: "Download it (starting a sandbox also does this):", Command: pull}}

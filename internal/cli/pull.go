@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"codeflower-app/internal/config"
 	"codeflower-app/internal/sandbox"
 )
 
@@ -22,7 +23,11 @@ is made for; --image-tag downloads another release (latest for the newest, or
 "codeflower sandbox", "codeflower run" and "codeflower task" download it on first use; on a
 cluster, run this once on the login node, as compute nodes often have no
 internet access. Apptainer keeps it in ` + sandbox.ImageDirectory() + ` as
-` + sandbox.SIFName + ` (set CODEFLOWER_IMAGE_DIR to keep it elsewhere).
+` + sandbox.SIFName + ` (image_dir in the config or CODEFLOWER_IMAGE_DIR keeps it
+elsewhere).
+With CODEFLOWER_IMAGE_DIR or image_dir in the config set, Podman also saves a
+copy (.tar) there, which it loads instead of downloading again where its
+storage does not last.
 
 Claude Code is not in the image, whose license does not allow passing it on:
 this also downloads the version the image needs from npm into
@@ -36,6 +41,9 @@ this also downloads the version the image needs from npm into
 			engine, err := sandbox.ChooseEngine(sandbox.DetectEngines(command.Context()), engineName, "")
 			if err != nil {
 				return engineMissing(os.Stderr, engine, err)
+			}
+			if loaded, err := config.Load(config.Directory("")); err == nil {
+				sandbox.SetImageDir(loaded.ImageDirectory())
 			}
 			ctx, stop := signal.NotifyContext(command.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()

@@ -508,6 +508,7 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	sandbox.SetImageDir(loaded.ImageDirectory())
 	apiKeys, err := loaded.APIKeys()
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
