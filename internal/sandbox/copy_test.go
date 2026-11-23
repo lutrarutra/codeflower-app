@@ -32,7 +32,8 @@ func writableTempDir(t *testing.T) string {
 	return dir
 }
 
-var past = time.Date(2024, 3, 1, 12, 30, 15, 123456789, time.UTC)
+// past keeps 100 ns steps, the finest times Windows (NTFS) keeps.
+var past = time.Date(2024, 3, 1, 12, 30, 15, 123456700, time.UTC)
 
 // dataTree makes a folder like a workspace: data files with old
 // modification times, a symbolic link, a hard link and a read-only folder.
@@ -77,7 +78,8 @@ func TestACopyKeepsTimesLinksAndModes(t *testing.T) {
 	if err != nil || !info.ModTime().Equal(past) {
 		t.Fatalf("modification time %v, %v", info.ModTime(), err)
 	}
-	if folder, _ := os.Stat(filepath.Join(target, "raw")); folder.Mode().Perm() != 0o555 || !folder.ModTime().Equal(past) {
+	if folder, _ := os.Stat(filepath.Join(target, "raw")); (runtime.GOOS != "windows" && folder.Mode().Perm() != 0o555) ||
+		!folder.ModTime().Equal(past) {
 		t.Fatalf("folder %v %v", folder.Mode(), folder.ModTime())
 	}
 	if runtime.GOOS != "windows" {
