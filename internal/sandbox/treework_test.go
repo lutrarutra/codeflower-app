@@ -70,9 +70,9 @@ func TestProgressHearsTheCount(t *testing.T) {
 	progressEvery = time.Millisecond
 	t.Cleanup(func() { progressEvery = before })
 	var heard atomic.Int64
-	m, stop := newMeter(func(doing string, files int64) {
-		if doing == "Removing" {
-			heard.Store(files)
+	m, stop := newMeter(func(report ProgressReport) {
+		if report.Doing == "Removing" {
+			heard.Store(report.Files)
 		}
 	})
 	m.phase("Removing")

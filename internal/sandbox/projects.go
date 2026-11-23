@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -219,7 +218,7 @@ func ListProjects(directory, envDir string) ([]Project, error) {
 	var projects []Project
 	for _, entry := range entries {
 		path := filepath.Join(expandHome(directory), entry.Name())
-		if isRemoving(path) || !isDirectory(path) || !IsProject(path) {
+		if isRemoving(path) || isStaging(path) || !isDirectory(path) || !IsProject(path) {
 			continue
 		}
 		if project, err := OpenProject(path, envDir); err == nil {
@@ -283,16 +282,25 @@ func (p Project) destination(target, envDir string) (string, string, string, err
 }
 
 // CopyProject copies the project to the folder target, with its settings,
-// allowlist and env folder. The copy gets a new key and certificate, so
-// links to the original do not open it, and no port, which the original
-// keeps. Runs' connection files and keys (instances/, run/) are left out.
-// A copy that fails, or that ctx stops, is removed again.
-func CopyProject(ctx context.Context, p Project, target, envDir string, progress Progress) (copied Project, err error) {
+// allowlist, env folder and workspace folder. The copy gets a new key and
+// certificate, so links to the original do not open it, and no port, which
+// the original keeps. Runs' connection files and keys (instances/, run/)
+// are left out. The folders are copied into hidden ones that take their
+// names once all are complete: a copy that fails, or that ctx stops, keeps
+// them for the same copy to continue (Transfer).
+func CopyProject(ctx context.Context, p Project, target, envDir string, progress Progress) (Project, error) {
 	if err := p.checkStopped("copy"); err != nil {
+		return Project{}, err
+	}
+	transfer, resuming, err := p.openTransfer(TransferCopy)
+	if err != nil {
 		return Project{}, err
 	}
 	target, envTarget, workspaceTarget, err := p.destination(target, envDir)
 	if err != nil {
+		return Project{}, err
+	}
+	if err := p.checkResumes(transfer, resuming, target); err != nil {
 		return Project{}, err
 	}
 	if envTarget != "" && envTarget == p.Env {
@@ -303,37 +311,52 @@ func CopyProject(ctx context.Context, p Project, target, envDir string, progress
 		return Project{}, fmt.Errorf("the copy would share the workspace folder %s with the original: "+
 			"give it another folder name", p.Workspace)
 	}
+	if err := transfer.checkStaging(target, envTarget, workspaceTarget); err != nil {
+		return Project{}, err
+	}
+	type part struct {
+		from, to string
+		skip     map[string]bool
+	}
+	parts := []part{{p.State, target, map[string]bool{"instances": true, "run": true}}}
+	if p.Env != "" {
+		parts = append(parts, part{p.Env, envTarget, nil})
+	}
+	if p.Workspace != "" {
+		parts = append(parts, part{p.Workspace, workspaceTarget, nil})
+	}
+	transfer.To = target
+	for _, part := range parts {
+		if !transfer.ours(stagingPath(part.to)) {
+			transfer.Partial = append(transfer.Partial, stagingPath(part.to))
+		}
+	}
+	// Before copying, so even a copy that is killed is found again.
+	if err := writeTransfer(p.State, transfer); err != nil {
+		return Project{}, err
+	}
 	m, stop := newMeter(progress)
 	defer stop()
-	defer func() {
-		if err != nil {
-			m.phase("Removing the partial copy of")
-			cleanup := m.work(context.Background())
-			for _, path := range []string{envTarget, workspaceTarget, target, SettingsFile(target), DefaultAllowlist(target)} {
-				if path != "" {
-					cleanup.remove(path)
-				}
-			}
-		}
-	}()
 	work := m.work(ctx)
-	m.phase("Copying")
-	if err := work.copy(p.State, target, map[string]bool{"instances": true, "run": true}); err != nil {
-		return Project{}, fmt.Errorf("copying the project: %w", err)
+	for _, part := range parts {
+		m.phase("Copying")
+		if err := work.copy(part.from, stagingPath(part.to), part.skip); err != nil {
+			return Project{}, fmt.Errorf("copying %s: %w", part.from, err)
+		}
 	}
-	if exists(p.Allowlist()) {
-		if err := copyFile(p.Allowlist(), DefaultAllowlist(target)); err != nil {
+	// All complete: the copies take their names.
+	for index, part := range parts {
+		if err := os.Rename(stagingPath(part.to), part.to); err != nil {
+			for back := index - 1; back >= 0; back-- {
+				os.Rename(parts[back].to, stagingPath(parts[back].to))
+			}
 			return Project{}, err
 		}
 	}
-	if p.Env != "" {
-		if err := work.copy(p.Env, envTarget, nil); err != nil {
-			return Project{}, fmt.Errorf("copying the project's env folder: %w", err)
-		}
-	}
-	if p.Workspace != "" {
-		if err := work.copy(p.Workspace, workspaceTarget, nil); err != nil {
-			return Project{}, fmt.Errorf("copying the project's workspace folder: %w", err)
+	removeTransfer(p.State)
+	if exists(p.Allowlist()) {
+		if err := copyFile(p.Allowlist(), DefaultAllowlist(target)); err != nil {
+			return Project{}, err
 		}
 	}
 	if settings, err := ReadSettings(p.Settings()); err == nil {
@@ -351,10 +374,12 @@ func CopyProject(ctx context.Context, p Project, target, envDir string, progress
 }
 
 // MoveProject moves (or renames) the project to the folder target, with its
-// settings, allowlist and env folder. Its key and port stay: links to it
-// still open it. What is on another file system is copied, and its
-// originals are removed only once everything is in its new place: a move
-// that fails, or that ctx stops, before then is undone. One stopped while
+// settings, allowlist, env folder and workspace folder. Its key and port
+// stay: links to it still open it. What is on another file system is
+// copied, into hidden folders that take their names once everything is
+// copied, and the originals are removed only then. A move that fails, or
+// that ctx stops, before then puts back what it renamed and keeps what it
+// copied for the same move to continue (Transfer). One stopped while
 // removing the originals leaves them for LeftoverRemoval, and returns the
 // moved project with the error.
 func MoveProject(ctx context.Context, p Project, target, envDir string, progress Progress) (Project, error) {
@@ -364,60 +389,102 @@ func MoveProject(ctx context.Context, p Project, target, envDir string, progress
 	if err := p.checkNoActiveJobs("move"); err != nil {
 		return Project{}, err
 	}
+	transfer, resuming, err := p.openTransfer(TransferMove)
+	if err != nil {
+		return Project{}, err
+	}
 	target, envTarget, workspaceTarget, err := p.destination(target, envDir)
 	if err != nil {
 		return Project{}, err
 	}
+	if err := p.checkResumes(transfer, resuming, target); err != nil {
+		return Project{}, err
+	}
+	moves := p.files(target, envTarget, workspaceTarget)
+	for _, move := range moves {
+		if move[0] != move[1] {
+			if err := transfer.checkStaging(move[1]); err != nil {
+				return Project{}, err
+			}
+		}
+	}
+	transfer.To = target
 	m, stop := newMeter(progress)
 	defer stop()
-	type step struct {
-		from, to string
-		copied   bool
-	}
-	var done []step
+	type step struct{ from, to string }
+	// renamed are undone by renaming them back, and copied files removed;
+	// copied folders stay hidden for the next attempt.
+	var renamed, copiedFiles, staged []step
 	undo := func(err error) (Project, error) {
-		m.phase("Removing the partial copy of")
-		cleanup := m.work(context.Background())
-		for index := len(done) - 1; index >= 0; index-- {
-			if done[index].copied {
-				cleanup.remove(done[index].to)
-			} else {
-				os.Rename(done[index].to, done[index].from)
-			}
+		for index := len(renamed) - 1; index >= 0; index-- {
+			os.Rename(renamed[index].to, renamed[index].from)
+		}
+		for _, file := range copiedFiles {
+			os.Remove(file.to)
+		}
+		if len(transfer.Partial) == 0 {
+			removeTransfer(p.State)
 		}
 		return Project{}, err
 	}
 	work := m.work(ctx)
-	for _, move := range p.files(target, envTarget, workspaceTarget) {
+	var copiedEntries int64
+	for _, move := range moves {
 		if !exists(move[0]) || move[0] == move[1] {
 			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(move[1]), 0o700); err != nil {
 			return undo(err)
 		}
-		err := os.Rename(move[0], move[1])
-		if err == nil {
-			done = append(done, step{move[0], move[1], false})
+		staging := stagingPath(move[1])
+		if !transfer.ours(staging) {
+			err := moveRename(move[0], move[1])
+			if err == nil {
+				renamed = append(renamed, step{move[0], move[1]})
+				continue
+			}
+			if !errors.Is(err, syscall.EXDEV) {
+				return undo(fmt.Errorf("moving %s: %w", move[0], err))
+			}
+		}
+		info, err := os.Lstat(move[0])
+		if err != nil {
+			return undo(err)
+		}
+		if !info.IsDir() {
+			if err := copyFile(move[0], move[1]); err != nil {
+				return undo(fmt.Errorf("moving %s: %w", move[0], err))
+			}
+			copiedFiles = append(copiedFiles, step{move[0], move[1]})
 			continue
 		}
-		if !errors.Is(err, syscall.EXDEV) {
-			return undo(fmt.Errorf("moving %s: %w", move[0], err))
+		if !transfer.ours(staging) {
+			transfer.Partial = append(transfer.Partial, staging)
+			// Before copying, so even a move that is killed is found again.
+			if err := writeTransfer(p.State, transfer); err != nil {
+				return undo(err)
+			}
 		}
-		// Recorded first, so a partial copy goes too.
-		done = append(done, step{move[0], move[1], true})
 		m.phase("Copying")
-		if info, statErr := os.Lstat(move[0]); statErr == nil && !info.IsDir() {
-			err = copyFile(move[0], move[1])
-		} else {
-			err = work.copy(move[0], move[1], nil)
-		}
-		if err != nil {
+		if err := work.copy(move[0], staging, nil); err != nil {
 			return undo(fmt.Errorf("moving %s: %w", move[0], err))
+		}
+		copiedEntries += m.files.Load()
+		staged = append(staged, step{move[0], move[1]})
+	}
+	// Everything is copied: the copies take their names.
+	for index, folder := range staged {
+		if err := os.Rename(stagingPath(folder.to), folder.to); err != nil {
+			for back := index - 1; back >= 0; back-- {
+				os.Rename(staged[back].to, stagingPath(staged[back].to))
+			}
+			return undo(err)
 		}
 	}
+	removeTransfer(p.State)
 	moved := Project{Name: filepath.Base(target), State: target, Env: envTarget, Workspace: workspaceTarget}
 	// What was copied is still in its old place (and only that).
-	m.phase("Removing the original of")
+	m.phaseOf("Removing the original of", copiedEntries)
 	original := p
 	if envTarget == p.Env {
 		original.Env = "" // stayed put: it is the moved project's
@@ -450,6 +517,17 @@ func RemoveProject(ctx context.Context, p Project, progress Progress) error {
 	defer stop()
 	m.phase("Removing")
 	work := m.work(ctx)
+	// An unfinished copy or move's partial copies go too.
+	if transfer, found, _ := ReadTransfer(p.State); found {
+		for _, path := range append(transfer.Partial, transfer.Removing...) {
+			if isStaging(path) || isRemoving(path) {
+				if err := work.remove(path); err != nil {
+					return removeError(err)
+				}
+			}
+		}
+		removeTransfer(p.State)
+	}
 	for _, path := range p.toRemove() {
 		if err := work.remove(path); err != nil {
 			return removeError(err)
@@ -532,29 +610,4 @@ func LeftoverRemoval(state, envDir string) (p Project, found bool) {
 		}
 	}
 	return p, false
-}
-
-// copyFile copies a regular file with its permissions.
-func copyFile(source, target string) error {
-	info, err := os.Stat(source)
-	if err != nil {
-		return err
-	}
-	in, err := os.Open(source)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm()|0o200)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return err
-	}
-	if err := out.Close(); err != nil {
-		return err
-	}
-	return os.Chmod(target, info.Mode().Perm())
 }

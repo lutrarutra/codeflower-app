@@ -276,6 +276,10 @@ func projectsShowCommand(options *projectsOptions) *cobra.Command {
 			if _, err := os.Stat(project.Allowlist()); err == nil {
 				line("allowlist", project.Allowlist())
 			}
+			if transfer, found, _ := sandbox.ReadTransfer(project.State); found {
+				line("unfinished", fmt.Sprintf("%s to %s, started %s (run it again to continue, or with --abort)",
+					transfer.Operation, transfer.To, formatTime(transfer.Started)))
+			}
 			settings, err := sandbox.ReadSettings(project.Settings())
 			if errors.Is(err, sandbox.ErrNoSettings) {
 				line("settings", "none saved yet: they are saved when `codeflower sandbox` starts the project")
@@ -322,7 +326,8 @@ func projectsShowCommand(options *projectsOptions) *cobra.Command {
 }
 
 func projectsCopyCommand(options *projectsOptions) *cobra.Command {
-	return &cobra.Command{
+	var abort bool
+	command := &cobra.Command{
 		Use:   "copy PROJECT NEW",
 		Short: "Copy a project, e.g. to try something without changing it",
 		Long: `Copy a project, with its chats, agent logins, workspace, tasks, settings,
@@ -330,32 +335,48 @@ allowlist, env folder and workspace folder. NEW is a name in the projects direct
 folder elsewhere.
 
 The copy gets its own key and certificate, so the original's links do not
-open it, and takes any free port when it starts.`,
+open it, and takes any free port when it starts.
+
+` + transferHelp,
 		Aliases: []string{"cp"},
-		Args:    cobra.ExactArgs(2),
+		Args:    cobra.RangeArgs(1, 2),
 		RunE: func(command *cobra.Command, args []string) error {
-			return options.copyOrMove(command, args, "Copied", sandbox.CopyProject)
+			return options.copyOrMove(command, args, abort, "Copied", sandbox.CopyProject)
 		},
 	}
+	command.Flags().BoolVar(&abort, "abort", false, "drop an unfinished copy: delete what it copied so far")
+	return command
 }
 
 func projectsMoveCommand(options *projectsOptions) *cobra.Command {
-	return &cobra.Command{
+	var abort bool
+	command := &cobra.Command{
 		Use:   "move PROJECT NEW",
 		Short: "Rename a project, or move it to another folder",
 		Long: `Rename a project, or move it to another folder, with its settings,
 allowlist, env folder and workspace folder. NEW is a name in the projects directory, or a
-folder elsewhere. It keeps its key and port, so its links still connect.`,
+folder elsewhere. It keeps its key and port, so its links still connect.
+
+` + transferHelp,
 		Aliases: []string{"mv", "rename"},
-		Args:    cobra.ExactArgs(2),
+		Args:    cobra.RangeArgs(1, 2),
 		RunE: func(command *cobra.Command, args []string) error {
-			return options.copyOrMove(command, args, "Moved", sandbox.MoveProject)
+			return options.copyOrMove(command, args, abort, "Moved", sandbox.MoveProject)
 		},
 	}
+	command.Flags().BoolVar(&abort, "abort", false, "drop an unfinished move: delete what it copied so far")
+	return command
 }
 
+// transferHelp explains how copies between file systems stop and continue.
+const transferHelp = `Between file systems the folders are copied, keeping modification times
+(which make, Snakemake and the like go by) and hard links, several files at a
+time. A copy that is stopped (Ctrl+C) or fails keeps what it copied, hidden;
+the same command again continues it, copying only what is missing, and
+--abort drops it. Until it is complete, the project stays as it was.`
+
 func projectsMoveWorkspaceCommand(options *projectsOptions) *cobra.Command {
-	var intoProject bool
+	var intoProject, abort bool
 	command := &cobra.Command{
 		Use:   "move-workspace PROJECT [DIR]",
 		Short: "Move a project's workspace to another folder, e.g. one with more room",
@@ -367,14 +388,18 @@ workspace is in its settings, so its sandboxes mount it from there; inside
 the sandbox the workspace's path stays the same.
 
 The config's workspace_dir only chooses for new projects: this moves an
-existing one's. What is on another file system is copied, and the original
-is removed once the copy is complete. Refused while a sandbox uses the
-project.`,
+existing one's. Refused while a sandbox uses the project.
+
+` + transferHelp + ` The copy shows how much is left once its files are
+counted, which runs alongside.`,
 		Example: `  codeflower projects move-workspace study42 /groups/lab/me/workspaces
   codeflower projects move-workspace study42 --into-project`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(command *cobra.Command, args []string) error {
-			if intoProject == (len(args) == 2) {
+			if abort && (intoProject || len(args) == 2) {
+				return fmt.Errorf("--abort takes only the project")
+			}
+			if !abort && intoProject == (len(args) == 2) {
 				return fmt.Errorf("give a folder to move the workspace to, or --into-project")
 			}
 			if err := options.directories(); err != nil {
@@ -383,6 +408,9 @@ project.`,
 			project, err := options.open(args[0])
 			if err != nil {
 				return err
+			}
+			if abort {
+				return abortTransfer(command, project)
 			}
 			dir := ""
 			if len(args) == 2 {
@@ -394,13 +422,7 @@ project.`,
 			result, err := sandbox.MoveWorkspace(ctx, project, dir, progress)
 			clear()
 			if err != nil {
-				if result.State != "" {
-					return fmt.Errorf("%w\nRemove what is left of the original yourself", err)
-				}
-				if errors.Is(err, context.Canceled) {
-					return fmt.Errorf("stopped; the workspace of %s is as it was", project.Name)
-				}
-				return err
+				return unfinished(project, err)
 			}
 			where := filepath.Join(result.State, "workspace")
 			if result.Workspace != "" {
@@ -411,17 +433,27 @@ project.`,
 		},
 	}
 	command.Flags().BoolVar(&intoProject, "into-project", false, "move the workspace back into the project folder")
+	command.Flags().BoolVar(&abort, "abort", false, "drop an unfinished move of the workspace: delete what it copied so far")
 	return command
 }
 
-func (options *projectsOptions) copyOrMove(command *cobra.Command, args []string, done string,
+func (options *projectsOptions) copyOrMove(command *cobra.Command, args []string, abort bool, done string,
 	action func(context.Context, sandbox.Project, string, string, sandbox.Progress) (sandbox.Project, error)) error {
+	if abort != (len(args) == 1) {
+		if abort {
+			return fmt.Errorf("--abort takes only the project")
+		}
+		return fmt.Errorf("give the project and where it goes")
+	}
 	if err := options.directories(); err != nil {
 		return err
 	}
 	project, err := options.open(args[0])
 	if err != nil {
 		return err
+	}
+	if abort {
+		return abortTransfer(command, project)
 	}
 	target, err := options.location(args[1])
 	if err != nil {
@@ -441,13 +473,55 @@ func (options *projectsOptions) copyOrMove(command *cobra.Command, args []string
 			}
 			return fmt.Errorf("%w\nRun `codeflower projects remove %s` to finish", err, project.State)
 		}
-		if errors.Is(err, context.Canceled) {
-			return fmt.Errorf("stopped; the project %s is as it was", project.Name)
-		}
-		return err
+		return unfinished(project, err)
 	}
 	fmt.Fprintf(command.OutOrStdout(), "%s %s to %s\nStart it with: codeflower sandbox --continue %s\n",
 		done, project.State, result.State, options.continueName(result))
+	return nil
+}
+
+// unfinished explains a copy or move that stopped or failed: what it kept,
+// and how to go on.
+func unfinished(project sandbox.Project, err error) error {
+	var pending sandbox.PendingTransferError
+	if errors.As(err, &pending) {
+		return err
+	}
+	stopped := errors.Is(err, context.Canceled)
+	transfer, found, _ := sandbox.ReadTransfer(project.State)
+	switch {
+	case found && len(transfer.Partial) > 0:
+		what := "stopped"
+		if !stopped {
+			what = err.Error()
+		}
+		return fmt.Errorf("%s; the project %s is as it was. What was copied to %s is kept: run the same command "+
+			"again to continue, or `codeflower projects %s %s --abort` to delete it",
+			what, project.Name, transfer.To, transfer.Operation, project.State)
+	case found && len(transfer.Removing) > 0:
+		if stopped {
+			return fmt.Errorf("stopped: the workspace is in %s now, but its original is not all removed; "+
+				"run the same command again to finish", transfer.To)
+		}
+		return err
+	case stopped:
+		return fmt.Errorf("stopped; the project %s is as it was", project.Name)
+	}
+	return err
+}
+
+// abortTransfer drops the project's unfinished copy or move.
+func abortTransfer(command *cobra.Command, project sandbox.Project) error {
+	ctx, stop := interruptible()
+	defer stop()
+	progress, clear := projectProgress(os.Stderr, project.Name)
+	transfer, err := sandbox.AbortTransfer(ctx, project, progress)
+	clear()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(command.OutOrStdout(), "Dropped the unfinished %s of %s to %s; the project is as it was\n",
+		transfer.Operation, project.Name, transfer.To)
 	return nil
 }
 
@@ -545,8 +619,8 @@ func projectProgress(out *os.File, name string) (progress sandbox.Progress, clea
 	}
 	// Only the meter's goroutine writes, and clear runs after it stopped.
 	shown := 0
-	progress = func(doing string, files int64) {
-		line := fmt.Sprintf("%s %s: %s files", doing, name, thousands(files))
+	progress = func(report sandbox.ProgressReport) {
+		line := fmt.Sprintf("%s %s: %s", report.Doing, name, progressLine(report))
 		fmt.Fprintf(out, "\r%-*s", shown, line)
 		shown = max(shown, len(line))
 	}
@@ -555,6 +629,55 @@ func projectProgress(out *os.File, name string) (progress sandbox.Progress, clea
 			fmt.Fprintf(out, "\r%*s\r", shown, "")
 		}
 	}
+}
+
+// progressLine says how far a copy, move or removal has come: files and
+// bytes done, of the total as far as counted ("≥" while counting), and the
+// speed of the bytes written.
+func progressLine(report sandbox.ProgressReport) string {
+	of := ""
+	if report.Counted {
+		of = " of "
+	} else if report.TotalFiles > 0 {
+		of = " of ≥"
+	}
+	line := thousands(report.Files)
+	if of != "" {
+		line += of + thousands(max(report.TotalFiles, report.Files))
+	}
+	line += " files"
+	if report.Bytes > 0 || report.TotalBytes > 0 {
+		line += ", " + humanBytes(report.Bytes)
+		if of != "" && report.TotalBytes > 0 {
+			line += of + humanBytes(max(report.TotalBytes, report.Bytes))
+		}
+	}
+	if report.Counted && report.TotalBytes > 0 {
+		line += fmt.Sprintf(" (%d%%)", min(100, report.Bytes*100/report.TotalBytes))
+	} else if report.Counted && report.TotalFiles > 0 {
+		line += fmt.Sprintf(" (%d%%)", min(100, report.Files*100/report.TotalFiles))
+	}
+	if seconds := report.Elapsed.Seconds(); seconds >= 1 && report.Written > 0 {
+		line += ", " + humanBytes(int64(float64(report.Written)/seconds)) + "/s"
+	}
+	return line
+}
+
+// humanBytes writes a size in decimal units: 950 B, 6.3 GB.
+func humanBytes(size int64) string {
+	const unit = 1000
+	if size < unit {
+		return fmt.Sprintf("%d B", size)
+	}
+	value, suffix := float64(size), ""
+	for _, next := range []string{"kB", "MB", "GB", "TB", "PB"} {
+		value /= unit
+		suffix = next
+		if value < unit {
+			break
+		}
+	}
+	return fmt.Sprintf("%.1f %s", value, suffix)
 }
 
 // thousands writes a count with commas: 1,234,567.

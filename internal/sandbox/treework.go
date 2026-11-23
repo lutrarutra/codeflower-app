@@ -15,9 +15,26 @@ import (
 )
 
 // Progress hears how a long copy, move or removal of a project goes, a few
-// times a second: what it does now ("Copying", "Removing") and how many
-// files and folders it has done at that so far. It may be nil.
-type Progress func(doing string, files int64)
+// times a second. It may be nil.
+type Progress func(ProgressReport)
+
+// ProgressReport is how far a copy, move or removal has come.
+type ProgressReport struct {
+	// Doing is what it does now: "Copying", "Removing", ….
+	Doing string
+	// Files are the files and folders done so far, and Bytes the bytes of
+	// the files: copied, or found copied by an earlier, stopped attempt.
+	Files, Bytes int64
+	// Written are the bytes this attempt wrote, for its speed.
+	Written int64
+	// TotalFiles and TotalBytes are what there is to do, as far as counted
+	// yet; Counted says the count is complete. Both zero when nothing is
+	// counted, as counting costs a walk of its own.
+	TotalFiles, TotalBytes int64
+	Counted                bool
+	// Elapsed is the time since Doing started.
+	Elapsed time.Duration
+}
 
 // removeSlots is how many folders a removal works on at once. Removing
 // waits on the disk, not the processor, and network file systems (NFS,
@@ -31,10 +48,14 @@ const readBatch = 1024
 // progressEvery is how often a Progress hears. A variable for tests.
 var progressEvery = 200 * time.Millisecond
 
-// meter counts the files of a copy, move or removal for a Progress.
+// meter counts the files and bytes of a copy, move or removal for a
+// Progress.
 type meter struct {
-	files atomic.Int64
-	doing atomic.Pointer[string]
+	files, bytes, written  atomic.Int64
+	totalFiles, totalBytes atomic.Int64
+	counted                atomic.Bool
+	started                atomic.Int64
+	doing                  atomic.Pointer[string]
 }
 
 // newMeter starts telling progress (when not nil) what the meter counts,
@@ -57,17 +78,67 @@ func newMeter(progress Progress) (m *meter, stop func()) {
 			case <-done:
 				return
 			case <-ticker.C:
-				progress(*m.doing.Load(), m.files.Load())
+				progress(m.report())
 			}
 		}
 	}()
 	return m, func() { close(done); wg.Wait() }
 }
 
+func (m *meter) report() ProgressReport {
+	return ProgressReport{
+		Doing: *m.doing.Load(), Files: m.files.Load(), Bytes: m.bytes.Load(), Written: m.written.Load(),
+		TotalFiles: m.totalFiles.Load(), TotalBytes: m.totalBytes.Load(), Counted: m.counted.Load(),
+		Elapsed: time.Since(time.Unix(0, m.started.Load())),
+	}
+}
+
 // phase starts counting something else.
 func (m *meter) phase(doing string) {
 	m.doing.Store(&doing)
-	m.files.Store(0)
+	for _, count := range []*atomic.Int64{&m.files, &m.bytes, &m.written, &m.totalFiles, &m.totalBytes} {
+		count.Store(0)
+	}
+	m.counted.Store(false)
+	m.started.Store(time.Now().UnixNano())
+}
+
+// phaseOf starts counting something else whose files are known, such as
+// the originals of what was just copied.
+func (m *meter) phaseOf(doing string, files int64) {
+	m.phase(doing)
+	m.totalFiles.Store(files)
+	m.counted.Store(true)
+}
+
+// count totals the files and bytes below path, alongside the work that
+// does them, until it is through or stop is called. Only where the walk is
+// cheap next to the work: a few large files, not millions of small ones.
+func (m *meter) count(path string) (stop func()) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		err := filepath.WalkDir(path, func(_ string, entry fs.DirEntry, err error) error {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if err != nil {
+				return nil
+			}
+			m.totalFiles.Add(1)
+			if entry.Type().IsRegular() {
+				if info, err := entry.Info(); err == nil {
+					m.totalBytes.Add(info.Size())
+				}
+			}
+			return nil
+		})
+		if err == nil {
+			m.counted.Store(true)
+		}
+	}()
+	return func() { cancel(); <-done }
 }
 
 // work starts removing or copying, until ctx ends or the work fails.
@@ -210,69 +281,6 @@ func (w *treeWork) unlink(path, parent string) {
 	case !errors.Is(err, fs.ErrNotExist):
 		w.fail(err)
 	}
-}
-
-// copy copies a folder with its permissions and links; skip names
-// top-level folders that are copied empty.
-func (w *treeWork) copy(source, target string, skip map[string]bool) error {
-	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-		return err
-	}
-	type folder struct {
-		path string
-		mode fs.FileMode
-	}
-	var folders []folder
-	err := filepath.WalkDir(source, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if err := w.err(); err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(source, path)
-		if err != nil {
-			return err
-		}
-		if parent := filepath.Dir(rel); parent != "." && skip[parent] {
-			if entry.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		destination := filepath.Join(target, rel)
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		w.files.Add(1)
-		switch {
-		case entry.Type()&fs.ModeSymlink != 0:
-			link, err := os.Readlink(path)
-			if err != nil {
-				return err
-			}
-			return os.Symlink(link, destination)
-		case entry.IsDir():
-			// Writable while copying into it; its own mode once its contents are in.
-			folders = append(folders, folder{destination, info.Mode().Perm()})
-			return os.Mkdir(destination, 0o700)
-		case info.Mode().IsRegular():
-			return copyFile(path, destination)
-		default:
-			// Sockets and pipes belong to a run, not the project.
-			return nil
-		}
-	})
-	if err != nil {
-		return err
-	}
-	for index := len(folders) - 1; index >= 0; index-- {
-		if err := os.Chmod(folders[index].path, folders[index].mode); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // removeTree removes a path like os.RemoveAll, also below read-only folders.

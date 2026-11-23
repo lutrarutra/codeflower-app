@@ -227,3 +227,14 @@ func TestTheWorkspaceFolderIsMountedAndReported(t *testing.T) {
 		t.Fatal("set for a workspace in the project")
 	}
 }
+
+func TestTheWorkspaceAndEnvFoldersMustBeApart(t *testing.T) {
+	project, _, envDir := testProject(t)
+	if _, err := PrepareWorkspace(project.Env, project.State, project.Env); err == nil {
+		t.Fatal("prepared the env folder as the workspace")
+	}
+	if _, err := MoveWorkspace(context.Background(), project, envDir, nil); err == nil ||
+		!strings.Contains(err.Error(), "must be apart") {
+		t.Fatalf("moved the workspace into the env folder: %v", err)
+	}
+}

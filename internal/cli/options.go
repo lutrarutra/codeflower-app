@@ -395,6 +395,11 @@ func (options sandboxOptions) prepareWith(ctx context.Context, engine sandbox.En
 	if env != "" {
 		fmt.Fprintf(os.Stderr, "  env      %s (software environments and caches)\n", env)
 	}
+	// It started from the project as it was; continuing copies what changed.
+	if transfer, found, _ := sandbox.ReadTransfer(state); found {
+		fmt.Fprintf(os.Stderr, "  note     an unfinished %s of this project to %s is waiting: "+
+			"`codeflower projects %s` continues it once the sandbox stops\n", transfer.Operation, transfer.To, transfer.Operation)
+	}
 	if workspace != "" {
 		fmt.Fprintf(os.Stderr, "  workspace %s\n", workspace)
 	} else if options.configWorkspaceDir != "" && !created {
