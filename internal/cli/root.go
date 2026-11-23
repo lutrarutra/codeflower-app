@@ -26,7 +26,12 @@ type commonOptions struct {
 	// envDirSaved says a project's saved settings chose envDir, even none:
 	// the config's env_dir does not replace it.
 	envDirSaved bool
-	image       string
+	// workspaceDir is --workspace-dir, and configWorkspaceDir the config's
+	// workspace_dir: the one only chooses for new projects
+	// (sandbox.ChooseWorkspace).
+	workspaceDir       string
+	configWorkspaceDir string
+	image              string
 	// imageTag picks a build of the published image instead of --image.
 	imageTag string
 	engine   string
@@ -73,6 +78,10 @@ func addDirectoryFlags(command *cobra.Command, options *commonOptions) {
 	command.Flags().StringVar(&options.envDir, "env-dir", "",
 		"folder for what the projects can download or rebuild (software environments, caches, the chats' browsers), e.g. on scratch, in a subfolder per project "+
 			"(or env_dir in the config; default: in the project)")
+	command.Flags().StringVar(&options.workspaceDir, "workspace-dir", "",
+		"folder for a new project's workspace (the agent's scripts, downloads and results), e.g. on group storage, in a subfolder per project; "+
+			"a project keeps where its workspace is, and codeflower projects move-workspace moves it "+
+			"(or workspace_dir in the config; default: in the project)")
 }
 
 func addProjectsDirFlag(command *cobra.Command, options *commonOptions) {
@@ -111,6 +120,7 @@ func (options *commonOptions) useDirectories(loaded *config.Config) {
 	if options.envDir == "" && !options.envDirSaved {
 		options.envDir = loaded.EnvDirectory()
 	}
+	options.configWorkspaceDir = loaded.WorkspaceDirectory()
 }
 
 func (options commonOptions) validate() error {

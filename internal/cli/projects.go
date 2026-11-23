@@ -122,6 +122,7 @@ Commands take a project's name, or the path of a project folder elsewhere.`,
   codeflower projects show study42
   codeflower projects copy study42 study42-v2
   codeflower projects move study42 /scratch/me/study42
+  codeflower projects move-workspace study42 /groups/lab/me/workspaces
   codeflower projects remove study42-v2`,
 		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
@@ -130,7 +131,7 @@ Commands take a project's name, or the path of a project folder elsewhere.`,
 	}
 	for _, sub := range []*cobra.Command{
 		projectsListCommand(&options), projectsShowCommand(&options), projectsCopyCommand(&options),
-		projectsMoveCommand(&options), projectsRemoveCommand(&options),
+		projectsMoveCommand(&options), projectsMoveWorkspaceCommand(&options), projectsRemoveCommand(&options),
 	} {
 		command.AddCommand(sub)
 	}
@@ -267,6 +268,11 @@ func projectsShowCommand(options *projectsOptions) *cobra.Command {
 			if project.Env != "" {
 				line("env", project.Env)
 			}
+			if project.Workspace != "" {
+				line("workspace", project.Workspace)
+			} else if dir, err := sandbox.SavedWorkspaceDir(project.State); err == nil && dir != "" {
+				line("workspace", sandbox.WorkspaceFolder(dir, project.State)+" (missing: made when the project starts)")
+			}
 			if _, err := os.Stat(project.Allowlist()); err == nil {
 				line("allowlist", project.Allowlist())
 			}
@@ -320,7 +326,7 @@ func projectsCopyCommand(options *projectsOptions) *cobra.Command {
 		Use:   "copy PROJECT NEW",
 		Short: "Copy a project, e.g. to try something without changing it",
 		Long: `Copy a project, with its chats, agent logins, workspace, tasks, settings,
-allowlist and env folder. NEW is a name in the projects directory, or a
+allowlist, env folder and workspace folder. NEW is a name in the projects directory, or a
 folder elsewhere.
 
 The copy gets its own key and certificate, so the original's links do not
@@ -338,7 +344,7 @@ func projectsMoveCommand(options *projectsOptions) *cobra.Command {
 		Use:   "move PROJECT NEW",
 		Short: "Rename a project, or move it to another folder",
 		Long: `Rename a project, or move it to another folder, with its settings,
-allowlist and env folder. NEW is a name in the projects directory, or a
+allowlist, env folder and workspace folder. NEW is a name in the projects directory, or a
 folder elsewhere. It keeps its key and port, so its links still connect.`,
 		Aliases: []string{"mv", "rename"},
 		Args:    cobra.ExactArgs(2),
@@ -346,6 +352,66 @@ folder elsewhere. It keeps its key and port, so its links still connect.`,
 			return options.copyOrMove(command, args, "Moved", sandbox.MoveProject)
 		},
 	}
+}
+
+func projectsMoveWorkspaceCommand(options *projectsOptions) *cobra.Command {
+	var intoProject bool
+	command := &cobra.Command{
+		Use:   "move-workspace PROJECT [DIR]",
+		Short: "Move a project's workspace to another folder, e.g. one with more room",
+		Long: `Move a project's workspace (the agent's scripts, downloads, intermediate and
+processed data) to DIR/PROJECT, e.g. on group storage when the home directory
+has a quota, or back into the project with --into-project. The project keeps
+its chats, logins and settings where they are, and records where its
+workspace is in its settings, so its sandboxes mount it from there; inside
+the sandbox the workspace's path stays the same.
+
+The config's workspace_dir only chooses for new projects: this moves an
+existing one's. What is on another file system is copied, and the original
+is removed once the copy is complete. Refused while a sandbox uses the
+project.`,
+		Example: `  codeflower projects move-workspace study42 /groups/lab/me/workspaces
+  codeflower projects move-workspace study42 --into-project`,
+		Args: cobra.RangeArgs(1, 2),
+		RunE: func(command *cobra.Command, args []string) error {
+			if intoProject == (len(args) == 2) {
+				return fmt.Errorf("give a folder to move the workspace to, or --into-project")
+			}
+			if err := options.directories(); err != nil {
+				return err
+			}
+			project, err := options.open(args[0])
+			if err != nil {
+				return err
+			}
+			dir := ""
+			if len(args) == 2 {
+				dir = absolutePath(args[1])
+			}
+			ctx, stop := interruptible()
+			defer stop()
+			progress, clear := projectProgress(os.Stderr, project.Name)
+			result, err := sandbox.MoveWorkspace(ctx, project, dir, progress)
+			clear()
+			if err != nil {
+				if result.State != "" {
+					return fmt.Errorf("%w\nRemove what is left of the original yourself", err)
+				}
+				if errors.Is(err, context.Canceled) {
+					return fmt.Errorf("stopped; the workspace of %s is as it was", project.Name)
+				}
+				return err
+			}
+			where := filepath.Join(result.State, "workspace")
+			if result.Workspace != "" {
+				where = result.Workspace
+			}
+			fmt.Fprintf(command.OutOrStdout(), "Moved the workspace of %s to %s\n", project.Name, where)
+			return nil
+		},
+	}
+	command.Flags().BoolVar(&intoProject, "into-project", false, "move the workspace back into the project folder")
+	return command
 }
 
 func (options *projectsOptions) copyOrMove(command *cobra.Command, args []string, done string,
@@ -391,7 +457,7 @@ func projectsRemoveCommand(options *projectsOptions) *cobra.Command {
 		Use:   "remove PROJECT",
 		Short: "Delete a project and everything in it",
 		Long: `Delete a project: its chats, agent logins, workspace and tasks, its settings,
-allowlist and env folder. Your input, output and code folders are not touched.
+allowlist, env folder and workspace folder. Your input, output and code folders are not touched.
 It asks first, unless --yes is given.
 
 A removal that is stopped (Ctrl+C) or fails leaves the rest hidden next to
@@ -447,7 +513,7 @@ the project (.PROJECT.removing); running the same command again finishes it.`,
 func confirmRemove(in io.Reader, out io.Writer, project sandbox.Project) bool {
 	fmt.Fprintf(out, "This deletes the project %s: its chats, agent logins, workspace and tasks.\n", project.Name)
 	fmt.Fprintf(out, "  %s\n", project.State)
-	for _, path := range []string{project.Settings(), project.Allowlist(), project.Env} {
+	for _, path := range []string{project.Settings(), project.Allowlist(), project.Env, project.Workspace} {
 		if path != "" {
 			if _, err := os.Lstat(path); err == nil {
 				fmt.Fprintf(out, "  %s\n", path)

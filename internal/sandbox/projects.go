@@ -24,6 +24,9 @@ type Project struct {
 	State string
 	// Env is its folder in the env directory, when it has one there.
 	Env string
+	// Workspace is its workspace folder in a workspace directory, when its
+	// settings put it there; else its workspace is in State.
+	Workspace string
 }
 
 // OpenProject finds the project in the folder state; envDir is the env
@@ -45,7 +48,26 @@ func OpenProject(state, envDir string) (Project, error) {
 			project.Env = env
 		}
 	}
+	project.Workspace = savedWorkspace(absolute)
 	return project, nil
+}
+
+// savedWorkspace is the project's workspace folder elsewhere, when its
+// settings name one and it is there.
+func savedWorkspace(state string) string {
+	dir, err := SavedWorkspaceDir(state)
+	if err != nil || dir == "" {
+		return ""
+	}
+	if workspace := WorkspaceFolder(dir, state); exists(workspace) {
+		return workspace
+	}
+	return ""
+}
+
+// ProjectExists says whether the folder dir (~ expanded) is a project yet.
+func ProjectExists(dir string) bool {
+	return IsProject(expandHome(dir))
 }
 
 // IsProject says whether a folder is a project: it has the layout
@@ -91,8 +113,9 @@ func (p Project) checkNoActiveJobs(what string) error {
 }
 
 // files are the project's paths and where each goes when the project's
-// folder becomes target (and its env folder envTarget).
-func (p Project) files(target, envTarget string) [][2]string {
+// folder becomes target (and its env and workspace folders envTarget and
+// workspaceTarget).
+func (p Project) files(target, envTarget, workspaceTarget string) [][2]string {
 	moves := [][2]string{
 		{p.State, target},
 		{p.Settings(), SettingsFile(target)},
@@ -101,6 +124,9 @@ func (p Project) files(target, envTarget string) [][2]string {
 	}
 	if p.Env != "" {
 		moves = append(moves, [2]string{p.Env, envTarget})
+	}
+	if p.Workspace != "" {
+		moves = append(moves, [2]string{p.Workspace, workspaceTarget})
 	}
 	return moves
 }
@@ -147,7 +173,7 @@ func (p Project) LastStarted() time.Time {
 func (p Project) Size() (total int64, complete bool) {
 	complete = true
 	seen := map[[2]uint64]bool{}
-	for _, move := range p.files("", "") {
+	for _, move := range p.files("", "", "") {
 		if !exists(move[0]) {
 			continue
 		}
@@ -205,11 +231,11 @@ func ListProjects(directory, envDir string) ([]Project, error) {
 }
 
 // destination checks that a project can be made at target, and returns the
-// absolute target and its env folder.
-func (p Project) destination(target, envDir string) (string, string, error) {
+// absolute target and its env and workspace folders.
+func (p Project) destination(target, envDir string) (string, string, string, error) {
 	absolute, err := filepath.Abs(expandHome(target))
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	outside := func(path string) error {
 		if path == p.State {
@@ -222,16 +248,16 @@ func (p Project) destination(target, envDir string) (string, string, error) {
 	}
 	// Before making its parent, and once resolved like the project's own path.
 	if err := outside(absolute); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	if err := os.MkdirAll(filepath.Dir(absolute), 0o700); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	if parent, err := filepath.EvalSymlinks(filepath.Dir(absolute)); err == nil {
 		absolute = filepath.Join(parent, filepath.Base(absolute))
 	}
 	if err := outside(absolute); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	envTarget := ""
 	if p.Env != "" {
@@ -240,12 +266,20 @@ func (p Project) destination(target, envDir string) (string, string, error) {
 			envTarget = EnvFolder(expandHome(envDir), absolute)
 		}
 	}
-	for _, move := range p.files(absolute, envTarget) {
+	workspaceTarget := ""
+	if p.Workspace != "" {
+		workspaceTarget = WorkspaceFolder(filepath.Dir(p.Workspace), absolute)
+	}
+	for _, move := range p.files(absolute, envTarget, workspaceTarget) {
+		// The env and workspace folders stay put when the folder's name does.
+		if move[0] == move[1] {
+			continue
+		}
 		if exists(move[0]) && exists(move[1]) {
-			return "", "", fmt.Errorf("%s already exists", move[1])
+			return "", "", "", fmt.Errorf("%s already exists", move[1])
 		}
 	}
-	return absolute, envTarget, nil
+	return absolute, envTarget, workspaceTarget, nil
 }
 
 // CopyProject copies the project to the folder target, with its settings,
@@ -257,9 +291,17 @@ func CopyProject(ctx context.Context, p Project, target, envDir string, progress
 	if err := p.checkStopped("copy"); err != nil {
 		return Project{}, err
 	}
-	target, envTarget, err := p.destination(target, envDir)
+	target, envTarget, workspaceTarget, err := p.destination(target, envDir)
 	if err != nil {
 		return Project{}, err
+	}
+	if envTarget != "" && envTarget == p.Env {
+		return Project{}, fmt.Errorf("the copy would share the env folder %s with the original: "+
+			"give it another folder name, or another env folder (--env-dir)", p.Env)
+	}
+	if workspaceTarget != "" && workspaceTarget == p.Workspace {
+		return Project{}, fmt.Errorf("the copy would share the workspace folder %s with the original: "+
+			"give it another folder name", p.Workspace)
 	}
 	m, stop := newMeter(progress)
 	defer stop()
@@ -267,7 +309,7 @@ func CopyProject(ctx context.Context, p Project, target, envDir string, progress
 		if err != nil {
 			m.phase("Removing the partial copy of")
 			cleanup := m.work(context.Background())
-			for _, path := range []string{envTarget, target, SettingsFile(target), DefaultAllowlist(target)} {
+			for _, path := range []string{envTarget, workspaceTarget, target, SettingsFile(target), DefaultAllowlist(target)} {
 				if path != "" {
 					cleanup.remove(path)
 				}
@@ -289,6 +331,11 @@ func CopyProject(ctx context.Context, p Project, target, envDir string, progress
 			return Project{}, fmt.Errorf("copying the project's env folder: %w", err)
 		}
 	}
+	if p.Workspace != "" {
+		if err := work.copy(p.Workspace, workspaceTarget, nil); err != nil {
+			return Project{}, fmt.Errorf("copying the project's workspace folder: %w", err)
+		}
+	}
 	if settings, err := ReadSettings(p.Settings()); err == nil {
 		settings.Port = 0
 		if err := settings.Renew(); err != nil {
@@ -300,7 +347,7 @@ func CopyProject(ctx context.Context, p Project, target, envDir string, progress
 	} else if !errors.Is(err, ErrNoSettings) {
 		return Project{}, err
 	}
-	return Project{Name: filepath.Base(target), State: target, Env: envTarget}, nil
+	return Project{Name: filepath.Base(target), State: target, Env: envTarget, Workspace: workspaceTarget}, nil
 }
 
 // MoveProject moves (or renames) the project to the folder target, with its
@@ -317,7 +364,7 @@ func MoveProject(ctx context.Context, p Project, target, envDir string, progress
 	if err := p.checkNoActiveJobs("move"); err != nil {
 		return Project{}, err
 	}
-	target, envTarget, err := p.destination(target, envDir)
+	target, envTarget, workspaceTarget, err := p.destination(target, envDir)
 	if err != nil {
 		return Project{}, err
 	}
@@ -341,8 +388,8 @@ func MoveProject(ctx context.Context, p Project, target, envDir string, progress
 		return Project{}, err
 	}
 	work := m.work(ctx)
-	for _, move := range p.files(target, envTarget) {
-		if !exists(move[0]) {
+	for _, move := range p.files(target, envTarget, workspaceTarget) {
+		if !exists(move[0]) || move[0] == move[1] {
 			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(move[1]), 0o700); err != nil {
@@ -368,10 +415,17 @@ func MoveProject(ctx context.Context, p Project, target, envDir string, progress
 			return undo(fmt.Errorf("moving %s: %w", move[0], err))
 		}
 	}
-	moved := Project{Name: filepath.Base(target), State: target, Env: envTarget}
+	moved := Project{Name: filepath.Base(target), State: target, Env: envTarget, Workspace: workspaceTarget}
 	// What was copied is still in its old place (and only that).
 	m.phase("Removing the original of")
-	for _, path := range p.toRemove() {
+	original := p
+	if envTarget == p.Env {
+		original.Env = "" // stayed put: it is the moved project's
+	}
+	if workspaceTarget == p.Workspace {
+		original.Workspace = ""
+	}
+	for _, path := range original.toRemove() {
 		if err := work.remove(path); err != nil {
 			return moved, fmt.Errorf("the project is in %s now, but removing its original stopped: %w",
 				moved.State, removeError(err))
@@ -415,9 +469,12 @@ func (p Project) toRemove() []string {
 		if p.Env != "" {
 			trash.Env = RemovingPath(p.Env)
 		}
+		if p.Workspace != "" {
+			trash.Workspace = RemovingPath(p.Workspace)
+		}
 	}
-	from := []string{p.Env, p.State, p.Jobs(), p.Allowlist(), p.Settings()}
-	to := []string{trash.Env, trash.State, trash.Jobs(), trash.Allowlist(), trash.Settings()}
+	from := []string{p.Env, p.Workspace, p.State, p.Jobs(), p.Allowlist(), p.Settings()}
+	to := []string{trash.Env, trash.Workspace, trash.State, trash.Jobs(), trash.Allowlist(), trash.Settings()}
 	var paths []string
 	for index, path := range from {
 		if path == "" || !exists(path) {
@@ -463,7 +520,13 @@ func LeftoverRemoval(state, envDir string) (p Project, found bool) {
 			p.Env = env
 		}
 	}
-	for _, path := range []string{p.State, p.Settings(), p.Allowlist(), p.Jobs(), p.Env} {
+	// The settings, which say where the workspace folder is, go last.
+	if dir, err := SavedWorkspaceDir(p.State); err == nil && dir != "" {
+		if workspace := WorkspaceFolder(dir, p.State); exists(workspace) {
+			p.Workspace = workspace
+		}
+	}
+	for _, path := range []string{p.State, p.Settings(), p.Allowlist(), p.Jobs(), p.Env, p.Workspace} {
 		if path != "" && exists(path) {
 			return p, true
 		}

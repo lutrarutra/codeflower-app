@@ -270,3 +270,27 @@ func TestBatchJobsGoWithTheProject(t *testing.T) {
 		t.Fatalf("the jobs folder is still there: %v", err)
 	}
 }
+
+// A project moved to a folder of the same name elsewhere keeps its env
+// folder where it is, instead of finding it in its own way.
+func TestAMoveToAnotherFolderOfTheSameNameKeepsTheEnvFolder(t *testing.T) {
+	project, projects, envDir := testProject(t)
+	target := filepath.Join(filepath.Dir(projects), "elsewhere", "study42")
+	moved, err := MoveProject(context.Background(), project, target, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moved.Env != project.Env || moved.Env != EnvFolder(envDir, moved.State) {
+		t.Fatalf("env folder %s, was %s", moved.Env, project.Env)
+	}
+	if _, err := os.Stat(filepath.Join(moved.Env, "env", "lib.so")); err != nil {
+		t.Fatalf("the env folder lost its files: %v", err)
+	}
+	if _, err := os.Lstat(project.State); !os.IsNotExist(err) {
+		t.Errorf("%s is still there: %v", project.State, err)
+	}
+	if _, err := CopyProject(context.Background(), moved, filepath.Join(projects, "study42"), "", nil); err == nil ||
+		!strings.Contains(err.Error(), "share the env folder") {
+		t.Fatalf("copied onto the original's env folder: %v", err)
+	}
+}

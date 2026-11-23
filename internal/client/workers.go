@@ -567,6 +567,7 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	created := !sandbox.ProjectExists(state)
 	state, err = sandbox.PrepareState(state)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -578,6 +579,15 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
+	}
+	var workspace string
+	workspaceDir, err := sandbox.ChooseWorkspace(state, created, loaded.WorkspaceDirectory(), "")
+	if err == nil && workspaceDir != "" {
+		workspace, err = sandbox.PrepareWorkspace(sandbox.WorkspaceFolder(workspaceDir, state), state)
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
 	}
 	var isolation *sandbox.Isolation
 	if request.IsolateNetwork {
@@ -602,7 +612,7 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(context.Background())
 	run := sandbox.Worker{
 		Token:  sandbox.NewToken(),
-		Engine: engine, Image: image, State: state, Env: env, Binds: binds,
+		Engine: engine, Image: image, State: state, Env: env, Workspace: workspace, Binds: binds,
 		Isolation: isolation, APIKeys: apiKeys, Images: images, MCPServers: loaded.MCPServers(),
 		Plugins: loaded.AllPlugins(), Jobs: jobSettings,
 	}

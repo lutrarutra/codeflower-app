@@ -285,7 +285,9 @@ type preparedSandbox struct {
 	image  string
 	state  string
 	// env is the project's env folder (--env-dir), or "".
-	env       string
+	env string
+	// workspace is the project's workspace folder (--workspace-dir), or "".
+	workspace string
 	binds     []sandbox.Bind
 	isolation *sandbox.Isolation
 	// apiKeys are the agents' keys from the config, by agent.
@@ -348,6 +350,7 @@ func (options sandboxOptions) prepareWith(ctx context.Context, engine sandbox.En
 	if err != nil {
 		return preparedSandbox{}, err
 	}
+	created := !sandbox.ProjectExists(options.stateDirectory())
 	state, err := sandbox.PrepareState(options.stateDirectory())
 	if err != nil {
 		return preparedSandbox{}, err
@@ -355,6 +358,16 @@ func (options sandboxOptions) prepareWith(ctx context.Context, engine sandbox.En
 	var env string
 	if dir := options.envDirectory(state); dir != "" {
 		if env, err = sandbox.PrepareEnv(dir, state); err != nil {
+			return preparedSandbox{}, err
+		}
+	}
+	workspaceDir, err := sandbox.ChooseWorkspace(state, created, options.configWorkspaceDir, options.workspaceDir)
+	if err != nil {
+		return preparedSandbox{}, err
+	}
+	var workspace string
+	if workspaceDir != "" {
+		if workspace, err = sandbox.PrepareWorkspace(sandbox.WorkspaceFolder(workspaceDir, state), state); err != nil {
 			return preparedSandbox{}, err
 		}
 	}
@@ -381,6 +394,12 @@ func (options sandboxOptions) prepareWith(ctx context.Context, engine sandbox.En
 	fmt.Fprintf(os.Stderr, "  project  %s\n", state)
 	if env != "" {
 		fmt.Fprintf(os.Stderr, "  env      %s (software environments and caches)\n", env)
+	}
+	if workspace != "" {
+		fmt.Fprintf(os.Stderr, "  workspace %s\n", workspace)
+	} else if options.configWorkspaceDir != "" && !created {
+		fmt.Fprintf(os.Stderr, "  workspace in the project: workspace_dir is for new projects; "+
+			"codeflower projects move-workspace %s %s moves this one's\n", filepath.Base(state), options.configWorkspaceDir)
 	}
 	if isolation != nil {
 		hosts := sandbox.ProviderHostsOf(agentsRun)
@@ -444,7 +463,7 @@ func (options sandboxOptions) prepareWith(ctx context.Context, engine sandbox.En
 	if !options.engineArgs.IsZero() {
 		fmt.Fprintf(os.Stderr, "  engine   %s\n", options.engineArgs)
 	}
-	return preparedSandbox{engine: engine, image: image, state: state, env: env, binds: binds, isolation: isolation, apiKeys: apiKeys,
+	return preparedSandbox{engine: engine, image: image, state: state, env: env, workspace: workspace, binds: binds, isolation: isolation, apiKeys: apiKeys,
 		images: images, mcpServers: mcpServers, plugins: plugins, resources: options.resources,
 		variables: options.envValues, engineArgs: options.engineArgs, jobs: jobSettings}, nil
 }
@@ -476,6 +495,7 @@ func (p preparedSandbox) worker(agent string) sandbox.Worker {
 		Image:      p.image,
 		State:      p.state,
 		Env:        p.env,
+		Workspace:  p.workspace,
 		Binds:      p.binds,
 		Isolation:  p.isolation,
 		APIKeys:    p.apiKeys,

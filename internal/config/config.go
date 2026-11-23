@@ -130,13 +130,22 @@ type Config struct {
 	IsolateNetwork *bool `yaml:"isolate_network"`
 	// ProjectsDir: the folder of projects started by name, when --projects-dir
 	// is not given (default ~/codeflower/projects). ~ and $VARIABLES are
-	// expanded in it and EnvDir, and relative paths are in the config directory.
+	// expanded in it, EnvDir and WorkspaceDir, and relative paths are in the config directory.
 	ProjectsDir string `yaml:"projects_dir"`
 	// EnvDir: a folder for what the projects can download or rebuild
 	// (software environments, caches, the chats' browsers), e.g. on scratch,
 	// when --env-dir is not given; each project gets a subfolder. Unset, they
 	// stay in the project.
 	EnvDir string `yaml:"env_dir"`
+	// WorkspaceDir: a folder for the workspaces of new projects (the agent's
+	// scripts, downloads, intermediate and processed data), e.g. on group
+	// storage, when --workspace-dir is not given; each project gets a
+	// subfolder. Unlike env_dir, it holds what cannot be made again, so not
+	// on scratch that is cleaned up. A project keeps where its workspace is
+	// in its settings: this only chooses for new projects (codeflower
+	// projects move-workspace moves an existing one's). Unset, it is in the
+	// project.
+	WorkspaceDir string `yaml:"workspace_dir"`
 	// ImageDir: the folder of the images the app downloads, when
 	// $CODEFLOWER_IMAGE_DIR is not set (default ~/codeflower/images):
 	// Apptainer's .sif files, and the copy (.tar) batch jobs' nodes load.
@@ -398,6 +407,11 @@ func (c *Config) resolveKey(section, inline, variable, file string) (string, err
 // ProjectsDirectory is projects_dir, or "".
 func (c *Config) ProjectsDirectory() string {
 	return c.path(c.ProjectsDir)
+}
+
+// WorkspaceDirectory is workspace_dir, or "".
+func (c *Config) WorkspaceDirectory() string {
+	return c.path(c.WorkspaceDir)
 }
 
 // EnvDirectory is env_dir, or "".

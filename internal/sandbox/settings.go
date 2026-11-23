@@ -28,11 +28,14 @@ type Settings struct {
 	IsolateNetwork bool     `yaml:"isolate_network"`
 	Allowlist      string   `yaml:"allowlist"`
 	EnvDir         string   `yaml:"env_dir"`
-	CPUs           int      `yaml:"cpus"`
-	Memory         string   `yaml:"memory"`
-	TimeLimit      string   `yaml:"time_limit"`
-	Env            []string `yaml:"env"`
-	EngineArgs     string   `yaml:"engine_args"`
+	// WorkspaceDir is where the project's workspace is (ChooseWorkspace),
+	// not how it last started: flags and the config do not change it.
+	WorkspaceDir string   `yaml:"workspace_dir"`
+	CPUs         int      `yaml:"cpus"`
+	Memory       string   `yaml:"memory"`
+	TimeLimit    string   `yaml:"time_limit"`
+	Env          []string `yaml:"env"`
+	EngineArgs   string   `yaml:"engine_args"`
 	// Jobs is --jobs: a scheduler, or off; empty follows the config.
 	Jobs          string `yaml:"jobs,omitempty"`
 	Server        bool   `yaml:"server"`
@@ -66,6 +69,7 @@ var settingsComments = map[string]string{
 	"isolate_network": "Cut the sandbox off the network except for its agents' services and the allowlist.",
 	"allowlist":       "Hosts file of an isolated sandbox; empty for the one next to the project.",
 	"env_dir":         "Folder for the software environments and caches; empty for in the project.",
+	"workspace_dir":   "Folder the workspace is in, in a subfolder named after the project; empty for in the project. Move it with codeflower projects move-workspace, not here.",
 	"cpus":            "CPUs the agent may use; 0 for the batch job's allocation.",
 	"memory":          "Memory the agent may use, e.g. 32G; empty for the batch job's allocation.",
 	"time_limit":      "Time the agent has, e.g. 8h; empty for the batch job's time limit.",

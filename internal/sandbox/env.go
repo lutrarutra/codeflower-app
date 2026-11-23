@@ -61,6 +61,8 @@ type WorkerSettings struct {
 	AdvertiseHost string
 	Port          int
 	HostState     string
+	// HostWorkspace is the workspace folder, when it is not in HostState.
+	HostWorkspace string
 	Engine        string
 	SlurmJobID    string
 	AppPID        int
@@ -92,6 +94,10 @@ func WorkerEnvironment(settings WorkerSettings) map[string]string {
 	values["CODEFLOWER_APP_PID"] = itoa(settings.AppPID)
 	// Shown in VS Code next to the worker.
 	values["CODEFLOWER_HOST_STATE"] = settings.HostState
+	// The workspace's own folder, when it is not HostState/workspace.
+	if settings.HostWorkspace != "" {
+		values["CODEFLOWER_HOST_WORKSPACE"] = settings.HostWorkspace
+	}
 	values["CODEFLOWER_ENGINE"] = settings.Engine
 	mounts := make([]mountInfo, 0, len(settings.Binds))
 	for _, bind := range settings.Binds {

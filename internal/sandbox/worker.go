@@ -80,7 +80,10 @@ type Worker struct {
 	State string
 	// Env, when set, is the project's prepared env folder (PrepareEnv),
 	// mounted over the project's software environment and caches.
-	Env           string
+	Env string
+	// Workspace, when set, is the project's prepared workspace folder
+	// (PrepareWorkspace), mounted over the project's own workspace.
+	Workspace     string
 	Binds         []Bind
 	ListenHost    string
 	AdvertiseHost string
@@ -322,6 +325,7 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 		AdvertiseHost: advertise,
 		Port:          port,
 		HostState:     w.State,
+		HostWorkspace: w.Workspace,
 		Engine:        w.Engine.Name,
 		SlurmJobID:    os.Getenv("SLURM_JOB_ID"),
 		AppPID:        os.Getpid(),
@@ -349,8 +353,9 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	if w.PluginsFetch {
 		values[PluginsFetchVariable] = "1"
 	}
-	// env/ and cache/ are separate mounts then, which hard links cannot cross.
-	if w.Env != "" {
+	// env/, cache/ and the workspace are separate mounts then, which hard
+	// links cannot cross.
+	if w.Env != "" || w.Workspace != "" {
 		values["UV_LINK_MODE"] = "copy"
 	}
 	for _, bind := range w.Binds {
@@ -572,7 +577,7 @@ func writeImageKey(state, instanceID, key string) (string, error) {
 // containers the daemon or podman start outside them, are limited here.
 func (w Worker) runEngine(ctx context.Context, instanceID string, values map[string]string, port int, netDirectory string, resources Resources) (int, error) {
 	name := "codeflower-" + instanceID[:8]
-	binds := append(EnvBinds(w.Env, w.State), w.Binds...)
+	binds := append(ProjectBinds(w.Env, w.Workspace, w.State), w.Binds...)
 	engineArgs := w.EngineArgs.forRun(w.Engine.Name, netDirectory == "", w.Stderr)
 	// An agent that sandboxes its commands itself needs user namespaces
 	// (Docker's and Podman's default profiles refuse them); Apptainer has none.

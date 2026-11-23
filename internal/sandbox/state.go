@@ -185,3 +185,47 @@ func EnvBinds(env, state string) []Bind {
 	}
 	return binds
 }
+
+// WorkspaceFolder is the project's workspace in a workspace directory
+// (--workspace-dir), named after the project.
+func WorkspaceFolder(workspaceDir, state string) string {
+	return filepath.Join(workspaceDir, filepath.Base(state))
+}
+
+// ContainerWorkspace is the agent's working directory in the sandbox.
+const ContainerWorkspace = ContainerState + "/workspace"
+
+// PrepareWorkspace creates a project's workspace folder (WorkspaceFolder),
+// which WorkspaceBinds mount over the project's own workspace, and returns
+// its absolute path. Unlike an env folder, it holds what cannot be made
+// again: the agent's scripts, notes, downloads and results.
+func PrepareWorkspace(dir, state string) (string, error) {
+	workspace, err := privateRoot(dir, "workspace")
+	if err != nil {
+		return "", err
+	}
+	if workspace == state || strings.HasPrefix(workspace, state+string(filepath.Separator)) ||
+		strings.HasPrefix(state, workspace+string(filepath.Separator)) {
+		return "", fmt.Errorf("the workspace folder %s must be outside the project %s", workspace, state)
+	}
+	// The mount point.
+	if err := privateDirectory(filepath.Join(state, "workspace")); err != nil {
+		return "", err
+	}
+	return workspace, nil
+}
+
+// WorkspaceBinds mount a project's workspace folder (PrepareWorkspace) over
+// its own workspace. None when workspace is empty: it is in the project.
+func WorkspaceBinds(workspace string) []Bind {
+	if workspace == "" {
+		return nil
+	}
+	return []Bind{{Source: workspace, Target: ContainerWorkspace}}
+}
+
+// ProjectBinds are a project's env and workspace folders' binds, which go
+// over the project's own folders, before the user's.
+func ProjectBinds(env, workspace, state string) []Bind {
+	return append(EnvBinds(env, state), WorkspaceBinds(workspace)...)
+}

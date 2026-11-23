@@ -103,11 +103,14 @@ func (w Worker) jobsMounts(base jobs.Base) (jobs.Base, error) {
 			return base, fmt.Errorf("the project's jobs folder %s is inside the read-write folder %s, where the agent could change jobs", ledger, bind.Source)
 		}
 	}
-	base.Roots = append(base.Roots, ContainerState+"/workspace")
+	base.Roots = append(base.Roots, ContainerWorkspace)
 	for _, bind := range EnvBinds(w.Env, w.State) {
 		if !w.Jobs.EnvWritable && (bind.Target == ContainerState+"/env" || bind.Target == ContainerState+"/env/exports") {
 			bind.ReadOnly = true
 		}
+		base.Mounts = append(base.Mounts, jobs.Mount{Source: bind.Source, Target: bind.Target, ReadOnly: bind.ReadOnly})
+	}
+	for _, bind := range WorkspaceBinds(w.Workspace) {
 		base.Mounts = append(base.Mounts, jobs.Mount{Source: bind.Source, Target: bind.Target, ReadOnly: bind.ReadOnly})
 	}
 	if w.Env == "" && !w.Jobs.EnvWritable {
@@ -229,7 +232,7 @@ func runJob(ctx context.Context, spec jobs.Spec, index *int, stderr io.Writer) (
 		binds = append(binds, Bind{Source: mount.Source, Target: mount.Target, ReadOnly: mount.ReadOnly})
 	}
 	if len(missing) > 0 {
-		return 2, fmt.Errorf("this node does not have %s: the project, its folders and env_dir must be on filesystems every node shares",
+		return 2, fmt.Errorf("this node does not have %s: the project, its folders, env_dir and workspace_dir must be on filesystems every node shares",
 			strings.Join(missing, ", "))
 	}
 	engine, err := ChooseEngine(DetectEngines(ctx), spec.Engine, spec.Image)
@@ -259,8 +262,8 @@ func runJob(ctx context.Context, spec jobs.Spec, index *int, stderr io.Writer) (
 		values["CODEFLOWER_JOB_INDEX"] = strconv.Itoa(*index)
 	}
 	for _, bind := range binds {
-		if bind.Target == ContainerState+"/env" {
-			// env/ and cache/ are separate mounts then, which hard links cannot cross.
+		if bind.Target == ContainerState+"/env" || bind.Target == ContainerWorkspace {
+			// env/, cache/ or the workspace are separate mounts then, which hard links cannot cross.
 			values["UV_LINK_MODE"] = "copy"
 		}
 	}
