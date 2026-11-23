@@ -199,9 +199,12 @@ const ContainerWorkspace = ContainerState + "/workspace"
 // which WorkspaceBinds mount over the project's own workspace, and returns
 // its absolute path. Unlike an env folder, it holds what cannot be made
 // again: the agent's scripts, notes, downloads and results.
-func PrepareWorkspace(dir, state string) (string, error) {
+func PrepareWorkspace(dir, state, env string) (string, error) {
 	workspace, err := privateRoot(dir, "workspace")
 	if err != nil {
+		return "", err
+	}
+	if err := apartFromEnv(workspace, env); err != nil {
 		return "", err
 	}
 	if workspace == state || strings.HasPrefix(workspace, state+string(filepath.Separator)) ||
@@ -213,6 +216,19 @@ func PrepareWorkspace(dir, state string) (string, error) {
 		return "", err
 	}
 	return workspace, nil
+}
+
+// apartFromEnv refuses a workspace folder that is, holds or is in the env
+// folder, e.g. when workspace_dir and env_dir are the same folder.
+func apartFromEnv(workspace, env string) error {
+	if resolved, err := filepath.EvalSymlinks(env); err == nil {
+		env = resolved
+	}
+	if env != "" && (workspace == env || isWithin(workspace, env) || isWithin(env, workspace)) {
+		return fmt.Errorf("the workspace folder %s and the env folder %s must be apart: "+
+			"give workspace_dir and env_dir different folders", workspace, env)
+	}
+	return nil
 }
 
 // WorkspaceBinds mount a project's workspace folder (PrepareWorkspace) over

@@ -367,7 +367,7 @@ func (options sandboxOptions) prepareWith(ctx context.Context, engine sandbox.En
 	}
 	var workspace string
 	if workspaceDir != "" {
-		if workspace, err = sandbox.PrepareWorkspace(sandbox.WorkspaceFolder(workspaceDir, state), state); err != nil {
+		if workspace, err = sandbox.PrepareWorkspace(sandbox.WorkspaceFolder(workspaceDir, state), state, env); err != nil {
 			return preparedSandbox{}, err
 		}
 	}

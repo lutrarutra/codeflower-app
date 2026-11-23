@@ -583,7 +583,7 @@ func (s *Server) startWorker(w http.ResponseWriter, r *http.Request) {
 	var workspace string
 	workspaceDir, err := sandbox.ChooseWorkspace(state, created, loaded.WorkspaceDirectory(), "")
 	if err == nil && workspaceDir != "" {
-		workspace, err = sandbox.PrepareWorkspace(sandbox.WorkspaceFolder(workspaceDir, state), state)
+		workspace, err = sandbox.PrepareWorkspace(sandbox.WorkspaceFolder(workspaceDir, state), state, env)
 	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)

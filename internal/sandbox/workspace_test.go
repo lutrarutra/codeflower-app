@@ -84,7 +84,7 @@ func TestWorkspaceDirFlagCannotHideAWorkspace(t *testing.T) {
 	if chosen, err := ChooseWorkspace(state, false, "", workspaces); err != nil || chosen != workspaces {
 		t.Fatalf("empty workspace: %q %v", chosen, err)
 	}
-	if _, err := PrepareWorkspace(WorkspaceFolder(workspaces, state), state); err != nil {
+	if _, err := PrepareWorkspace(WorkspaceFolder(workspaces, state), state, ""); err != nil {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(WorkspaceFolder(workspaces, state), "data.csv"), "1")
