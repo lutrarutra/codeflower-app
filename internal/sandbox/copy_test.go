@@ -92,8 +92,12 @@ func TestACopyKeepsTimesLinksAndModes(t *testing.T) {
 			t.Fatal("the hard link became two files")
 		}
 	}
-	if m.bytes.Load() != 4000+3+9+4000 {
-		t.Fatalf("counted %d bytes", m.bytes.Load())
+	want := int64(4000 + 3 + 9)
+	if runtime.GOOS != "windows" {
+		want += 4000 // the hard link
+	}
+	if m.bytes.Load() != want {
+		t.Fatalf("counted %d bytes, want %d", m.bytes.Load(), want)
 	}
 }
 
