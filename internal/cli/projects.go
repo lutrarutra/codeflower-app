@@ -173,7 +173,8 @@ file, which can take a while for large projects.`,
 			fmt.Fprintln(table, header+"PATH")
 			for _, project := range projects {
 				saved := "saved"
-				if _, err := sandbox.ReadSettings(project.Settings()); errors.Is(err, sandbox.ErrNoSettings) {
+				if settings, err := sandbox.ReadSettings(project.Settings()); errors.Is(err, sandbox.ErrNoSettings) ||
+					(err == nil && !settings.Started()) {
 					saved = "-"
 				} else if err != nil {
 					saved = "unreadable"
@@ -294,7 +295,7 @@ are kept elsewhere. It reads every file, which can take a while.`,
 					transfer.Operation, transfer.To, formatTime(transfer.Started)))
 			}
 			settings, err := sandbox.ReadSettings(project.Settings())
-			if errors.Is(err, sandbox.ErrNoSettings) {
+			if errors.Is(err, sandbox.ErrNoSettings) || (err == nil && !settings.Started()) {
 				line("settings", "none saved yet: they are saved when `codeflower sandbox` starts the project")
 				return nil
 			}

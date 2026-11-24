@@ -28,6 +28,13 @@ func SavedWorkspaceDir(state string) (string, error) {
 	return settings.WorkspaceDir, err
 }
 
+// WorkspaceMovedIntoProject says whether the project's workspace was moved
+// back into it on purpose (MoveWorkspace), rather than never moved out.
+func WorkspaceMovedIntoProject(state string) bool {
+	settings, err := ReadSettings(SettingsFile(state))
+	return err == nil && settings.WorkspaceInProject
+}
+
 // saveWorkspaceDir records the project's workspace directory in its settings
 // ("" for in the project), making the file when the project has none yet.
 func saveWorkspaceDir(state, dir string) error {
@@ -37,44 +44,83 @@ func saveWorkspaceDir(state, dir string) error {
 		return err
 	}
 	settings.WorkspaceDir = dir
+	settings.WorkspaceInProject = dir == ""
 	return WriteSettings(file, filepath.Base(state), settings)
 }
 
 // ChooseWorkspace decides the workspace directory of the project in state
-// ("" for in the project), and saves it in the project's settings when it
-// chooses one. created says the project is new (it was not a project before
-// PrepareState); configured is the config's workspace_dir, and given is
-// --workspace-dir. The saved settings decide for an existing project:
-// --workspace-dir may only repeat them, or choose for a project whose
-// workspace is still empty.
-func ChooseWorkspace(state string, created bool, configured, given string) (string, error) {
+// ("" for in the project), prepares its folder there (PrepareWorkspace,
+// apart from the env folder env) and, once that worked, saves the choice in
+// the project's settings. It returns the directory and the folder. created
+// says the project is new (it was not a project before PrepareState);
+// configured is the config's workspace_dir, and given is --workspace-dir.
+// The saved settings decide for an existing project: --workspace-dir may
+// only repeat them, or choose for a project whose workspace is still empty.
+// A new project does not take a folder that is already full, such as the
+// workspace of another project of the same name.
+func ChooseWorkspace(state, env string, created bool, configured, given string) (string, string, error) {
 	saved, err := SavedWorkspaceDir(state)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	if given != "" {
+	chosen := saved
+	switch {
+	case given != "":
 		given, err = absoluteFolder(given)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
-		if given == saved {
-			return saved, nil
+		if sameFolder(given, saved) {
+			break
 		}
 		current := filepath.Join(state, "workspace")
 		if saved != "" {
 			current = WorkspaceFolder(saved, state)
 		}
 		if !created && !emptyFolder(current) {
-			return "", fmt.Errorf("the workspace of the project %s is in %s, not in %s; to move it there, stop its "+
+			return "", "", fmt.Errorf("the workspace of the project %s is in %s, not in %s; to move it there, stop its "+
 				"sandboxes and run: codeflower projects move-workspace %s %s",
 				filepath.Base(state), current, WorkspaceFolder(given, state), state, given)
 		}
-		return given, saveWorkspaceDir(state, given)
+		chosen = given
+	case saved == "" && created && configured != "":
+		chosen = configured
 	}
-	if saved != "" || !created || configured == "" {
-		return saved, nil
+	if chosen == "" {
+		return "", "", nil
 	}
-	return configured, saveWorkspaceDir(state, configured)
+	folder := WorkspaceFolder(chosen, state)
+	if chosen != saved && !emptyFolder(folder) {
+		return "", "", fmt.Errorf("the workspace folder %s of the project %s is not empty: the workspace of "+
+			"another project of the same name? Give the project another name, or remove the folder",
+			folder, filepath.Base(state))
+	}
+	workspace, err := PrepareWorkspace(folder, state, env)
+	if err != nil {
+		return "", "", err
+	}
+	if chosen != saved {
+		if err := saveWorkspaceDir(state, chosen); err != nil {
+			return "", "", err
+		}
+	}
+	return chosen, workspace, nil
+}
+
+// sameFolder says whether two folders are the same, also through links.
+func sameFolder(a, b string) bool {
+	if a == b {
+		return true
+	}
+	if a == "" || b == "" {
+		return false
+	}
+	first, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	second, err := os.Stat(b)
+	return err == nil && os.SameFile(first, second)
 }
 
 // MoveWorkspace moves the project's workspace to its folder in the workspace

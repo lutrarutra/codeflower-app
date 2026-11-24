@@ -49,14 +49,17 @@ func TestTheConfigsWorkspaceDirIsForNewProjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chosen, err := ChooseWorkspace(fresh, true, workspaces, "")
+	chosen, _, err := ChooseWorkspace(fresh, "", true, workspaces, "")
 	if err != nil || chosen != workspaces {
 		t.Fatalf("new project: %q %v", chosen, err)
 	}
 	if saved, _ := SavedWorkspaceDir(fresh); saved != workspaces {
 		t.Fatalf("not saved: %q", saved)
 	}
-	if chosen, _ := ChooseWorkspace(fresh, false, other, ""); chosen != workspaces {
+	if settings, _ := ReadSettings(SettingsFile(fresh)); settings.Started() {
+		t.Fatal("where the workspace is taken for how the project started")
+	}
+	if chosen, _, _ := ChooseWorkspace(fresh, "", false, other, ""); chosen != workspaces {
 		t.Fatalf("a changed config moved the workspace to %q", chosen)
 	}
 
@@ -65,11 +68,64 @@ func TestTheConfigsWorkspaceDirIsForNewProjects(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(old, "workspace", "analysis.R"), "x")
-	if chosen, err := ChooseWorkspace(old, false, workspaces, ""); err != nil || chosen != "" {
+	if chosen, _, err := ChooseWorkspace(old, "", false, workspaces, ""); err != nil || chosen != "" {
 		t.Fatalf("existing project: %q %v", chosen, err)
 	}
 	if _, err := os.Stat(SettingsFile(old)); !os.IsNotExist(err) {
 		t.Fatalf("settings written for a project that keeps its workspace: %v", err)
+	}
+}
+
+// A choice the workspace folder is refused for is not saved, so fixing the
+// config fixes the next start; and a new project does not take the full
+// workspace folder of another one of the same name.
+func TestAWorkspaceChoiceIsSavedOnlyOnceItWorks(t *testing.T) {
+	dir := t.TempDir()
+	shared := filepath.Join(dir, "shared")
+	env, err := PrepareEnv(filepath.Join(shared, "study"), filepath.Join(dir, "projects", "study"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := PrepareState(filepath.Join(dir, "projects", "study"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ChooseWorkspace(state, env, true, shared, ""); err == nil {
+		t.Fatal("took the env folder as the workspace")
+	}
+	if saved, _ := SavedWorkspaceDir(state); saved != "" {
+		t.Fatalf("saved a refused choice: %q", saved)
+	}
+
+	workspaces := filepath.Join(dir, "workspaces")
+	writeFile(t, filepath.Join(workspaces, "other", "results.csv"), "1")
+	other, err := PrepareState(filepath.Join(dir, "elsewhere", "other"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ChooseWorkspace(other, "", true, workspaces, ""); err == nil || !strings.Contains(err.Error(), "not empty") {
+		t.Fatalf("took the workspace of another project: %v", err)
+	}
+}
+
+// The saved folder named through a link is the saved folder.
+func TestWorkspaceDirFlagThroughALink(t *testing.T) {
+	dir := resolved(t, t.TempDir())
+	workspaces := filepath.Join(dir, "workspaces")
+	state, err := PrepareState(filepath.Join(dir, "projects", "study"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ChooseWorkspace(state, "", true, "", workspaces); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(WorkspaceFolder(workspaces, state), "data.csv"), "1")
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(workspaces, link); err != nil {
+		t.Skip(err)
+	}
+	if chosen, _, err := ChooseWorkspace(state, "", false, "", link); err != nil || chosen != workspaces {
+		t.Fatalf("the saved folder through a link: %q %v", chosen, err)
 	}
 }
 
@@ -81,17 +137,14 @@ func TestWorkspaceDirFlagCannotHideAWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Still empty: the flag chooses.
-	if chosen, err := ChooseWorkspace(state, false, "", workspaces); err != nil || chosen != workspaces {
+	if chosen, _, err := ChooseWorkspace(state, "", false, "", workspaces); err != nil || chosen != workspaces {
 		t.Fatalf("empty workspace: %q %v", chosen, err)
 	}
-	if _, err := PrepareWorkspace(WorkspaceFolder(workspaces, state), state, ""); err != nil {
-		t.Fatal(err)
-	}
 	writeFile(t, filepath.Join(WorkspaceFolder(workspaces, state), "data.csv"), "1")
-	if chosen, err := ChooseWorkspace(state, false, "", workspaces); err != nil || chosen != workspaces {
+	if chosen, _, err := ChooseWorkspace(state, "", false, "", workspaces); err != nil || chosen != workspaces {
 		t.Fatalf("the saved folder again: %q %v", chosen, err)
 	}
-	_, err = ChooseWorkspace(state, false, "", filepath.Join(dir, "elsewhere"))
+	_, _, err = ChooseWorkspace(state, "", false, "", filepath.Join(dir, "elsewhere"))
 	if err == nil || !strings.Contains(err.Error(), "move-workspace") {
 		t.Fatalf("moved a full workspace by flag: %v", err)
 	}
@@ -135,6 +188,9 @@ func TestMovingAWorkspaceOutAndBack(t *testing.T) {
 	}
 	if back.Workspace != "" || readFile(t, filepath.Join(project.State, "workspace", "results", "table.csv")) != "a,b" {
 		t.Fatalf("not back: %+v", back)
+	}
+	if !WorkspaceMovedIntoProject(project.State) {
+		t.Fatal("moving it back is not recorded")
 	}
 	if exists(moved.Workspace) {
 		t.Fatal("the workspace folder is still there")

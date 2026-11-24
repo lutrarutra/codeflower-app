@@ -361,15 +361,9 @@ func (options sandboxOptions) prepareWith(ctx context.Context, engine sandbox.En
 			return preparedSandbox{}, err
 		}
 	}
-	workspaceDir, err := sandbox.ChooseWorkspace(state, created, options.configWorkspaceDir, options.workspaceDir)
+	_, workspace, err := sandbox.ChooseWorkspace(state, env, created, options.configWorkspaceDir, options.workspaceDir)
 	if err != nil {
 		return preparedSandbox{}, err
-	}
-	var workspace string
-	if workspaceDir != "" {
-		if workspace, err = sandbox.PrepareWorkspace(sandbox.WorkspaceFolder(workspaceDir, state), state, env); err != nil {
-			return preparedSandbox{}, err
-		}
 	}
 
 	var isolation *sandbox.Isolation
@@ -402,7 +396,7 @@ func (options sandboxOptions) prepareWith(ctx context.Context, engine sandbox.En
 	}
 	if workspace != "" {
 		fmt.Fprintf(os.Stderr, "  workspace %s\n", workspace)
-	} else if options.configWorkspaceDir != "" && !created {
+	} else if options.configWorkspaceDir != "" && !created && !sandbox.WorkspaceMovedIntoProject(state) {
 		fmt.Fprintf(os.Stderr, "  workspace in the project: workspace_dir is for new projects; "+
 			"codeflower projects move-workspace %s %s moves this one's\n", filepath.Base(state), options.configWorkspaceDir)
 	}

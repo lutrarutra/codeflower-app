@@ -72,7 +72,7 @@ func (options *sandboxOptions) continueProject(argument string, create bool) (se
 		return settings, false, fmt.Errorf("%w (add --create to start it new)", err)
 	}
 	settings, err = sandbox.ReadSettings(project.Settings())
-	if errors.Is(err, sandbox.ErrNoSettings) {
+	if errors.Is(err, sandbox.ErrNoSettings) || (err == nil && !settings.Started()) {
 		if create {
 			return settings, false, nil
 		}

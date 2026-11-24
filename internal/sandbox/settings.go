@@ -30,12 +30,15 @@ type Settings struct {
 	EnvDir         string   `yaml:"env_dir"`
 	// WorkspaceDir is where the project's workspace is (ChooseWorkspace),
 	// not how it last started: flags and the config do not change it.
-	WorkspaceDir string   `yaml:"workspace_dir"`
-	CPUs         int      `yaml:"cpus"`
-	Memory       string   `yaml:"memory"`
-	TimeLimit    string   `yaml:"time_limit"`
-	Env          []string `yaml:"env"`
-	EngineArgs   string   `yaml:"engine_args"`
+	WorkspaceDir string `yaml:"workspace_dir"`
+	// WorkspaceInProject says the workspace was moved back into the project
+	// (move-workspace --into-project) on purpose.
+	WorkspaceInProject bool     `yaml:"workspace_in_project,omitempty"`
+	CPUs               int      `yaml:"cpus"`
+	Memory             string   `yaml:"memory"`
+	TimeLimit          string   `yaml:"time_limit"`
+	Env                []string `yaml:"env"`
+	EngineArgs         string   `yaml:"engine_args"`
 	// Jobs is --jobs: a scheduler, or off; empty follows the config.
 	Jobs          string `yaml:"jobs,omitempty"`
 	Server        bool   `yaml:"server"`
@@ -59,30 +62,31 @@ type SettingsCertificate struct {
 
 // settingsComments explain each key in the file.
 var settingsComments = map[string]string{
-	"engine":          "Container engine: docker, podman or apptainer.",
-	"image":           "Sandbox image; empty for the published image this app is made for.",
-	"input":           "Folders mounted read-only at /data/input/NAME.",
-	"output":          "Folders mounted read-write at /data/output/NAME.",
-	"code":            "Repositories and packages mounted read-write at /data/code/NAME.",
-	"skills":          "Skills folders mounted read-only at /data/skills/NAME (the config's are added too).",
-	"bind":            "More mounts: SOURCE[:TARGET[:ro|rw]].",
-	"isolate_network": "Cut the sandbox off the network except for its agents' services and the allowlist.",
-	"allowlist":       "Hosts file of an isolated sandbox; empty for the one next to the project.",
-	"env_dir":         "Folder for the software environments and caches; empty for in the project.",
-	"workspace_dir":   "Folder the workspace is in, in a subfolder named after the project; empty for in the project. Move it with codeflower projects move-workspace, not here.",
-	"cpus":            "CPUs the agent may use; 0 for the batch job's allocation.",
-	"memory":          "Memory the agent may use, e.g. 32G; empty for the batch job's allocation.",
-	"time_limit":      "Time the agent has, e.g. 8h; empty for the batch job's time limit.",
-	"env":             "Environment variables: NAME=VALUE, or NAME for its value where the sandbox starts (keeps secrets out of this file).",
-	"engine_args":     "Container engine flags, e.g. --gpus all --shm-size 8g.",
-	"server":          "Also serve the chat page on the worker's port.",
-	"host":            "Interface the worker listens on (Apptainer).",
-	"advertise_host":  "Address printed in the links; empty for this node's address.",
-	"port":            "Port of the worker; 0 for any free port. Starting fails if it is taken.",
-	"no_tunnel":       "Keep the sandbox from browsers paired through the tunnel.",
-	"forward_to":      "SSH host whose 127.0.0.1:PORT reaches the worker through ssh -R while it runs; empty for none.",
-	"key":             "Secret that VS Code and the page connect with. Anyone who has it controls the agent.",
-	"tls":             "The worker's TLS certificate; links name its fingerprint.",
+	"engine":               "Container engine: docker, podman or apptainer.",
+	"image":                "Sandbox image; empty for the published image this app is made for.",
+	"input":                "Folders mounted read-only at /data/input/NAME.",
+	"output":               "Folders mounted read-write at /data/output/NAME.",
+	"code":                 "Repositories and packages mounted read-write at /data/code/NAME.",
+	"skills":               "Skills folders mounted read-only at /data/skills/NAME (the config's are added too).",
+	"bind":                 "More mounts: SOURCE[:TARGET[:ro|rw]].",
+	"isolate_network":      "Cut the sandbox off the network except for its agents' services and the allowlist.",
+	"allowlist":            "Hosts file of an isolated sandbox; empty for the one next to the project.",
+	"env_dir":              "Folder for the software environments and caches; empty for in the project.",
+	"workspace_dir":        "Folder the workspace is in, in a subfolder named after the project; empty for in the project. Move it with codeflower projects move-workspace, not here.",
+	"workspace_in_project": "The workspace was moved into the project on purpose: workspace_dir in the config does not suggest moving it out.",
+	"cpus":                 "CPUs the agent may use; 0 for the batch job's allocation.",
+	"memory":               "Memory the agent may use, e.g. 32G; empty for the batch job's allocation.",
+	"time_limit":           "Time the agent has, e.g. 8h; empty for the batch job's time limit.",
+	"env":                  "Environment variables: NAME=VALUE, or NAME for its value where the sandbox starts (keeps secrets out of this file).",
+	"engine_args":          "Container engine flags, e.g. --gpus all --shm-size 8g.",
+	"server":               "Also serve the chat page on the worker's port.",
+	"host":                 "Interface the worker listens on (Apptainer).",
+	"advertise_host":       "Address printed in the links; empty for this node's address.",
+	"port":                 "Port of the worker; 0 for any free port. Starting fails if it is taken.",
+	"no_tunnel":            "Keep the sandbox from browsers paired through the tunnel.",
+	"forward_to":           "SSH host whose 127.0.0.1:PORT reaches the worker through ssh -R while it runs; empty for none.",
+	"key":                  "Secret that VS Code and the page connect with. Anyone who has it controls the agent.",
+	"tls":                  "The worker's TLS certificate; links name its fingerprint.",
 }
 
 // SettingsFile is where a project's Settings are: next to its folder, as
@@ -93,6 +97,14 @@ func SettingsFile(state string) string {
 
 // ErrNoSettings means a project has no saved settings yet.
 var ErrNoSettings = errors.New("no saved settings")
+
+// Started says whether the settings are how `codeflower sandbox` started
+// the project, not only where its workspace is: a project that other
+// commands started, or whose workspace was moved, has a file with only
+// workspace_dir (ChooseWorkspace, MoveWorkspace).
+func (s Settings) Started() bool {
+	return s.Engine != "" || s.Key != ""
+}
 
 // ReadSettings reads the settings file; ErrNoSettings if there is none.
 func ReadSettings(path string) (Settings, error) {
