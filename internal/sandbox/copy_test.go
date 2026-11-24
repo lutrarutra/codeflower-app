@@ -118,6 +118,9 @@ func TestACopyContinuesWhereItStopped(t *testing.T) {
 	os.Remove(filepath.Join(target, "Snakefile"))
 	writeFile(t, partialName(filepath.Join(target, "Snakefile")), "ru")
 	writeFile(t, filepath.Join(target, "results", "table.csv"), "x,y")
+	// And what the source no longer has: removed or renamed since.
+	writeFile(t, filepath.Join(target, "results", "old.csv"), "old")
+	writeFile(t, filepath.Join(target, "gone", "deep", "file"), "old")
 
 	m.phase("Copying")
 	if err := m.work(context.Background()).copy(source, target, nil); err != nil {
@@ -132,6 +135,9 @@ func TestACopyContinuesWhereItStopped(t *testing.T) {
 	}
 	if exists(partialName(filepath.Join(target, "Snakefile"))) {
 		t.Fatal("the partial file is left")
+	}
+	if exists(filepath.Join(target, "results", "old.csv")) || exists(filepath.Join(target, "gone")) {
+		t.Fatal("what the source no longer has is left in the copy")
 	}
 }
 
@@ -206,7 +212,10 @@ func TestAnUnfinishedMoveCanBeDropped(t *testing.T) {
 	}
 	// What it had copied so far.
 	writeFile(t, filepath.Join(transfer.Partial[0], "a.txt"), "a")
-	if _, err := AbortTransfer(context.Background(), project, nil); err != nil {
+	if _, err := AbortTransfer(context.Background(), project, TransferCopy, nil); err == nil {
+		t.Fatal("a copy's --abort dropped a move of the workspace")
+	}
+	if _, err := AbortTransfer(context.Background(), project, TransferMoveWorkspace, nil); err != nil {
 		t.Fatal(err)
 	}
 	if exists(transfer.Partial[0]) || exists(TransferFile(project.State)) {
@@ -215,7 +224,7 @@ func TestAnUnfinishedMoveCanBeDropped(t *testing.T) {
 	if readFile(t, filepath.Join(project.State, "workspace", "a.txt")) != "a" {
 		t.Fatal("the workspace changed")
 	}
-	if _, err := AbortTransfer(context.Background(), project, nil); err == nil {
+	if _, err := AbortTransfer(context.Background(), project, TransferMoveWorkspace, nil); err == nil {
 		t.Fatal("dropped a transfer that is not there")
 	}
 }
@@ -228,7 +237,7 @@ func TestAMoveStoppedWhileRemovingFinishes(t *testing.T) {
 	if err := writeTransfer(project.State, Transfer{Operation: TransferMoveWorkspace, To: project.Workspace, Removing: []string{leftover}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AbortTransfer(context.Background(), project, nil); err == nil {
+	if _, err := AbortTransfer(context.Background(), project, TransferMoveWorkspace, nil); err == nil {
 		t.Fatal("dropped a move that is complete")
 	}
 	moved, err := MoveWorkspace(context.Background(), project, filepath.Dir(project.Workspace), nil)

@@ -358,7 +358,7 @@ open it, and takes any free port when it starts.
 		Aliases: []string{"cp"},
 		Args:    cobra.RangeArgs(1, 2),
 		RunE: func(command *cobra.Command, args []string) error {
-			return options.copyOrMove(command, args, abort, "Copied", sandbox.CopyProject)
+			return options.copyOrMove(command, args, abort, sandbox.TransferCopy, "Copied", sandbox.CopyProject)
 		},
 	}
 	command.Flags().BoolVar(&abort, "abort", false, "drop an unfinished copy: delete what it copied so far")
@@ -378,7 +378,7 @@ folder elsewhere. It keeps its key and port, so its links still connect.
 		Aliases: []string{"mv", "rename"},
 		Args:    cobra.RangeArgs(1, 2),
 		RunE: func(command *cobra.Command, args []string) error {
-			return options.copyOrMove(command, args, abort, "Moved", sandbox.MoveProject)
+			return options.copyOrMove(command, args, abort, sandbox.TransferMove, "Moved", sandbox.MoveProject)
 		},
 	}
 	command.Flags().BoolVar(&abort, "abort", false, "drop an unfinished move: delete what it copied so far")
@@ -427,7 +427,7 @@ counted, which runs alongside.`,
 				return err
 			}
 			if abort {
-				return abortTransfer(command, project)
+				return abortTransfer(command, project, sandbox.TransferMoveWorkspace)
 			}
 			dir := ""
 			if len(args) == 2 {
@@ -454,7 +454,7 @@ counted, which runs alongside.`,
 	return command
 }
 
-func (options *projectsOptions) copyOrMove(command *cobra.Command, args []string, abort bool, done string,
+func (options *projectsOptions) copyOrMove(command *cobra.Command, args []string, abort bool, operation, done string,
 	action func(context.Context, sandbox.Project, string, string, sandbox.Progress) (sandbox.Project, error)) error {
 	if abort != (len(args) == 1) {
 		if abort {
@@ -470,7 +470,7 @@ func (options *projectsOptions) copyOrMove(command *cobra.Command, args []string
 		return err
 	}
 	if abort {
-		return abortTransfer(command, project)
+		return abortTransfer(command, project, operation)
 	}
 	target, err := options.location(args[1])
 	if err != nil {
@@ -528,11 +528,11 @@ func unfinished(project sandbox.Project, err error) error {
 }
 
 // abortTransfer drops the project's unfinished copy or move.
-func abortTransfer(command *cobra.Command, project sandbox.Project) error {
+func abortTransfer(command *cobra.Command, project sandbox.Project, operation string) error {
 	ctx, stop := interruptible()
 	defer stop()
 	progress, clear := projectProgress(os.Stderr, project.Name)
-	transfer, err := sandbox.AbortTransfer(ctx, project, progress)
+	transfer, err := sandbox.AbortTransfer(ctx, project, operation, progress)
 	clear()
 	if err != nil {
 		return err

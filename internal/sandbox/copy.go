@@ -36,10 +36,16 @@ const partialSuffix = ".codeflower-partial"
 // hard links (within it); skip names top-level folders that are copied
 // empty. It continues what a stopped copy into target left: a file already
 // there with the same size and modification time is kept, as rsync does,
-// and others are written again, so running it again finishes the copy.
+// others are written again, and what the source no longer has goes, so
+// running it again finishes the copy.
 func (w *treeWork) copy(source, target string, skip map[string]bool) error {
 	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 		return err
+	}
+	// What the copy is in target, when it continues a stopped one.
+	var copied map[string]bool
+	if exists(target) {
+		copied = map[string]bool{}
 	}
 	type folder struct {
 		path     string
@@ -90,6 +96,9 @@ func (w *treeWork) copy(source, target string, skip map[string]bool) error {
 			return nil
 		}
 		destination := filepath.Join(target, rel)
+		if copied != nil {
+			copied[destination] = true
+		}
 		info, err := entry.Info()
 		if err != nil {
 			return err
@@ -141,6 +150,12 @@ func (w *treeWork) copy(source, target string, skip map[string]bool) error {
 			return err
 		}
 	}
+	if copied != nil {
+		if err := pruneCopy(target, copied); err != nil {
+			w.fail(err)
+			return err
+		}
+	}
 	for index := len(folders) - 1; index >= 0; index-- {
 		folder := folders[index]
 		if err := os.Chmod(folder.path, folder.mode); err != nil {
@@ -151,6 +166,27 @@ func (w *treeWork) copy(source, target string, skip map[string]bool) error {
 		}
 	}
 	return nil
+}
+
+// pruneCopy removes from the copy in target what a stopped copy left there
+// that is not part of the copy (copied): what was removed or renamed in the
+// source since, and files it was writing.
+func pruneCopy(target string, copied map[string]bool) error {
+	return filepath.WalkDir(target, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if copied[path] {
+			return nil
+		}
+		if err := removeTree(path); err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return filepath.SkipDir
+		}
+		return nil
+	})
 }
 
 // copyFile copies a regular file for a copy, unless a stopped copy left it

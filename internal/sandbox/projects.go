@@ -355,32 +355,44 @@ func CopyProject(ctx context.Context, p Project, target, envDir string, progress
 			return Project{}, fmt.Errorf("copying %s: %w", part.from, err)
 		}
 	}
-	// All complete: the copies take their names.
-	for index, part := range parts {
-		if err := os.Rename(stagingPath(part.to), part.to); err != nil {
-			for back := index - 1; back >= 0; back-- {
-				os.Rename(parts[back].to, stagingPath(parts[back].to))
-			}
-			return Project{}, err
+	// All complete: the copies take their names. Until the settings are
+	// written too, a failure puts them back, for the same copy to continue.
+	renamed := 0
+	var written []string
+	undo := func(err error) (Project, error) {
+		for _, file := range written {
+			os.Remove(file)
 		}
+		for back := renamed - 1; back >= 0; back-- {
+			os.Rename(parts[back].to, stagingPath(parts[back].to))
+		}
+		return Project{}, err
 	}
-	removeTransfer(p.State)
+	for _, part := range parts {
+		if err := os.Rename(stagingPath(part.to), part.to); err != nil {
+			return undo(err)
+		}
+		renamed++
+	}
 	if exists(p.Allowlist()) {
+		written = append(written, DefaultAllowlist(target))
 		if err := copyFile(p.Allowlist(), DefaultAllowlist(target)); err != nil {
-			return Project{}, err
+			return undo(err)
 		}
 	}
 	if settings, err := ReadSettings(p.Settings()); err == nil {
 		settings.Port = 0
 		if err := settings.Renew(); err != nil {
-			return Project{}, err
+			return undo(err)
 		}
+		written = append(written, SettingsFile(target))
 		if err := WriteSettings(SettingsFile(target), filepath.Base(target), settings); err != nil {
-			return Project{}, err
+			return undo(err)
 		}
 	} else if !errors.Is(err, ErrNoSettings) {
-		return Project{}, err
+		return undo(err)
 	}
+	removeTransfer(p.State)
 	return Project{Name: filepath.Base(target), State: target, Env: envTarget, Workspace: workspaceTarget}, nil
 }
 

@@ -132,15 +132,19 @@ func (t Transfer) checkStaging(paths ...string) error {
 	return nil
 }
 
-// AbortTransfer drops the project's unfinished copy or move: it removes
-// what it copied so far. The project itself is as it was.
-func AbortTransfer(ctx context.Context, p Project, progress Progress) (Transfer, error) {
+// AbortTransfer drops the project's unfinished operation (a copy or move):
+// it removes what it copied so far. The project itself is as it was.
+// Another unfinished operation refuses, as it does in openTransfer.
+func AbortTransfer(ctx context.Context, p Project, operation string, progress Progress) (Transfer, error) {
 	transfer, found, err := ReadTransfer(p.State)
 	if err != nil {
 		return transfer, err
 	}
 	if !found {
-		return transfer, fmt.Errorf("the project %s has no unfinished copy or move", p.Name)
+		return transfer, fmt.Errorf("the project %s has no unfinished %s", p.Name, operation)
+	}
+	if transfer.Operation != operation {
+		return transfer, PendingTransferError{p, transfer}
 	}
 	if len(transfer.Partial) == 0 && len(transfer.Removing) > 0 {
 		return transfer, fmt.Errorf("the %s of %s to %s is complete; only removing its original is left: "+
