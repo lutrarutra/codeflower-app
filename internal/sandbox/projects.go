@@ -165,18 +165,29 @@ func (p Project) LastStarted() time.Time {
 	return time.Time{}
 }
 
-// Size is the disk space the project's files take: its folder, settings,
-// allowlist and env folder. Symbolic links are not followed, hard-linked
+// Size is the disk space the project itself takes: its folder, settings,
+// allowlist and batch jobs, not an env or workspace folder kept elsewhere
+// (FolderSize tells those). Symbolic links are not followed, hard-linked
 // files count once, and files it cannot read are left out (complete is then
 // false).
 func (p Project) Size() (total int64, complete bool) {
+	return diskUsage(p.State, p.Settings(), p.Allowlist(), p.Jobs())
+}
+
+// FolderSize is the disk space a folder takes, such as a project's env or
+// workspace folder, counted as Size counts.
+func FolderSize(path string) (total int64, complete bool) {
+	return diskUsage(path)
+}
+
+func diskUsage(paths ...string) (total int64, complete bool) {
 	complete = true
 	seen := map[[2]uint64]bool{}
-	for _, move := range p.files("", "", "") {
-		if !exists(move[0]) {
+	for _, path := range paths {
+		if !exists(path) {
 			continue
 		}
-		err := filepath.WalkDir(move[0], func(_ string, entry fs.DirEntry, err error) error {
+		err := filepath.WalkDir(path, func(_ string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				complete = false
 				if entry != nil && entry.IsDir() {

@@ -147,9 +147,10 @@ func projectsListCommand(options *projectsOptions) *cobra.Command {
 		Short:   "List the projects in the projects directory",
 		Long: `List the projects in the projects directory.
 
---size adds the disk space each project takes (its folder, settings,
-allowlist and env folder). It reads every file in them, which can take a
-while for large projects.`,
+--size adds the disk space each project itself takes: its folder, settings,
+allowlist and batch jobs, not an env or workspace folder kept elsewhere
+(` + "`codeflower projects show PROJECT --size`" + ` tells those). It reads every
+file, which can take a while for large projects.`,
 		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			if err := options.directories(); err != nil {
@@ -180,11 +181,7 @@ while for large projects.`,
 				fmt.Fprintf(table, "%s\t%s\t%s\t%s\t", project.Name, projectStatus(project),
 					formatTime(project.LastStarted()), saved)
 				if withSize {
-					// Open it again with its env folder, which its size includes.
-					if withEnv, err := sandbox.OpenProject(project.State, options.envDirOf(project.State)); err == nil {
-						project = withEnv
-					}
-					fmt.Fprintf(table, "%s\t", projectSize(project))
+					fmt.Fprintf(table, "%s\t", formatUsage(project.Size()))
 				}
 				fmt.Fprintln(table, project.State)
 			}
@@ -196,7 +193,7 @@ while for large projects.`,
 		},
 	}
 	command.Flags().BoolVar(&withSize, "size", false,
-		"also show the disk space each project takes (slow for large projects)")
+		"also show the disk space each project itself takes, without env and workspace folders elsewhere (slow for large projects)")
 	return command
 }
 
@@ -212,10 +209,9 @@ func projectStatus(project sandbox.Project) string {
 	}
 }
 
-// projectSize is the disk space a project takes, with ">" when some of its
-// files could not be read.
-func projectSize(project sandbox.Project) string {
-	bytes, complete := project.Size()
+// formatUsage writes a disk space, with ">" when some files could not be
+// read.
+func formatUsage(bytes int64, complete bool) string {
 	if complete {
 		return formatSize(bytes)
 	}
@@ -244,10 +240,16 @@ func formatTime(moment time.Time) string {
 }
 
 func projectsShowCommand(options *projectsOptions) *cobra.Command {
-	return &cobra.Command{
+	var withSize bool
+	command := &cobra.Command{
 		Use:   "show PROJECT",
 		Short: "Show where a project's files are and how it starts",
-		Args:  cobra.ExactArgs(1),
+		Long: `Show where a project's files are and how it starts.
+
+--size adds the disk space of the project itself (its folder, settings,
+allowlist and batch jobs), and of its env and workspace folders when they
+are kept elsewhere. It reads every file, which can take a while.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
 			if err := options.directories(); err != nil {
 				return err
@@ -259,17 +261,28 @@ func projectsShowCommand(options *projectsOptions) *cobra.Command {
 			out := command.OutOrStdout()
 			line := func(label, value string) { fmt.Fprintf(out, "  %-10s %s\n", label, value) }
 			fmt.Fprintln(out, project.Name)
-			line("folder", project.State)
+			// With its size, when asked: what the folder at path takes.
+			sized := func(path string) string {
+				if !withSize {
+					return path
+				}
+				return fmt.Sprintf("%s (%s)", path, formatUsage(sandbox.FolderSize(path)))
+			}
+			if withSize {
+				line("folder", fmt.Sprintf("%s (%s with settings and jobs)", project.State, formatUsage(project.Size())))
+			} else {
+				line("folder", project.State)
+			}
 			line("status", projectStatus(project))
 			for _, running := range project.Running() {
 				line("", fmt.Sprintf("%s with %s since %s (process %d)", running.Kind, running.Engine,
 					formatTime(running.Started), running.PID))
 			}
 			if project.Env != "" {
-				line("env", project.Env)
+				line("env", sized(project.Env))
 			}
 			if project.Workspace != "" {
-				line("workspace", project.Workspace)
+				line("workspace", sized(project.Workspace))
 			} else if dir, err := sandbox.SavedWorkspaceDir(project.State); err == nil && dir != "" {
 				line("workspace", sandbox.WorkspaceFolder(dir, project.State)+" (missing: made when the project starts)")
 			}
@@ -323,6 +336,9 @@ func projectsShowCommand(options *projectsOptions) *cobra.Command {
 			return nil
 		},
 	}
+	command.Flags().BoolVar(&withSize, "size", false,
+		"also show the disk space of the project and of its env and workspace folders (slow for large projects)")
+	return command
 }
 
 func projectsCopyCommand(options *projectsOptions) *cobra.Command {
