@@ -223,7 +223,7 @@ sandbox with a few clicks, or connects to one running elsewhere. Run
 		return u.run(command.Context())
 	}
 	root.AddCommand(sandboxCommand(), runCommand(), taskCommand(), tuiCommand(), attachCommand(), chatsCommand(), terminalsCommand(),
-		pluginsCommand(), projectsCommand(), jobsCommand(), jobRunCommand(), pullCommand(), checkCommand(), reproduceCommand(), auditCommand(), clientCommand(), tunnelCommand(), updateCommand())
+		pluginsCommand(), projectsCommand(), jobsCommand(), jobRunCommand(), pullCommand(), imagesCommand(), checkCommand(), reproduceCommand(), auditCommand(), clientCommand(), tunnelCommand(), updateCommand())
 	return root
 }
 

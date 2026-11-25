@@ -439,7 +439,7 @@ func (w Worker) Run(ctx context.Context, ready func(Connection)) (int, error) {
 	if !w.PluginsFetch && w.TUI == "" {
 		defer register(Running{
 			ID: instanceID, ConnectionFile: connectionFile, Project: filepath.Base(w.State), State: w.State,
-			Agent: w.oneAgent(), Engine: w.Engine.Name, Kind: kind, PID: os.Getpid(), Started: time.Now(), NoTunnel: w.NoTunnel,
+			Agent: w.oneAgent(), Engine: w.Engine.Name, Image: w.Image, Kind: kind, PID: os.Getpid(), Started: time.Now(), NoTunnel: w.NoTunnel,
 		})()
 	}
 

@@ -20,6 +20,9 @@ type Running struct {
 	State          string `json:"state"`
 	Agent          string `json:"agent"`
 	Engine         string `json:"engine"`
+	// Image is the one it runs, as ListImages names it; older apps did not
+	// record it.
+	Image string `json:"image,omitempty"`
 	// Kind is worker, run (a worker with an initial prompt) or task.
 	Kind string `json:"kind"`
 	// PID is the codeflower process that runs the sandbox and stops it on SIGTERM.

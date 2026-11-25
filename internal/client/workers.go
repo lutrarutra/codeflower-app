@@ -939,6 +939,16 @@ func newSettingsStore() *settingsStore {
 	return &settingsStore{path: filepath.Join(dir, "codeflower", "app.json")}
 }
 
+// SavedImage is the sandbox image the window starts sandboxes with, as its
+// settings name it (empty for the app's release), for `codeflower images`.
+func SavedImage() (string, error) {
+	settings := newSettingsStore().load()
+	if settings.ImageTag == "" {
+		return settings.Image, nil
+	}
+	return sandbox.PublishedImage(settings.ImageTag)
+}
+
 func (store *settingsStore) load() Settings {
 	var settings Settings
 	if store.path == "" {

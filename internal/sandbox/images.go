@@ -38,6 +38,8 @@ type LocalImage struct {
 	// Ref names it for RemoveImage: name:tag (Docker and Podman), the image's
 	// id when it has no tag left, or the file (Apptainer).
 	Ref string `json:"ref"`
+	// ID is the engine's id of the image (Docker and Podman).
+	ID string `json:"id,omitempty"`
 	// Tag is what it was downloaded as: a release, latest or a commit's build.
 	Tag string `json:"tag"`
 	// Version and Revision are the release and commit it was built from.
@@ -99,7 +101,7 @@ func listDocker(ctx context.Context) ([]LocalImage, error) {
 	images := []LocalImage{}
 	add := func(summary image.Summary, ref, tag string, untagged bool) {
 		images = append(images, LocalImage{
-			Ref: ref, Tag: tag, Untagged: untagged, Size: summary.Size, Created: time.Unix(summary.Created, 0),
+			Ref: ref, ID: summary.ID, Tag: tag, Untagged: untagged, Size: summary.Size, Created: time.Unix(summary.Created, 0),
 			Version: strings.TrimPrefix(summary.Labels[versionLabel], "v"), Revision: shortRevision(summary.Labels[revisionLabel]),
 		})
 	}
@@ -138,7 +140,7 @@ func listPodman(ctx context.Context, executable string) ([]LocalImage, error) {
 	images := []LocalImage{}
 	for _, item := range listed {
 		entry := LocalImage{
-			Size: item.Size, Created: time.Unix(item.Created, 0),
+			ID: item.ID, Size: item.Size, Created: time.Unix(item.Created, 0),
 			Version: strings.TrimPrefix(item.Labels[versionLabel], "v"), Revision: shortRevision(item.Labels[revisionLabel]),
 		}
 		tagged := false

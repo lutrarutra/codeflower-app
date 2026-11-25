@@ -212,6 +212,15 @@ Downloads the sandbox image, or updates a moving tag (`latest`, `0.2`) to its ne
 other commands download it on first use; on a cluster, run `codeflower pull --engine apptainer` once
 on the login node, as compute nodes often have no internet.
 
+### `codeflower images`
+
+`codeflower images list` shows the builds of the sandbox image the engine has and whether each is still
+needed; `codeflower images prune` removes the unused ones after asking (`--dry-run` only shows them, `--yes`
+does not ask). Unused are releases and commits' builds older than the one the app runs, and older downloads
+a newer one of their tag replaced, unless a sandbox or container uses them or a project's saved settings, the
+window, the config or `$CODEFLOWER_IMAGE`/`$CODEFLOWER_IMAGE_TAG` choose them. With Podman, the copies saved
+in the image folder are reviewed too.
+
 ### `codeflower check`
 
 Lists the container engines on this machine and checks that the image is there. When none works, it
