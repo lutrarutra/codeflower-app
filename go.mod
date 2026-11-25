@@ -12,7 +12,7 @@ require (
 	github.com/flynn/noise v1.1.0
 	github.com/godbus/dbus/v5 v5.1.0
 	github.com/landlock-lsm/go-landlock v0.11.0
-	github.com/lutrarutra/codeflower-audit v0.0.0-20261125082413-d5781dcd4ffe
+	github.com/lutrarutra/codeflower-audit v0.1.0
 	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/moby/term v0.5.2
 	github.com/shirou/gopsutil/v4 v4.26.9
