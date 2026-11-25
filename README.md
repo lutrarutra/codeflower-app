@@ -25,6 +25,13 @@ DeepSeek Harness or OpenCode) that sees only the folders you give it, and that y
 browser. It is a single static Go binary with a window for people who do not use a terminal and a
 command line for workstations and clusters.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/teaser-dark.png">
+    <img src="assets/teaser-light.png" width="900" alt="code flower: a chat with an agent in a sandbox, the Roots map of ideas, and a storyteller report">
+  </picture>
+</p>
+
 ## Install
 
 Linux (also on clusters) and macOS:
