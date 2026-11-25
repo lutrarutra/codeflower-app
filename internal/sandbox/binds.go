@@ -204,6 +204,9 @@ func checkTargets(binds []Bind) error {
 	return nil
 }
 
+// ExpandHome replaces a leading ~ with the home folder, as the shell does.
+func ExpandHome(value string) string { return expandHome(value) }
+
 func expandHome(value string) string {
 	if value == "~" || strings.HasPrefix(value, "~/") {
 		if home, err := os.UserHomeDir(); err == nil {

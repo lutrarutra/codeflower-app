@@ -6,11 +6,32 @@ import (
 	"os"
 	"path/filepath"
 
+	audit "github.com/lutrarutra/codeflower-audit"
 	"github.com/spf13/cobra"
 
 	"codeflower-app/internal/config"
 	"codeflower-app/internal/sandbox"
 )
+
+// auditPresets are the hosts an audit needs: papers and their metadata, code, and the usual data archives.
+var auditPresets = []string{"literature", "github", "ncbi", "ebi"}
+
+// seedAuditAllowlist gives a new allowlist the presets an audit needs. An
+// existing one is the user's: it is left as it is.
+func seedAuditAllowlist(options sandboxOptions) error {
+	path := options.allowlist
+	if path == "" {
+		path = sandbox.DefaultAllowlist(options.stateDirectory())
+	}
+	if _, err := os.Stat(sandbox.ExpandHome(path)); err == nil {
+		return nil
+	}
+	path, err := sandbox.PrepareAllowlist(path)
+	if err != nil {
+		return err
+	}
+	return sandbox.AddPresets(path, auditPresets, "for the paper audit (codeflower sandbox --audit)")
+}
 
 func sandboxCommand() *cobra.Command {
 	var options sandboxOptions
@@ -72,6 +93,12 @@ HOST without a password (an SSH key), and the port must be free there. In a
 batch job, --forward-to "$SLURM_SUBMIT_HOST" names the node it was submitted
 from. The tunnel connects again when it drops and stops with the sandbox.
 
+With --audit DOI the sandbox audits that paper's reproducibility: the agent
+follows the codeflower-audit skill (or the "Audit a paper" action), and the
+project is named audit-SLUG unless --project is given. With --isolate-network,
+a new allowlist gets the @literature, @github, @ncbi and @ebi presets. The
+sealed result lands in the output folder; check it with "codeflower audit verify".
+
 To start a session with an initial task and continue it in VS Code, see
 "codeflower run". To let the agent work on a task by itself instead, see
 "codeflower task".`,
@@ -83,12 +110,25 @@ To start a session with an initial task and continue it in VS Code, see
   codeflower sandbox --continue study42 --create --input ~/data/study42 --output ~/results/study42
   codeflower sandbox --input ~/data/study42 --skills ~/my-skills --isolate-network
   codeflower sandbox --project study42 --input /data/study42 --forward-to "$SLURM_SUBMIT_HOST"
-  codeflower sandbox --image ./codeflower-sandbox.sif --state ~/cf/study42 --bind /data/ref:/reference`,
+  codeflower sandbox --image ./codeflower-sandbox.sif --state ~/cf/study42 --bind /data/ref:/reference
+  codeflower sandbox --audit 10.1038/s41586-020-2649-2 --output ~/audits`,
 		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			given := command.Flags().Changed
 			if flags.create && flags.continueFrom == "" {
 				return fmt.Errorf("--create needs --continue")
+			}
+			if flags.audit != "" {
+				doi, err := audit.NormalizeDOI(flags.audit)
+				if err != nil {
+					return fmt.Errorf("--audit: %w", err)
+				}
+				if flags.continueFrom == "" && !given("project") && !given("state") {
+					options.project = audit.ProjectName(doi)
+				}
+				// Saved with the project's settings, so --continue keeps auditing it.
+				options.envValues = append(options.envValues, sandbox.AuditDOIVariable+"="+doi)
+				flags.audit = doi
 			}
 			if flags.continueFrom != "" {
 				for _, name := range []string{"project", "state"} {
@@ -133,6 +173,11 @@ To start a session with an initial task and continue it in VS Code, see
 						hint = "the project's saved settings ask for it; stop what uses it, or give --port 0 for any free port (saved for next time)"
 					}
 					return fmt.Errorf("%w: %s", err, hint)
+				}
+			}
+			if flags.audit != "" && options.isolateNetwork {
+				if err := seedAuditAllowlist(options); err != nil {
+					return err
 				}
 			}
 			ctx, kill, connected, stop := quitOnSignals(command.Context(), options.config)
@@ -226,6 +271,8 @@ To start a session with an initial task and continue it in VS Code, see
 		"start a project again with its saved settings: a project name, or a project folder (flags given replace settings, or add folders)")
 	command.Flags().BoolVar(&flags.create, "create", false,
 		"with --continue: start the project new from the flags given if it does not exist yet (a script can then always use --continue)")
+	command.Flags().StringVar(&flags.audit, "audit", "",
+		"audit a paper's reproducibility (the codeflower-audit skill): its DOI; names the project audit-SLUG unless --project is given")
 	command.Flags().BoolVar(&flags.newKey, "new-key", false,
 		"give the project a new key and TLS certificate: links saved before no longer connect")
 	// Development only: anyone who can reach the inspector can run code in the sandbox.

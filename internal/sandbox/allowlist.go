@@ -72,6 +72,46 @@ var AllowlistPresets = []AllowlistPreset{
 	{Name: "uniprot", Description: "UniProt: REST API and downloads", Hosts: []string{"uniprot.org", "*.uniprot.org"}},
 	{Name: "ebi", Description: "EMBL-EBI: ENA, Expression Atlas, PDBe and the FTP site over HTTPS",
 		Hosts: []string{"www.ebi.ac.uk", "ftp.ebi.ac.uk"}},
+	{Name: "literature", Description: "papers and their data: doi.org, Crossref, OpenAlex, Europe PMC, Zenodo, figshare, arXiv, bioRxiv",
+		Hosts: []string{"doi.org", "api.crossref.org", "api.openalex.org", "europepmc.org", "www.ebi.ac.uk",
+			"zenodo.org", "figshare.com", "ndownloader.figshare.com", "arxiv.org", "export.arxiv.org",
+			"api.biorxiv.org", "www.biorxiv.org"}},
+}
+
+// AddPresets appends the presets an allowlist does not allow yet, under a
+// comment saying why.
+func AddPresets(path string, names []string, why string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	allowed := map[string]bool{}
+	for _, line := range strings.Split(string(data), "\n") {
+		allowed[strings.ToLower(strings.TrimSpace(line))] = true
+	}
+	var missing []string
+	for _, name := range names {
+		if _, ok := findPreset(name); !ok {
+			return fmt.Errorf("unknown preset @%s", name)
+		}
+		if !allowed["@"+strings.ToLower(name)] {
+			missing = append(missing, "@"+name)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	text := "\n# Added " + why + ":\n" + strings.Join(missing, "\n") + "\n"
+	if len(data) > 0 && !strings.HasSuffix(string(data), "\n") {
+		text = "\n" + text
+	}
+	_, err = file.WriteString(text)
+	return err
 }
 
 func findPreset(name string) (AllowlistPreset, bool) {

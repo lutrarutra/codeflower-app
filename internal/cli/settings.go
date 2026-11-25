@@ -29,6 +29,8 @@ type workerFlags struct {
 	// exist yet.
 	create bool
 	newKey bool
+	// audit is --audit: the DOI of the paper the sandbox audits.
+	audit string
 }
 
 // projectArgument tells a project name from a project folder: a name has

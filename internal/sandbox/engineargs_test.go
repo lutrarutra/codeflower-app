@@ -171,4 +171,8 @@ func TestAddEnvironment(t *testing.T) {
 			t.Errorf("ParseEnv(%q) should fail", value)
 		}
 	}
+	// --audit passes the DOI as an --env value.
+	if name, err := ParseEnv(AuditDOIVariable + "=10.1/x"); err != nil || name != AuditDOIVariable {
+		t.Errorf("ParseEnv(audit DOI) = %q, %v", name, err)
+	}
 }

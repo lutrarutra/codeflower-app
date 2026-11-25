@@ -379,13 +379,21 @@ func splitWords(value string) ([]string, error) {
 // envName is what a variable's name may be.
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// AuditDOIVariable names the paper a sandbox started with --audit audits (the
+// sandbox's doctor and audit skill read it). The app passes it as an --env
+// value, so it is saved with the project's settings and --continue keeps it.
+const AuditDOIVariable = "CODEFLOWER_AUDIT_DOI"
+
+// passedVariables are the CODEFLOWER_ variables the app gives the sandbox through --env.
+var passedVariables = map[string]bool{AuditDOIVariable: true}
+
 // ParseEnv checks an --env value, NAME or NAME=VALUE, and returns its name.
 func ParseEnv(value string) (string, error) {
 	name, _, _ := strings.Cut(value, "=")
 	if !envName.MatchString(name) {
 		return "", fmt.Errorf("--env must be NAME or NAME=VALUE, with NAME of letters, digits and _, not %q", value)
 	}
-	if strings.HasPrefix(name, "CODEFLOWER_") {
+	if strings.HasPrefix(name, "CODEFLOWER_") && !passedVariables[name] {
 		return "", fmt.Errorf("--env cannot set %s: the CODEFLOWER_ variables are the app's", name)
 	}
 	return name, nil
