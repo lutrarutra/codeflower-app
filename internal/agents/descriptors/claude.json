@@ -8,6 +8,7 @@
   },
   "order": 10,
   "launch": "@agentclientprotocol/claude-agent-acp/dist/index.js",
+  "wrapper": "launch.js",
   "home": {
     "variable": "CLAUDE_CONFIG_DIR",
     "path": "harness/claude"
