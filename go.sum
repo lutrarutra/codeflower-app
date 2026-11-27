@@ -61,8 +61,8 @@ github.com/landlock-lsm/go-landlock v0.11.0 h1:zbZFIUpSLXkRLRFwXn9v9itB1ghkPDSbR
 github.com/landlock-lsm/go-landlock v0.11.0/go.mod h1:ZnBdV8UcnaaRfuyG1amR2qdsoRazWS1yr8+3LVme6t0=
 github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 h1:6E+4a0GO5zZEnZ81pIr0yLvtUWk2if982qA3F3QD6H4=
 github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0/go.mod h1:zJYVVT2jmtg6P3p1VtQj7WsuWi/y4VnjVBn7F8KPB3I=
-github.com/lutrarutra/codeflower-audit v0.2.0 h1:eqBCFsqen9+6/zoo19czXEZ3f0wVfpbWI3fGilDTvcQ=
-github.com/lutrarutra/codeflower-audit v0.2.0/go.mod h1:ULXu3mTwUYTbs59tIa7x0XPhWwVjZJiRzNcgq45/VPI=
+github.com/lutrarutra/codeflower-audit v0.3.0 h1:tUUkc4SW1D4XzID/PsacfAVFFBieLFp7Tu3t9A68AlU=
+github.com/lutrarutra/codeflower-audit v0.3.0/go.mod h1:ULXu3mTwUYTbs59tIa7x0XPhWwVjZJiRzNcgq45/VPI=
 github.com/mdp/qrterminal/v3 v3.2.1 h1:6+yQjiiOsSuXT5n9/m60E54vdgFsw0zhADHhHLrFet4=
 github.com/mdp/qrterminal/v3 v3.2.1/go.mod h1:jOTmXvnBsMy5xqLniO0R++Jmjs2sTm9dFSuQ5kpz/SU=
 github.com/moby/docker-image-spec v1.3.1 h1:jMKff3w6PgbfSa69GfNg+zN/XLhfXJGnEx3Nl2EsFP0=
